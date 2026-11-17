@@ -98,7 +98,7 @@ export function NotConnected({ source }) {
 /** Contrôle segmenté (pilules noires comme la v1). */
 export function Segmented({ options, value, onChange, className = '' }) {
   return (
-    <div className={`inline-flex rounded-xl border border-slate-200 bg-white p-1 ${className}`}>
+    <div className={`inline-flex max-w-full overflow-x-auto rounded-xl border border-slate-200 bg-white p-1 ${className}`}>
       {options.map((o) => (
         <button
           key={o.value}

@@ -36,7 +36,7 @@ function Sidebar() {
   const { data, error } = useApi(() => api.health(), []);
   const connected = !!data && !error;
   return (
-    <aside className="sticky top-0 flex h-screen w-72 shrink-0 flex-col border-r border-slate-200 bg-white px-5 py-6">
+    <aside className="sticky top-0 flex h-screen w-56 shrink-0 flex-col border-r border-slate-200 bg-white px-3 py-6 lg:w-72 lg:px-5">
       <div className="flex items-center gap-3 px-2">
         <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-600 text-white shadow-md shadow-blue-600/30">
           <BoltIcon width={24} height={24} />
@@ -83,7 +83,7 @@ export default function Layout() {
   return (
     <div className="flex min-h-screen bg-slate-50 font-sans text-slate-900">
       <Sidebar />
-      <main className="min-w-0 flex-1 px-10 py-8">
+      <main className="min-w-0 flex-1 px-5 py-8 lg:px-10">
         <Outlet />
       </main>
       <ChatWidget />

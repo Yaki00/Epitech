@@ -18,9 +18,13 @@ function AppCard({ app }) {
         <div className="flex items-start gap-4">
           <AppAvatar name={app.name} criticality={app.criticality} />
           <div className="min-w-0 flex-1 pt-2.5">
-            <div className="truncate text-lg font-medium text-slate-900">{app.name}</div>
+            <div title={app.name} className="line-clamp-2 break-words text-lg font-medium leading-snug text-slate-900">
+              {app.name}
+            </div>
           </div>
-          <CriticalityBadge value={app.criticality} size="sm" />
+          <div className="shrink-0">
+            <CriticalityBadge value={app.criticality} size="sm" />
+          </div>
         </div>
         <div className="mt-3 flex gap-4 pl-16 text-xs text-slate-500">
           <span>{t('apps.servers', { n: app.servers })}</span>
@@ -29,7 +33,9 @@ function AppCard({ app }) {
         <div className="mt-auto flex items-center justify-between pt-5 text-sm text-slate-500">
           <span className="flex min-w-0 items-center gap-1.5">
             <UserIcon width={16} height={16} className="shrink-0" />
-            <span className="truncate">{app.owner || app.supportTeam || ''}</span>
+            <span className="truncate" title={app.owner || app.supportTeam || ''}>
+              {app.owner || app.supportTeam || ''}
+            </span>
           </span>
           <span className="flex shrink-0 items-center gap-1.5">
             <span className={`h-2 w-2 rounded-full ${synced ? 'bg-emerald-500' : 'bg-slate-300'}`} />
