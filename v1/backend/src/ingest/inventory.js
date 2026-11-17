@@ -24,10 +24,15 @@ function resolveInputFile(root, pattern) {
     const m = name.match(/(20\d{2})-?(\d{2})-?(\d{2})/);
     return m ? `${m[1]}${m[2]}${m[3]}` : '';
   };
+  // date d'un fichier : celle de son nom (export daté), sinon le jour de sa dernière modification (fichier téléchargé)
+  const dayOf = (ms) => new Date(ms).toISOString().slice(0, 10).replace(/-/g, '');
   const files = fs
     .readdirSync(dir)
     .filter((f) => re.test(f))
-    .map((f) => ({ file: path.join(dir, f), date: dateIn(f), mtime: fs.statSync(path.join(dir, f)).mtimeMs }));
+    .map((f) => {
+      const mtime = fs.statSync(path.join(dir, f)).mtimeMs;
+      return { file: path.join(dir, f), date: dateIn(f) || dayOf(mtime), mtime };
+    });
   if (!files.length) return null;
   files.sort((a, b) => (b.date > a.date ? 1 : b.date < a.date ? -1 : 0) || b.mtime - a.mtime);
   return files[0].file;

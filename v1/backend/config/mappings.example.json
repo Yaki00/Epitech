@@ -1,7 +1,8 @@
 {
-  "_comment": "Copier en mappings.json et adapter. Une colonne se désigne par son nom d'en-tête exact ou par sa lettre Excel (A, B… CK). 'file' accepte * (le fichier le plus récent est pris, d'après la date dans le nom). 'direction: from' = la valeur de la colonne dépend de la ligne (ex: l'application tourne sur ce serveur). Les 'attrs' d'une relation sont posés sur l'entité liée.",
+  "_comment": "Copier en mappings.json et adapter. Une colonne se désigne par son nom d'en-tête exact ou par sa lettre Excel (A, B… CK). 'file' accepte * (le fichier le plus récent est pris, d'après la date dans le nom). 'direction: from' = la valeur de la colonne dépend de la ligne (ex: l'application tourne sur ce serveur). Les 'attrs' d'une relation sont posés sur l'entité liée. downloadEnv (ex. MARKETPLACE) : si <downloadEnv>_URL est rempli dans .env, le fichier est téléchargé une fois par jour par scripts/fetch-inventory.js (downloadTo = fichier écrit quand 'file' contient *).",
   "marketplace": {
     "file": "./data/raw/marketplace/servers.csv",
+    "downloadEnv": "MARKETPLACE",
     "perimeterColumn": "Application",
     "entity": "server",
     "key": "Hostname",
@@ -28,6 +29,8 @@
   "apm": {
     "_comment": "Export APM des serveurs : une ligne = un serveur et l'application qu'il héberge. Colonnes désignées par leur lettre Excel (un nom d'en-tête exact marche aussi). perimeterColumn : avec config/perimeter.json, seules les lignes des applications du périmètre sont importées.",
     "file": "./data/raw/apm/*.csv",
+    "downloadEnv": "APM",
+    "downloadTo": "./data/raw/apm/apm.csv",
     "perimeterColumn": "A",
     "entity": "server",
     "key": "E",

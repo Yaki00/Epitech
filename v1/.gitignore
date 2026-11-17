@@ -10,3 +10,4 @@ frontend/dist/
 _backup/
 _to_delete/
 backend/config/perimeter.json
+logs/

@@ -58,9 +58,9 @@ le backend le sert (`FRONTEND_DIST`). Le poste Node 16 n'exécute jamais Vite.
 
 `npm run setup` copie les modèles s'ils manquent. Puis `npm run doctor` (teste IA, Confluence, fichiers).
 
-Commande unique : `npm run sync:all` = `fetch-confluence.js` (pages nouvelles ou modifiées) → `sync-inventory.js`
-(APM, marketplace) → `sync-confluence.js --llm` (pages nouvelles ou modifiées). Options `--no-fetch`, `--no-llm`,
-`--no-inventory`. Code de sortie non nul si une étape échoue (prévu pour un timer systemd ou le Planificateur de tâches).
+Commande unique : `npm run sync:all` = `fetch-confluence.js` (pages nouvelles ou modifiées) → `fetch-inventory.js`
+(exports CSV à lien direct, une fois par jour) → `sync-inventory.js` (APM, marketplace) → `sync-confluence.js --llm`
+(pages nouvelles ou modifiées). Options `--no-fetch`, `--no-download`, `--no-llm`, `--no-inventory`. Code de sortie non nul si une étape échoue (prévu pour un timer systemd ou le Planificateur de tâches).
 Premier passage : tester avec `fetch-confluence.js --limit 20` puis `sync-confluence.js --llm --limit 20`.
 
 ## Récupération Confluence (`scripts/fetch-confluence.js`, `src/fetch/`)
@@ -78,6 +78,15 @@ personnel en Bearer (`CONFLUENCE_TOKEN`) ou Basic (`CONFLUENCE_USER` / `CONFLUEN
 - Une page est écrite dans un dossier temporaire puis renommée : jamais de page à moitié écrite.
 - Images (`image/*`) dans `images/<nom d'origine>` (le nom cité par le HTML), schémas draw.io dans `attachments/`,
   liste dans `metadata.attachments` ; PDF et autres ignorés ; plus de `CONFLUENCE_MAX_ATTACHMENT_MB` ignorés.
+
+## Téléchargement des exports CSV (`scripts/fetch-inventory.js`, `src/fetch/download.js`)
+
+Une source de `mappings.json` avec `"downloadEnv": "MARKETPLACE"` est téléchargée si `MARKETPLACE_URL` est rempli
+(auth facultative : `_TOKEN` Bearer, `_USER`/`_PASSWORD` Basic, `_COOKIE`). Au plus une fois par jour (jour local) ;
+remplacement atomique seulement si le contenu change ; une page HTML, un .xlsx ou un fichier vide sont refusés et
+l'ancien fichier est gardé. État dans `<fichier>.telechargement.json` (jamais l'URL). Redirections suivies.
+Fichier écrit : `file`, ou `downloadTo` si `file` contient `*`. Fichier le plus récent d'un motif : date du nom,
+sinon jour de modification.
 
 ## Source Confluence (export local, lecture seule)
 

@@ -30,6 +30,20 @@ Premier passage : tester sur 20 pages avant de tout lancer :
 `node backend/scripts/fetch-confluence.js --limit 20` puis `node backend/scripts/sync-confluence.js --llm --limit 20`.
 Rapports (Excel) dans `backend/data/rapports/`.
 
+### Lancement automatique sur un poste Windows (Planificateur de tâches)
+
+Dans une invite de commandes, en adaptant le chemin (ici tous les jours à 7 h ; `/SC HOURLY` pour toutes les heures) :
+
+```bat
+mkdir C:\chemin\vers\v1\logs
+schtasks /Create /TN "Lyra sync" /SC DAILY /ST 07:00 /TR "cmd /c cd /d C:\chemin\vers\v1 && npm run sync:all >> logs\sync.log 2>&1"
+schtasks /Run /TN "Lyra sync"      &REM pour tester tout de suite
+schtasks /Delete /TN "Lyra sync"   &REM pour l'enlever
+```
+
+La tâche tourne quand la session est ouverte. Chaque étape ne refait que ce qui a changé ; le journal est dans `logs\sync.log`.
+Sur un serveur Linux, l'équivalent est un timer systemd (à venir).
+
 Si un `package-lock.json` d'une ancienne version traîne dans `backend/`, supprimez-le avec `backend/node_modules` avant `npm run setup`.
 
 ## Frontend (machine Node ≥ 20)
@@ -47,6 +61,8 @@ npm test           # vitest
 ```bash
 cd backend
 npm run fetch:confluence                  # récupère les pages nouvelles ou modifiées des espaces CONFLUENCE_SPACES
+npm run fetch:inventory                   # télécharge la marketplace (MARKETPLACE_URL) si pas encore fait aujourd'hui
+node scripts/fetch-inventory.js --force   # retélécharge même si déjà vérifié aujourd'hui
 node scripts/fetch-confluence.js --full   # retélécharge tout (ex. une fois par semaine)
 npm run sync:inventory                    # toutes les sources CSV de mappings.json
 node scripts/sync-inventory.js apm        # une seule
