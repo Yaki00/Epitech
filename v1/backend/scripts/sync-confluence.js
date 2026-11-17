@@ -12,6 +12,12 @@
  *   node scripts/sync-confluence.js --llm      + extraction des relations par IA
  *   node scripts/sync-confluence.js --force    retraite même les pages inchangées
  *   node scripts/sync-confluence.js --limit 20 ne traite que 20 pages (test)
+ *   node scripts/sync-confluence.js --llm --no-triage  sans le tri IA des pages où aucun nom du périmètre n'est reconnu
+ *
+ * Avec un périmètre (config/perimeter.json) : chaque page est rattachée aux applications suivies
+ * (nom, variante, faute, sigle, serveur connu…). Seules ces pages partent à l'IA, et les relations
+ * vers des applications hors périmètre sont écartées. Rapports CSV dans data/rapports/.
+ * Lancer l'import APM AVANT : il donne les serveurs de chaque application, qui servent d'indice.
  */
 const fs = require('fs');
 const config = require('../src/config');
@@ -19,7 +25,9 @@ const { openStore, acquireLock } = require('../src/store/store');
 const { createRepo } = require('../src/store/repo');
 const { ingestConfluencePage, documentId } = require('../src/ingest/confluence');
 const { readExportPages, exportHash, analyseEntry, loadDiagrams } = require('../src/ingest/confluenceExport');
-const { extractRelations, applyRelations, chunkText } = require('../src/enrich/relations');
+const { extractRelations, applyRelations, triagePage, chunkText } = require('../src/enrich/relations');
+const { loadPerimeter, createMatcher, ensurePerimeterNodes } = require('../src/perimeter/perimeter');
+const { writeCsvReport } = require('../src/lib/report');
 const { createLlmClient } = require('../src/lib/llmClient');
 const { createLogger } = require('../src/lib/logger');
 
@@ -28,9 +36,99 @@ const args = process.argv.slice(2);
 const opt = {
   llm: args.includes('--llm'),
   force: args.includes('--force'),
+  triage: !args.includes('--no-triage'),
   limit: args.includes('--limit') ? Number(args[args.indexOf('--limit') + 1]) : Infinity,
 };
 const FLUSH_EVERY = 100; // sauvegarde régulière : une synchro interrompue garde ce qui est fait
+
+/**
+ * Envoie une page à l'IA.
+ * Sans périmètre : toutes les sections. Avec périmètre : seulement si la page concerne une application suivie,
+ * reconnue par les règles ou, à défaut, par un tri IA rapide (titre, pages parentes, début du texte).
+ * @returns {Promise<Array<PromiseSettledResult>>}
+ */
+async function enrichPage({ llm, repo, page, p, nodeId, related, matcher, scope, counters, stats }) {
+  let pageApps = related.map((x) => x.name);
+  if (matcher && !pageApps.length) {
+    if (!opt.triage) {
+      stats.outOfScope++;
+      return [];
+    }
+    const text = page.sections.map((s) => `${s.heading || ''}\n${s.text}`).join('\n');
+    const ancestors = (p.ancestors || []).map((a) => (typeof a === 'string' ? a : a.title));
+    let found;
+    try {
+      found = await triagePage(llm, { title: page.title, ancestors, text, scope });
+    } catch (err) {
+      return [{ status: 'rejected', reason: err }];
+    }
+    for (const f of found) {
+      const m = matcher.resolveAppName(f.name);
+      if (!m) continue;
+      const confidence = +(0.6 * f.confidence + 0.1).toFixed(2); // tri IA : 0.46 à 0.7, sous les règles
+      repo.addEdge({ src: m.app.id, dst: nodeId, type: 'documented_in', source: 'llm', sourceRef: p.id, confidence, attrs: { evidence: f.evidence } });
+      if (!pageApps.includes(m.app.name)) pageApps.push(m.app.name);
+    }
+    if (!pageApps.length) {
+      stats.outOfScope++;
+      return [];
+    }
+    stats.triaged++;
+  }
+  const scoped = matcher ? { ...scope, pageApps, knownServers: knownServersOf(repo, page, matcher, pageApps) } : null;
+  // toutes les sections partent en parallèle (la concurrence est limitée par le client LLM)
+  const jobs = page.sections.flatMap((s) =>
+    chunkText(s.text).map((text) =>
+      extractRelations(llm, { pageTitle: page.title, section: { heading: s.heading, text }, hints: page.entities, scope: scoped }).then((res) => {
+        return applyRelations(repo, res, { sourceRef: p.id, docId: nodeId, matcher, counters });
+      })
+    )
+  );
+  return Promise.allSettled(jobs);
+}
+
+/**
+ * Rapports tirés du graphe (donc complets même quand les pages inchangées sont sautées) :
+ *  - perimetre-pages.csv : pour chaque application, les pages qui la concernent, avec score et raisons
+ *  - perimetre-orthographes.csv : les façons dont chaque application est écrite, à valider en alias
+ */
+function writePerimeterReports(repo, matcher) {
+  const rows = [];
+  const spellings = new Map();
+  for (const app of matcher.apps) {
+    for (const e of repo.edgesFrom(app.id).filter((x) => x.type === 'documented_in')) {
+      const doc = repo.getNode(e.dst);
+      if (!doc) continue;
+      const how = e.source === 'llm' ? 'tri IA' : 'règles';
+      rows.push([app.name, doc.name, doc.attrs.url || '', e.confidence, e.attrs.reasons || [e.attrs.evidence || ''], e.attrs.spellings || [], how]);
+      for (const sp of e.attrs.spellings || []) {
+        const k = `${app.name}|${sp}`;
+        spellings.set(k, (spellings.get(k) || 0) + 1);
+      }
+    }
+  }
+  rows.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : b[3] - a[3]));
+  const f1 = writeCsvReport(config.reportsDir, 'perimetre-pages', ['application', 'page', 'url', 'score', 'raisons', 'orthographes à vérifier', 'trouvé par'], rows);
+  const f2 = writeCsvReport(
+    config.reportsDir,
+    'perimetre-orthographes',
+    ['application', 'écrit dans Confluence', 'nombre de pages', 'action'],
+    [...spellings.entries()]
+      .map(([k, n]) => [...k.split('|'), n, "si c'est bien elle : l'ajouter en alias dans config/perimeter.json ; sinon le signaler"])
+      .sort((a, b) => b[2] - a[2])
+  );
+  log.info(`rapports : ${f1} ; ${f2}`);
+}
+
+/** Serveurs des applications de la page qui sont cités dans la page (indice pour l'IA). */
+function knownServersOf(repo, page, matcher, pageApps) {
+  const apps = matcher.apps.filter((a) => pageApps.includes(a.name));
+  const out = new Set();
+  for (const token of [...page.entities.hosts, ...page.entities.ips]) {
+    for (const n of repo.resolve(token)) if (n.type === 'server' && apps.some((a) => a.servers.has(n.id))) out.add(n.name);
+  }
+  return [...out].slice(0, 30);
+}
 
 async function main() {
   const dir = config.confluence.exportDir;
@@ -45,6 +143,20 @@ async function main() {
   const stats = { pages: 0, skipped: 0, errors: 0, mentions: 0, diagramLinks: 0, diagramsMissing: 0, obsoleteFragments: 0, llmRelations: 0, unresolved: 0 };
   const llmJobs = [];
 
+  const perimeter = loadPerimeter(config.perimeterFile);
+  let matcher = null;
+  let scope = null;
+  if (perimeter) {
+    ensurePerimeterNodes(repo, perimeter);
+    matcher = createMatcher(perimeter, repo);
+    scope = { apps: perimeter.applications, ignoreOthers: perimeter.ignoreOtherApplications };
+    Object.assign(stats, { inScope: 0, triaged: 0, outOfScope: 0, llmDropped: 0, llmRenamed: 0 });
+    const noServers = matcher.apps.filter((a) => !a.servers.size).map((a) => a.name);
+    log.info(`périmètre : ${perimeter.applications.length} applications`);
+    if (noServers.length) log.warn(`sans serveur connu (import APM fait ?) : ${noServers.join(', ')}`);
+  }
+  const counters = { dropped: 0, renamed: 0 };
+
   try {
     for (const entry of readExportPages(dir)) {
       if (stats.pages + stats.skipped >= opt.limit) break;
@@ -58,37 +170,38 @@ async function main() {
       const docId = `confluence:${p.id}`;
       const hash = exportHash(entry);
       const prev = repo.getDocument(docId);
-      const unchanged = prev && prev.content_hash === hash && prev.status !== 'error';
+      const unchanged = prev && prev.content_hash === hash && prev.status !== 'error' && (prev.attrs?.perimeterHash || null) === (matcher ? matcher.hash : null);
       if (unchanged && !opt.force && (!opt.llm || prev.status === 'enriched')) {
         stats.skipped++;
         continue;
       }
-      const docBase = { id: docId, source: 'confluence', title: p.title, url: p.url, version: p.version, updatedAt: p.updatedAt, contentHash: hash };
+      const docBase = { attrs: {}, id: docId, source: 'confluence', title: p.title, url: p.url, version: p.version, updatedAt: p.updatedAt, contentHash: hash };
       try {
         const page = analyseEntry(entry);
         const diagrams = loadDiagrams(dir, entry, page);
         const docAttrs = { folder: entry.ref, parentId: p.parentId || null, ancestors: p.ancestors || [], images: entry.imageFiles.length, diagramsMissing: diagrams.missing };
         const r = ingestConfluencePage(repo, page, { drawioResults: diagrams.results, url: p.url, attrs: docAttrs });
+        const nodeId = `document:${documentId(p.id)}`;
+        // applications du périmètre reconnues par les règles (sans IA)
+        const related = matcher ? matcher.scanPage({ ...page, ancestors: p.ancestors || page.ancestors || [] }).filter((x) => x.score >= 0.6) : [];
+        if (matcher) {
+          docBase.attrs = { perimeterHash: matcher.hash, perimeterApps: related.map((x) => ({ id: x.id, score: x.score })) };
+          for (const x of related) {
+            repo.addEdge({ src: x.id, dst: nodeId, type: 'documented_in', source: 'confluence', sourceRef: p.id, confidence: x.score, attrs: { reasons: x.reasons, spellings: x.spellings } });
+          }
+          if (related.length) stats.inScope++;
+        }
         stats.pages++;
         stats.mentions += r.mentions;
         stats.diagramLinks += r.diagramLinks;
         stats.diagramsMissing += diagrams.missing.length;
         stats.obsoleteFragments += page.obsoleteFragments || 0;
         stats.unresolved += r.unresolved.length;
-        repo.saveDocument({ ...docBase, status: 'parsed', attrs: { obsoleteFragments: page.obsoleteFragments || 0, sections: page.sections.length, tables: page.tables.length } });
+        repo.saveDocument({ ...docBase, status: 'parsed', attrs: { ...docBase.attrs, obsoleteFragments: page.obsoleteFragments || 0, sections: page.sections.length, tables: page.tables.length } });
 
         if (llm) {
-          // toutes les sections partent en parallèle (la concurrence est limitée par le client LLM)
-          const nodeId = `document:${documentId(p.id)}`;
-          const jobs = page.sections.flatMap((s) =>
-            chunkText(s.text).map((text) =>
-              extractRelations(llm, { pageTitle: page.title, section: { heading: s.heading, text }, hints: page.entities }).then((res) =>
-                applyRelations(repo, res, { sourceRef: p.id, docId: nodeId })
-              )
-            )
-          );
           llmJobs.push(
-            Promise.allSettled(jobs).then((results) => {
+            enrichPage({ llm, repo, page, p, nodeId, related, matcher, scope, counters, stats }).then((results) => {
               const failures = results.filter((x) => x.status === 'rejected');
               stats.llmRelations += results.filter((x) => x.status === 'fulfilled').reduce((a, x) => a + x.value, 0);
               if (failures.length) {
@@ -116,6 +229,13 @@ async function main() {
     }
 
     await Promise.all(llmJobs);
+    if (matcher) {
+      stats.llmDropped = counters.dropped;
+      stats.llmRenamed = counters.renamed;
+      writePerimeterReports(repo, matcher);
+      const pagesOf = (a) => new Set(repo.edgesFrom(a.id).filter((e) => e.type === 'documented_in').map((e) => e.dst)).size;
+      log.info('pages par application du périmètre', Object.fromEntries(matcher.apps.map((a) => [a.name, pagesOf(a)])));
+    }
     const status = stats.errors ? 'partial' : 'success';
     repo.finishRun(runId, { status, stats: { ...stats, llm: llm ? llm.stats : undefined } });
     log.info(`terminé (${status})`, { ...stats, llm: llm ? llm.stats : undefined });

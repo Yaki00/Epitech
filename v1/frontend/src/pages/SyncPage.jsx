@@ -15,7 +15,7 @@ const STATUS = {
 const SOURCE_NAMES = { marketplace: 'Marketplace', apm: 'APM', naemon: 'Naemon', confluence: 'Confluence', 'confluence+llm': 'Confluence + IA', servicenow: 'ServiceNow' };
 const sourceName = (s) => SOURCE_NAMES[s] || s;
 
-const STAT_LABELS = { rows: 'lignes', nodes: 'entités', relations: 'relations', pages: 'pages', skipped: 'inchangées', errors: 'erreurs', mentions: 'mentions', diagramLinks: 'liens draw.io', llmRelations: 'relations IA', unresolved: 'non résolus' };
+const STAT_LABELS = { rows: 'lignes', nodes: 'entités', relations: 'relations', pages: 'pages', skipped: 'inchangées', errors: 'erreurs', mentions: 'mentions', diagramLinks: 'liens draw.io', llmRelations: 'relations IA', unresolved: 'non résolus', outOfScope: 'hors périmètre', inScope: 'pages du périmètre', triaged: 'trouvées par tri IA', llmDropped: 'relations IA écartées', llmRenamed: 'noms corrigés' };
 
 function RunRow({ run }) {
   const [open, setOpen] = useState(false);

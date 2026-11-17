@@ -67,6 +67,11 @@ const config = {
     mappingFile: path.resolve(ROOT, env('INVENTORY_MAPPING', './config/mappings.json')),
   },
 
+  // applications suivies (liste fermée) : absent = tout est analysé
+  perimeterFile: path.resolve(ROOT, env('PERIMETER_FILE', './config/perimeter.json')),
+  // rapports lisibles dans Excel (pages par application, orthographes rencontrées)
+  reportsDir: path.resolve(ROOT, env('REPORTS_DIR', './data/rapports')),
+
   logLevel: env('LOG_LEVEL', 'info'),
 };
 

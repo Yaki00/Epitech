@@ -12,8 +12,10 @@ const config = require('../src/config');
 const { openStore, acquireLock } = require('../src/store/store');
 const { createRepo } = require('../src/store/repo');
 const { parseCsv } = require('../src/lib/csv');
-const { ingestInventory, resolveInputFile } = require('../src/ingest/inventory');
+const { ingestInventory, resolveInputFile, resolveMapping } = require('../src/ingest/inventory');
 const { createLogger } = require('../src/lib/logger');
+const { loadPerimeter, createMatcher, ensurePerimeterNodes } = require('../src/perimeter/perimeter');
+const { writeCsvReport } = require('../src/lib/report');
 
 const log = createLogger('sync-inventory');
 
@@ -28,6 +30,14 @@ function main() {
   const release = acquireLock(config.dataDir);
   const repo = createRepo(openStore(config.dataDir));
   let failed = false;
+  const perimeter = loadPerimeter(config.perimeterFile);
+  let matcher = null;
+  if (perimeter) {
+    ensurePerimeterNodes(repo, perimeter);
+    matcher = createMatcher(perimeter);
+    log.info(`périmètre : ${perimeter.applications.length} applications (${perimeter.applications.map((a) => a.name).join(', ')})`);
+  } else log.warn(`pas de périmètre (${config.perimeterFile} absent) : toutes les applications sont importées`);
+  const nearRows = [];
 
   try {
     for (const source of sources) {
@@ -37,8 +47,15 @@ function main() {
         const file = resolveInputFile(config.root, mapping.file);
         if (!file) throw new Error(`aucun fichier ne correspond à ${mapping.file}`);
         const { records, headers, delimiter } = parseCsv(fs.readFileSync(file, 'utf8'));
-        log.info(`${source} : ${file} — ${records.length} lignes, séparateur "${delimiter}"`, { colonnes: headers });
-        const stats = ingestInventory(repo, { source, records, mapping, runId });
+        log.info(`${source} : ${file} (${records.length} lignes, séparateur "${delimiter}", ${headers.length} colonnes)`);
+        const { resolved } = resolveMapping(mapping, headers);
+        if (resolved.length) log.info(`${source} : colonnes par lettre`, Object.fromEntries(resolved.map((r) => [r.ref, r.header])));
+        const stats = ingestInventory(repo, { source, records, headers, mapping, matcher, runId });
+        if (stats.nearMisses) {
+          log.warn(`${source} : noms proches d'une application du périmètre mais NON importés (à ajouter en alias si c'est la même)`, stats.nearMisses);
+          for (const n of stats.nearMisses) nearRows.push([source, n]);
+          delete stats.nearMisses;
+        }
         repo.finishRun(runId, { status: stats.errors ? 'partial' : 'success', stats: { ...stats, file } });
         log.info(`${source} terminé`, stats);
       } catch (err) {
@@ -46,6 +63,10 @@ function main() {
         repo.finishRun(runId, { status: 'error', error: err.message });
         log.error(`${source} en échec : ${err.message}`);
       }
+    }
+    if (perimeter) {
+      const file = writeCsvReport(config.reportsDir, 'inventaire-noms-proches', ['source', 'nom dans l\'export -> application du périmètre (lignes)'], nearRows);
+      if (nearRows.length) log.info(`rapport : ${file}`);
     }
     log.info('Contenu du graphe', repo.countByType());
   } finally {

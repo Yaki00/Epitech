@@ -57,6 +57,14 @@ async function main() {
   // 3. fichiers de configuration
   fs.existsSync(path.join(config.root, '.env')) ? ok('backend/.env présent') : warn('backend/.env absent (lancez npm run setup ou copiez .env.example)');
   fs.existsSync(config.inventory.mappingFile) ? ok('config/mappings.json présent') : warn('config/mappings.json absent (copiez mappings.example.json)');
+  try {
+    const { loadPerimeter } = require('../src/perimeter/perimeter');
+    const perimeter = loadPerimeter(config.perimeterFile);
+    if (perimeter) ok(`périmètre : ${perimeter.applications.length} applications (${perimeter.applications.map((a) => a.name).join(', ')})`);
+    else warn('config/perimeter.json absent : toutes les applications seront analysées (copiez perimeter.example.json)');
+  } catch (err) {
+    ko(`config/perimeter.json illisible : ${err.message}`);
+  }
 
   // 4. export Confluence
   await check('export Confluence', async () => {

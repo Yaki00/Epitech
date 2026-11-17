@@ -95,20 +95,25 @@ export default function ApplicationsPage() {
   const [query, setQuery] = useState('');
   const [mode, setMode] = useState('app');
   const [level, setLevel] = useState('all');
+  const [scope, setScope] = useState('perimeter');
+
+  // périmètre défini (config/perimeter.json) : on montre d'abord les applications suivies
+  const perimeterCount = useMemo(() => (apps || []).filter((a) => a.inPerimeter).length, [apps]);
+  const base = useMemo(() => (perimeterCount && scope === 'perimeter' ? (apps || []).filter((a) => a.inPerimeter) : apps || []), [apps, perimeterCount, scope]);
 
   const counts = useMemo(() => {
-    const c = { all: apps?.length || 0, critical: 0, high: 0, medium: 0, low: 0, unknown: 0 };
-    for (const a of apps || []) c[normalizeCriticality(a.criticality)]++;
+    const c = { all: base.length, critical: 0, high: 0, medium: 0, low: 0, unknown: 0 };
+    for (const a of base) c[normalizeCriticality(a.criticality)]++;
     return c;
-  }, [apps]);
+  }, [base]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return (apps || [])
+    return base
       .filter((a) => level === 'all' || normalizeCriticality(a.criticality) === level)
       .filter((a) => !q || a.name.toLowerCase().includes(q) || (a.owner || '').toLowerCase().includes(q))
       .sort((a, b) => CRITICALITY[normalizeCriticality(a.criticality)].rank - CRITICALITY[normalizeCriticality(b.criticality)].rank || a.name.localeCompare(b.name));
-  }, [apps, query, level]);
+  }, [base, query, level]);
 
   return (
     <div className="mx-auto max-w-[1500px]">
@@ -140,6 +145,16 @@ export default function ApplicationsPage() {
             { value: 'server', label: 'Serveur / IP' },
           ]}
         />
+        {mode === 'app' && perimeterCount > 0 && (
+          <Segmented
+            value={scope}
+            onChange={setScope}
+            options={[
+              { value: 'perimeter', label: 'Périmètre', count: perimeterCount },
+              { value: 'all', label: 'Toutes', count: apps.length },
+            ]}
+          />
+        )}
         {mode === 'app' && (
           <Segmented
             value={level}

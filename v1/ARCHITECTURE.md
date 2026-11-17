@@ -108,6 +108,24 @@ test/                       jest (*.test.js, assertions avec le module assert) +
 Racine : `npm run setup` (installe le backend, et le frontend seulement si Node ≥ 20), `npm start` (backend seul si
 `frontend/dist` existe), `npm run doctor`, `npm run sync`, `npm test`.
 
+## Périmètre (config/perimeter.json, non versionné)
+
+Liste fermée des applications suivies (une douzaine). Tout le reste est ignoré (`ignoreOtherApplications`).
+`src/perimeter/perimeter.js` reconnaît une application SANS IA, même mal écrite : nom exact, alias déclaré,
+mots collés (0.95), AUID (0.9), faute de frappe (0.75, mots de 5 lettres et plus, même première lettre),
+sigle en majuscules (0.7), nom incomplet (0.6). Une page est rattachée à une application par son titre,
+ses pages parentes, son texte et les serveurs connus de l'application (import APM) qu'elle cite.
+
+- Import APM (`perimeterColumn`) : correspondance stricte (nom, alias, mots collés) ; les noms proches non
+  importés vont dans `data/rapports/inventaire-noms-proches.csv`.
+- Confluence : seules les pages rattachées partent à l'IA. Une page sans nom reconnu passe d'abord par un tri
+  IA rapide (titre, parents, début du texte ; `--no-triage` pour le couper). Le prompt d'extraction reçoit le
+  périmètre, les applis de la page et leurs serveurs cités ; un nom mal écrit renvoyé par l'IA est ramené au
+  nom de référence, une relation vers une appli hors périmètre est écartée.
+- Rapports : `perimetre-pages.csv` (pages par application, score, raisons) et `perimetre-orthographes.csv`
+  (façons d'écrire chaque appli : à valider puis ajouter en alias). Changer le périmètre relance les pages concernées.
+- Ordre des synchros : APM d'abord (serveurs de chaque appli), puis Confluence.
+
 ## Frontend (frontend/)
 
 React 18 + Vite 6 + Tailwind 3 + react-router 6 + cytoscape/cytoscape-dagre. Port 3000 en dev, proxy `/api` -> 3001.
@@ -151,6 +169,7 @@ Règles : pas de 0 trompeur pour une source non branchée (afficher « non conne
 - [~] Étape 3 — IA : extraction des relations (fait) ; images à faire :
       hash des images (dédoublonnage) -> classification -> OCR (mistral-ocr) ou schéma (gemma, sortie nœuds/liens JSON).
       `viewHtml` donne déjà, pour chaque image, son fichier d'origine et sa section ; il manque la correspondance avec `images/img_N` (à fournir par le fetcher).
+- [x] Étape 3a — Périmètre : 12 applications, variantes et fautes reconnues, tri IA des pages, rapports CSV
 - [ ] Étape 3b — Jeu d'évaluation : 20 pages annotées à la main, comparer les modèles (précision, liens manqués, temps)
 - [ ] Étape 4 — Naemon (mapping CSV ou Livestatus) : hôtes supervisés, dépendances, rapport d'écarts
 - [ ] Étape 5 — ServiceNow (MCP limité à 200 résultats : `mcpClient.fetchAllByWindows`, ou export CSV) ; Bitbucket pour les PRs

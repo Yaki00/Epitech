@@ -42,6 +42,9 @@ function DescriptionTab({ app, sources }) {
 
       <h3 className="mt-8 text-lg font-semibold">Informations</h3>
       <div className="mt-4 grid grid-cols-1 gap-x-16 gap-y-6 md:grid-cols-2">
+        <InfoItem label="AUID (écosystème)">{app.attrs.auid}</InfoItem>
+        <InfoItem label="Profil">{app.attrs.profile}</InfoItem>
+        <InfoItem label="Confidentialité">{app.attrs.confidentiality}</InfoItem>
         <InfoItem label="Équipe support">{app.supportTeam}</InfoItem>
         <InfoItem label="Environnements">{app.environments.length ? app.environments.join(', ') : null}</InfoItem>
         <InfoItem label="Responsable">{app.owner}</InfoItem>
@@ -212,7 +215,7 @@ function ArchitectureTab({ appId }) {
 function NodeTable({ rows, columns, emptyTitle }) {
   if (!rows.length) return <EmptyState title={emptyTitle} />;
   return (
-    <Card className="overflow-hidden">
+    <Card className="overflow-x-auto">
       <table className="w-full text-left text-sm">
         <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
           <tr>
@@ -251,9 +254,14 @@ const SERVER_COLUMNS = [
   { key: 'name', label: 'Serveur', render: (r) => <span className="font-medium">{r.name}</span> },
   { key: 'ip', label: 'IP' },
   { key: 'environment', label: 'Env.' },
+  { key: 'provisioner', label: 'Type' },
+  { key: 'usedFor', label: 'Usage' },
   { key: 'os', label: 'OS' },
+  { key: 'osVersion', label: 'Version' },
   { key: 'cpu', label: 'CPU' },
+  { key: 'cpuCores', label: 'Cœurs' },
   { key: 'ram', label: 'RAM' },
+  { key: 'country', label: 'Pays' },
 ];
 const DB_COLUMNS = [
   { key: 'name', label: 'Base', render: (r) => <span className="font-medium">{r.name}</span> },

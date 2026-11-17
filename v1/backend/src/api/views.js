@@ -25,6 +25,7 @@ function applicationSummary(repo, app) {
   return {
     id: app.id,
     name: app.name,
+    inPerimeter: Boolean(app.attrs.perimeter),
     criticality: app.attrs.criticality || null,
     owner: app.attrs.owner || null,
     supportTeam: app.attrs.supportTeam || null,

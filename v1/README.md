@@ -16,7 +16,10 @@ Architecture, conventions et feuille de route : voir **[ARCHITECTURE.md](ARCHITE
 ```bash
 npm run setup      # npm install du backend + crée backend/.env et backend/config/mappings.json
 # renseigner dans backend/.env : LLM_TOKEN, CONFLUENCE_EXPORT_DIR (dossier de l'export Confluence)
-# adapter backend/config/mappings.json : noms de colonnes et fichiers CSV
+# adapter backend/config/mappings.json : colonnes (nom exact ou lettre Excel, ex. "CK") et fichiers CSV
+# export APM des serveurs : déposer le CSV dans backend/data/raw/apm/ (le plus récent est pris)
+# périmètre : copier backend/config/perimeter.example.json en perimeter.json et y lister les applications suivies
+# ordre : npm run sync:inventory (APM) PUIS la synchro Confluence ; rapports dans backend/data/rapports/
 npm run doctor     # vérifie tout et affiche un rapport à copier-coller
 npm test           # tests du backend (jest), sans IA ni réseau
 npm run sync       # construit le graphe : inventaires CSV puis Confluence (sans IA)
