@@ -1,0 +1,14 @@
+<h1>Architecture ALTO</h1>
+<p>L'application ALTO tourne sur <strong>srvalto01.dom.example.com</strong> (10.20.30.41) et s'appuie sur la base ORA_ALTO.</p>
+<p>Voir aussi <ac:link><ri:page ri:content-title="BRIEF - Interfaces" ri:space-key="INFRA" /></ac:link>.</p>
+<ac:structured-macro ac:name="drawio" ac:schema-version="1"><ac:parameter ac:name="diagramName">archi-alto</ac:parameter></ac:structured-macro>
+<h2>Serveurs</h2>
+<table><tbody>
+<tr><th>Serveur</th><th>IP</th><th>Rôle</th></tr>
+<tr><td>srvalto01</td><td>10.20.30.41</td><td>Front &amp; API</td></tr>
+<tr><td>srvalto02</td><td>10.20.30.42</td><td>Batch</td></tr>
+</tbody></table>
+<p>Logs : /data/alto/logs et \\partage\alto</p>
+<ac:image><ri:attachment ri:filename="flux.png" /></ac:image>
+<ac:structured-macro ac:name="jira"><ac:parameter ac:name="key">ALTO-123</ac:parameter></ac:structured-macro>
+<ac:structured-macro ac:name="code"><ac:plain-text-body><![CDATA[curl https://alto.dom.example.com/api]]></ac:plain-text-body></ac:structured-macro>

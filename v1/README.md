@@ -1,0 +1,75 @@
+# Lyra v1 (Infrastructure Intelligence)
+
+Graphe de dépendances applications ↔ serveurs ↔ bases, construit depuis l'export Confluence, la marketplace,
+l'APM et Naemon, pour répondre à « si je touche X, qu'est-ce qui est impacté ? ».
+
+Architecture, conventions et feuille de route : voir **[ARCHITECTURE.md](ARCHITECTURE.md)**.
+
+## Prérequis
+
+- **Node 16.20** (testé pour 16.20.2), Windows ou Linux. Pas de base de données à installer : le graphe est stocké en fichiers JSON.
+- Le **frontend** (Vite 6) se compile sur une machine **Node ≥ 20**, puis on copie `frontend/dist` à côté du backend.
+  Le backend sert alors l'interface et l'API sur le même port.
+
+## Démarrage (poste Node 16)
+
+```bash
+npm run setup      # npm install du backend + crée backend/.env et backend/config/mappings.json
+# renseigner dans backend/.env : LLM_TOKEN, CONFLUENCE_EXPORT_DIR (dossier de l'export Confluence)
+# adapter backend/config/mappings.json : noms de colonnes et fichiers CSV
+npm run doctor     # vérifie tout et affiche un rapport à copier-coller
+npm test           # tests du backend (jest), sans IA ni réseau
+npm run sync       # construit le graphe : inventaires CSV puis Confluence (sans IA)
+npm start          # http://localhost:3001 (interface si frontend/dist est présent, sinon API seule)
+```
+
+Si un `package-lock.json` d'une ancienne version traîne dans `backend/`, supprimez-le avec `backend/node_modules` avant `npm run setup`.
+
+## Frontend (machine Node ≥ 20)
+
+```bash
+cd frontend
+npm install
+npm run build      # produit frontend/dist : à copier dans frontend/ sur le poste Node 16
+npm run dev        # développement : http://localhost:3000 (le backend doit tourner sur :3001)
+npm test           # vitest
+```
+
+## Alimenter le graphe
+
+```bash
+cd backend
+npm run sync:inventory                    # toutes les sources CSV de mappings.json
+node scripts/sync-inventory.js apm        # une seule
+npm run sync:confluence                   # sans IA : structure, tableaux, liens, draw.io, mentions
+node scripts/sync-confluence.js --llm --limit 20   # test de l'extraction IA sur 20 pages
+npm run sync:confluence:llm               # tout, avec IA (incrémental : seules les pages modifiées)
+```
+
+Les synchros peuvent tourner pendant que le serveur est lancé : il recharge les données tout seul.
+
+## Format attendu de l'export Confluence
+
+Un dossier par page, à n'importe quelle profondeur sous `CONFLUENCE_EXPORT_DIR` (par exemple un sous-dossier par espace) :
+
+```
+0006 - Paris Service Delivery/
+  metadata.json       obligatoire : pageId ; utiles : title, url, spaceKey, version, updatedAt, parentId, ancestors, labels
+  page.html           obligatoire : HTML rendu de la page (sans nettoyage)
+  page.storage.xml    optionnel : format storage (paramètres des macros : nom des diagrammes draw.io, Jira…)
+  images/             optionnel
+  attachments/        optionnel : pièces jointes, dont les diagrammes <nom>.drawio
+```
+
+- La clé d'une page est `pageId` ; le nom du dossier n'est pas utilisé comme identifiant.
+- Le texte barré est considéré comme obsolète et ignoré.
+- `entities` et `keywords` de `metadata.json` sont ignorés : Lyra recalcule les entités.
+- L'ancien format (`pages/*.json` au format API REST + `attachments/<pageId>/`) reste accepté.
+
+## Exemples
+
+```bash
+curl "localhost:3001/api/search?q=10.20.30.41"
+curl "localhost:3001/api/impact/server:srvalto01"
+curl -X POST localhost:3001/api/ask -H "Content-Type: application/json" -d "{\"question\":\"Que se passe-t-il si srvalto01 redémarre ?\"}"
+```

@@ -1,0 +1,33 @@
+{
+  "_comment": "Copier en mappings.json et remplacer les noms de colonnes par ceux de vos exports. 'file' accepte * (le fichier le plus récent est pris, d'après la date dans le nom). 'direction: from' = la valeur de la colonne dépend de la ligne (ex: l'application tourne sur ce serveur).",
+  "marketplace": {
+    "file": "./data/raw/marketplace/servers.csv",
+    "entity": "server",
+    "key": "Hostname",
+    "aliases": ["FQDN", "IP"],
+    "attrs": {
+      "ip": "IP",
+      "ram": "RAM",
+      "cpu": "CPU",
+      "os": "OS",
+      "environment": "Environnement"
+    },
+    "relations": [
+      { "column": "Application", "entity": "application", "type": "runs_on", "direction": "from" }
+    ]
+  },
+  "apm": {
+    "file": "./data/raw/apm/apm_os_*.csv",
+    "entity": "application",
+    "key": "Code application",
+    "name": "Nom application",
+    "attrs": {
+      "criticality": "Criticité",
+      "owner": "Responsable",
+      "supportTeam": "Équipe support"
+    },
+    "relations": [
+      { "column": "Serveur", "entity": "server", "type": "runs_on", "direction": "to" }
+    ]
+  }
+}

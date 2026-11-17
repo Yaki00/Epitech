@@ -1,0 +1,37 @@
+{
+  "name": "lyra-v1-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Lyra - Infrastructure Intelligence : graphe de dépendances et analyse d'impact",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=16.20.0"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node src/server.js",
+    "doctor": "node scripts/doctor.js",
+    "sync:inventory": "node scripts/sync-inventory.js",
+    "sync:confluence": "node scripts/sync-confluence.js",
+    "sync:confluence:llm": "node scripts/sync-confluence.js --llm",
+    "test": "jest --forceExit --detectOpenHandles"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testMatch": [
+      "<rootDir>/test/**/*.test.js"
+    ]
+  },
+  "dependencies": {
+    "body-parser": "^1.20.2",
+    "cheerio": "1.0.0-rc.12",
+    "cors": "^2.8.5",
+    "dotenv": "^17.4.2",
+    "express": "^4.18.2",
+    "node-html-parser": "^6.1.13"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "supertest": "^7.0.0"
+  }
+}

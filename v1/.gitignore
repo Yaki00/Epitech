@@ -1,0 +1,11 @@
+node_modules/
+.env
+backend/data/
+backend/config/mappings.json
+*.db
+*.db-wal
+*.db-shm
+.DS_Store
+frontend/dist/
+_backup/
+_to_delete/
