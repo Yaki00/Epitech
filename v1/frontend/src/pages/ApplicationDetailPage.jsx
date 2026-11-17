@@ -69,6 +69,9 @@ function DescriptionTab({ app, sources }) {
           <ul className="mt-3 space-y-2">
             {app.documents.map((d) => (
               <li key={d.id}>
+                {d.architecture && (
+                  <span className="mr-2 rounded-md bg-indigo-50 px-1.5 py-0.5 text-xs font-medium text-indigo-700">Architecture</span>
+                )}
                 {d.url ? (
                   <a href={d.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-blue-700 hover:underline">
                     {d.name} <ExternalIcon width={14} height={14} />
@@ -76,12 +79,39 @@ function DescriptionTab({ app, sources }) {
                 ) : (
                   <span>{d.name}</span>
                 )}
+                {d.audit && <ArchitectureAudit audit={d.audit} />}
               </li>
             ))}
           </ul>
         </>
       )}
     </Card>
+  );
+}
+
+/** Contrôle d'une page d'architecture par rapport aux inventaires (APM, marketplace). */
+function ArchitectureAudit({ audit }) {
+  const ok = audit.verdict === 'cohérente avec les inventaires';
+  const lines = [
+    ['Manquants dans la page', audit.missing],
+    ["Rattachés à une autre application", audit.otherApp],
+    ['Inconnus des inventaires', audit.unknown],
+    ['IP différentes', audit.ipMismatch],
+    ['Rubriques absentes', audit.absentSections],
+  ].filter(([, list]) => list && list.length);
+  return (
+    <div className={`mt-1.5 rounded-lg border px-3 py-2 text-sm ${ok ? 'border-emerald-200 bg-emerald-50/60' : 'border-amber-200 bg-amber-50/60'}`}>
+      <div className="font-medium text-slate-800">
+        {audit.completeness !== null ? `${Math.round(audit.completeness * 100)} % des serveurs (${audit.confirmed.length}/${audit.expected})` : 'Serveurs de référence inconnus'}
+        {audit.environment ? ` · ${audit.environment === 'prod' ? 'production' : 'hors production'}` : ''}
+        <span className="font-normal text-slate-600"> · {audit.verdict}</span>
+      </div>
+      {lines.map(([label, list]) => (
+        <div key={label} className="mt-1 text-slate-600">
+          <span className="text-slate-500">{label} :</span> {list.join(', ')}
+        </div>
+      ))}
+    </div>
   );
 }
 

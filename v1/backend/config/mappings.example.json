@@ -2,6 +2,7 @@
   "_comment": "Copier en mappings.json et adapter. Une colonne se désigne par son nom d'en-tête exact ou par sa lettre Excel (A, B… CK). 'file' accepte * (le fichier le plus récent est pris, d'après la date dans le nom). 'direction: from' = la valeur de la colonne dépend de la ligne (ex: l'application tourne sur ce serveur). Les 'attrs' d'une relation sont posés sur l'entité liée.",
   "marketplace": {
     "file": "./data/raw/marketplace/servers.csv",
+    "perimeterColumn": "Application",
     "entity": "server",
     "key": "Hostname",
     "aliases": [

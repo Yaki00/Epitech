@@ -215,3 +215,53 @@ describe('IA avec périmètre', () => {
     assert.equal(sent.task, 'extract');
   });
 });
+
+describe('application retrouvée par ses serveurs', () => {
+  let repo;
+  beforeEach(() => {
+    repo = createRepo(openStore(':memory:'));
+    ensurePerimeterNodes(repo, PERIMETER);
+    // noms qui ne suivent aucun motif de nom de serveur : seule la liste connue permet de les repérer
+    repo.upsertNode({ type: 'server', key: 'PARAPPX1', attrs: { fqdn: 'parappx1.dom.example.com', ip: '10.9.9.1' }, source: 'apm' });
+    repo.upsertNode({ type: 'server', key: 'PARAPPX2', source: 'apm' });
+    repo.upsertNode({ type: 'server', key: 'MUTUSRV', source: 'apm' });
+    repo.addEdge({ src: 'application:orderhub', dst: 'server:parappx1', type: 'runs_on', source: 'apm', confidence: 1 });
+    repo.addEdge({ src: 'application:orderhub', dst: 'server:parappx2', type: 'runs_on', source: 'apm', confidence: 1 });
+    repo.addEdge({ src: 'application:orderhub', dst: 'server:mutusrv', type: 'runs_on', source: 'apm', confidence: 1 });
+    repo.addEdge({ src: 'application:alto', dst: 'server:mutusrv', type: 'runs_on', source: 'apm', confidence: 1 });
+  });
+  const page = (text) => ({ title: 'Procédure', sections: [{ text }], entities: { hosts: [], ips: [] } });
+
+  test('nom court, FQDN ou IP repérés sans motif', () => {
+    const m = createMatcher(PERIMETER, repo);
+    for (const t of ['Redémarrer PARAPPX1 le soir', 'voir parappx1.dom.example.com', 'ping 10.9.9.1']) {
+      const [r] = m.scanPage(page(t));
+      assert.equal(r.name, 'OrderHub', t);
+      assert.equal(r.score, 0.85);
+    }
+  });
+  test('deux serveurs propres : indice plus fort', () => {
+    const [r] = createMatcher(PERIMETER, repo).scanPage(page('PARAPPX1 et PARAPPX2'));
+    assert.ok(r.score >= 0.9);
+  });
+  test('serveur partagé : indice faible pour chaque application', () => {
+    const r = createMatcher(PERIMETER, repo).scanPage(page('Arrêt de MUTUSRV'));
+    assert.deepEqual(r.map((x) => [x.name, x.score]).sort(), [['Alto', 0.6], ['OrderHub', 0.6]]);
+  });
+});
+
+describe('marketplace : plusieurs applications dans une cellule', () => {
+  test('seules celles du périmètre sont gardées', () => {
+    const repo = createRepo(openStore(':memory:'));
+    ensurePerimeterNodes(repo, PERIMETER);
+    const records = [
+      { Hostname: 'srv1', Application: 'Autre;ORDERHUB' },
+      { Hostname: 'srv2', Application: 'Autre;Encore' },
+    ];
+    const mapping = { entity: 'server', key: 'Hostname', perimeterColumn: 'Application', relations: [{ column: 'Application', entity: 'application', type: 'runs_on', direction: 'from' }] };
+    const stats = ingestInventory(repo, { source: 'marketplace', records, mapping, matcher: createMatcher(PERIMETER) });
+    assert.equal(stats.outOfScope, 1);
+    assert.deepEqual(repo.edgesFrom('application:orderhub').map((e) => e.dst), ['server:srv1']);
+    assert.ok(!repo.getNode('application:autre'));
+  });
+});

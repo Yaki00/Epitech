@@ -107,6 +107,7 @@ function ingestInventory(repo, { source, records, headers, mapping: rawMapping, 
   const cols = headers || Object.keys(records[0] || {});
   const { mapping } = resolveMapping(rawMapping, cols);
   const perimeterCol = scoped ? resolveMapping({ key: rawMapping.perimeterColumn }, cols).mapping.key : null;
+  const multiPerimeter = scoped && mapping.relations.some((r) => r.column === perimeterCol && r.multi !== false);
   const missing = [
     perimeterCol,
     mapping.key,
@@ -127,15 +128,23 @@ function ingestInventory(repo, { source, records, headers, mapping: rawMapping, 
           return;
         }
         if (scoped) {
-          const raw = row[perimeterCol];
-          const m = raw ? matcher.matchName(raw, { minScore: 0.95 }) : null;
-          if (!m) {
-            stats.outOfScope++;
-            const near = raw ? matcher.matchName(raw, { minScore: 0.6 }) : null;
+          // une cellule peut lister plusieurs applications ("BRIEF;HERA") : on garde celles du périmètre
+          const values = multiPerimeter ? splitMulti(row[perimeterCol]) : [row[perimeterCol]].filter(Boolean);
+          const kept = [];
+          for (const raw of values) {
+            const m = matcher.matchName(raw, { minScore: 0.95 });
+            if (m) {
+              if (!kept.includes(m.app.name)) kept.push(m.app.name);
+              continue;
+            }
+            const near = matcher.matchName(raw, { minScore: 0.6 });
             if (near) nearMisses.set(`${raw} -> ${near.app.name}`, (nearMisses.get(`${raw} -> ${near.app.name}`) || 0) + 1);
+          }
+          if (!kept.length) {
+            stats.outOfScope++;
             return;
           }
-          row = { ...row, [perimeterCol]: m.app.name };
+          row = { ...row, [perimeterCol]: kept.join(';') };
         }
         const key = row[mapping.key];
         if (!key) {

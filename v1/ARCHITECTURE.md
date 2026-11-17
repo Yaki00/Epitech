@@ -124,7 +124,22 @@ ses pages parentes, son texte et les serveurs connus de l'application (import AP
   nom de référence, une relation vers une appli hors périmètre est écartée.
 - Rapports : `perimetre-pages.csv` (pages par application, score, raisons) et `perimetre-orthographes.csv`
   (façons d'écrire chaque appli : à valider puis ajouter en alias). Changer le périmètre relance les pages concernées.
-- Ordre des synchros : APM d'abord (serveurs de chaque appli), puis Confluence.
+- Serveurs : une page qui cite un serveur d'une appli (nom court, FQDN ou IP, sans besoin de HOST_SHORTNAME_PATTERN)
+  lui est rattachée (0.85 ; 0.9 si 2 serveurs propres ; 0.6 si le serveur est partagé entre plusieurs applis du périmètre).
+  La marketplace est aussi limitée au périmètre (`perimeterColumn: "Application"`, cellules à plusieurs applis gérées).
+- Ordre des synchros : APM et marketplace d'abord (serveurs de chaque appli), puis Confluence. Un réimport qui change
+  les serveurs du périmètre relance les règles et les contrôles sur les pages, pas l'IA.
+
+### Pages d'architecture (`src/perimeter/architecture.js`)
+
+Reconnues par le titre (architecture, DAT, serveurs, production, infra… ; `architectureKeywords` dans perimeter.json),
+un tableau serveurs + IP, un schéma ou de nombreux serveurs cités. Pour chaque appli rattachée, contrôle SANS IA par
+rapport aux inventaires : serveurs confirmés / manquants (filtrés par environnement si le titre dit « production »
+et que l'inventaire donne l'environnement), rattachés à une autre appli, inconnus des inventaires, IP du tableau
+différentes de l'inventaire, rubriques attendues absentes (bases, flux, sauvegarde, supervision, redondance, contacts,
+schéma), ancienneté (> 2 ans). Résultat sur le lien `documented_in` (`attrs.audit`), affiché dans la fiche appli,
+et rapports `architecture-pages.csv` et `architecture-applications.csv` (serveurs documentés dans aucune page).
+Limite : les imports ajoutent sans supprimer ; un serveur retiré de l'APM reste dans le graphe (à traiter).
 
 ## Frontend (frontend/)
 
@@ -170,6 +185,7 @@ Règles : pas de 0 trompeur pour une source non branchée (afficher « non conne
       hash des images (dédoublonnage) -> classification -> OCR (mistral-ocr) ou schéma (gemma, sortie nœuds/liens JSON).
       `viewHtml` donne déjà, pour chaque image, son fichier d'origine et sa section ; il manque la correspondance avec `images/img_N` (à fournir par le fetcher).
 - [x] Étape 3a — Périmètre : 12 applications, variantes et fautes reconnues, tri IA des pages, rapports CSV
+- [x] Étape 3a bis — Applis retrouvées par leurs serveurs ; contrôle des pages d'architecture par rapport aux inventaires
 - [ ] Étape 3b — Jeu d'évaluation : 20 pages annotées à la main, comparer les modèles (précision, liens manqués, temps)
 - [ ] Étape 4 — Naemon (mapping CSV ou Livestatus) : hôtes supervisés, dépendances, rapport d'écarts
 - [ ] Étape 5 — ServiceNow (MCP limité à 200 résultats : `mcpClient.fetchAllByWindows`, ou export CSV) ; Bitbucket pour les PRs

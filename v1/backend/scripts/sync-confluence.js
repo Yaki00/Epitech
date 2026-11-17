@@ -27,6 +27,7 @@ const { ingestConfluencePage, documentId } = require('../src/ingest/confluence')
 const { readExportPages, exportHash, analyseEntry, loadDiagrams } = require('../src/ingest/confluenceExport');
 const { extractRelations, applyRelations, triagePage, chunkText } = require('../src/enrich/relations');
 const { loadPerimeter, createMatcher, ensurePerimeterNodes } = require('../src/perimeter/perimeter');
+const { architectureScore, auditArchitecturePage, DEFAULT_KEYWORDS } = require('../src/perimeter/architecture');
 const { writeCsvReport } = require('../src/lib/report');
 const { createLlmClient } = require('../src/lib/llmClient');
 const { createLogger } = require('../src/lib/logger');
@@ -117,17 +118,58 @@ function writePerimeterReports(repo, matcher) {
       .map(([k, n]) => [...k.split('|'), n, "si c'est bien elle : l'ajouter en alias dans config/perimeter.json ; sinon le signaler"])
       .sort((a, b) => b[2] - a[2])
   );
-  log.info(`rapports : ${f1} ; ${f2}`);
+  const f3 = writeArchitectureReports(repo, matcher);
+  log.info(`rapports : ${f1} ; ${f2} ; ${f3.join(' ; ')}`);
+}
+
+/**
+ * Contrôle des pages d'architecture :
+ *  - architecture-pages.csv : une ligne par page et application (serveurs confirmés, manquants, inconnus, IP, rubriques)
+ *  - architecture-applications.csv : par application, serveurs documentés dans AUCUNE page d'architecture
+ */
+function writeArchitectureReports(repo, matcher) {
+  const rows = [];
+  const summary = [];
+  for (const app of matcher.apps) {
+    const documented = new Set();
+    let pages = 0;
+    let best = null;
+    for (const e of repo.edgesFrom(app.id).filter((x) => x.type === 'documented_in' && x.attrs.audit)) {
+      const doc = repo.getNode(e.dst);
+      if (!doc) continue;
+      const a = e.attrs.audit;
+      pages++;
+      for (const n of a.confirmed) documented.add(n.toLowerCase());
+      if (a.completeness !== null && (best === null || a.completeness > best)) best = a.completeness;
+      rows.push([
+        app.name, doc.name, doc.attrs.url || '', doc.attrs.updatedAt || '', a.environment || '',
+        a.completeness === null ? '' : `${Math.round(a.completeness * 100)} %`,
+        a.confirmed, a.missing, a.otherApp, a.unknown, a.ipMismatch, a.absentSections, a.verdict,
+      ]);
+    }
+    const never = [...app.servers].map((id) => repo.getNode(id)?.name).filter((n) => n && !documented.has(n.toLowerCase()));
+    summary.push([app.name, pages, best === null ? '' : `${Math.round(best * 100)} %`, app.servers.size, never, pages ? '' : "aucune page d'architecture trouvée"]);
+  }
+  return [
+    writeCsvReport(
+      config.reportsDir,
+      'architecture-pages',
+      ['application', 'page', 'url', 'modifiée le', 'environnement', 'complétude', 'serveurs confirmés', 'serveurs manquants', "serveurs d'une autre application", 'inconnus des inventaires', 'IP différentes', 'rubriques absentes', 'verdict'],
+      rows
+    ),
+    writeCsvReport(config.reportsDir, 'architecture-applications', ['application', "pages d'architecture", 'meilleure complétude', 'serveurs (inventaires)', "serveurs documentés dans aucune page d'architecture", 'remarque'], summary),
+  ];
 }
 
 /** Serveurs des applications de la page qui sont cités dans la page (indice pour l'IA). */
 function knownServersOf(repo, page, matcher, pageApps) {
   const apps = matcher.apps.filter((a) => pageApps.includes(a.name));
-  const out = new Set();
-  for (const token of [...page.entities.hosts, ...page.entities.ips]) {
-    for (const n of repo.resolve(token)) if (n.type === 'server' && apps.some((a) => a.servers.has(n.id))) out.add(n.name);
-  }
-  return [...out].slice(0, 30);
+  const text = [page.title, ...page.sections.map((s) => s.text)].join('\n');
+  const cited = matcher.serversIn(text, [...page.entities.hosts, ...page.entities.ips]);
+  return [...cited]
+    .filter((sid) => apps.some((a) => a.servers.has(sid)))
+    .map((sid) => repo.getNode(sid)?.name || sid)
+    .slice(0, 30);
 }
 
 async function main() {
@@ -150,7 +192,7 @@ async function main() {
     ensurePerimeterNodes(repo, perimeter);
     matcher = createMatcher(perimeter, repo);
     scope = { apps: perimeter.applications, ignoreOthers: perimeter.ignoreOtherApplications };
-    Object.assign(stats, { inScope: 0, triaged: 0, outOfScope: 0, llmDropped: 0, llmRenamed: 0 });
+    Object.assign(stats, { inScope: 0, triaged: 0, outOfScope: 0, llmDropped: 0, llmRenamed: 0, architecturePages: 0 });
     const noServers = matcher.apps.filter((a) => !a.servers.size).map((a) => a.name);
     log.info(`périmètre : ${perimeter.applications.length} applications`);
     if (noServers.length) log.warn(`sans serveur connu (import APM fait ?) : ${noServers.join(', ')}`);
@@ -170,8 +212,11 @@ async function main() {
       const docId = `confluence:${p.id}`;
       const hash = exportHash(entry);
       const prev = repo.getDocument(docId);
-      const unchanged = prev && prev.content_hash === hash && prev.status !== 'error' && (prev.attrs?.perimeterHash || null) === (matcher ? matcher.hash : null);
-      if (unchanged && !opt.force && (!opt.llm || prev.status === 'enriched')) {
+      const unchanged = !opt.force && prev && prev.content_hash === hash && prev.status !== 'error' && (prev.attrs?.perimeterHash || null) === (matcher ? matcher.hash : null);
+      // inventaires réimportés (serveurs des applications changés) : on refait les règles et les contrôles, pas l'IA
+      const serversChanged = Boolean(matcher) && (prev?.attrs?.serversHash || null) !== matcher.serversHash;
+      const needLlm = opt.llm && !(unchanged && prev.status === 'enriched');
+      if (unchanged && !serversChanged && !needLlm) {
         stats.skipped++;
         continue;
       }
@@ -185,9 +230,17 @@ async function main() {
         // applications du périmètre reconnues par les règles (sans IA)
         const related = matcher ? matcher.scanPage({ ...page, ancestors: p.ancestors || page.ancestors || [] }).filter((x) => x.score >= 0.6) : [];
         if (matcher) {
-          docBase.attrs = { perimeterHash: matcher.hash, perimeterApps: related.map((x) => ({ id: x.id, score: x.score })) };
+          docBase.attrs = { perimeterHash: matcher.hash, serversHash: matcher.serversHash, perimeterApps: related.map((x) => ({ id: x.id, score: x.score })) };
+          // page d'architecture : contrôlée par rapport aux inventaires pour chaque application concernée
+          const archi = architectureScore(page, { keywords: perimeter.architectureKeywords || DEFAULT_KEYWORDS, ancestors: p.ancestors || [] });
+          const isArchi = archi.score >= 0.6;
+          if (isArchi) {
+            stats.architecturePages++;
+            repo.upsertNode({ type: 'document', key: documentId(p.id), name: page.title, source: 'confluence', attrs: { pageKind: 'architecture', architecture: archi } });
+          }
           for (const x of related) {
-            repo.addEdge({ src: x.id, dst: nodeId, type: 'documented_in', source: 'confluence', sourceRef: p.id, confidence: x.score, attrs: { reasons: x.reasons, spellings: x.spellings } });
+            const audit = isArchi ? auditArchitecturePage(repo, matcher, { ...page, updatedAt: p.updatedAt || page.updatedAt }, x.id) : undefined;
+            repo.addEdge({ src: x.id, dst: nodeId, type: 'documented_in', source: 'confluence', sourceRef: p.id, confidence: x.score, attrs: { reasons: x.reasons, spellings: x.spellings, audit } });
           }
           if (related.length) stats.inScope++;
         }
@@ -197,9 +250,11 @@ async function main() {
         stats.diagramsMissing += diagrams.missing.length;
         stats.obsoleteFragments += page.obsoleteFragments || 0;
         stats.unresolved += r.unresolved.length;
-        repo.saveDocument({ ...docBase, status: 'parsed', attrs: { ...docBase.attrs, obsoleteFragments: page.obsoleteFragments || 0, sections: page.sections.length, tables: page.tables.length } });
+        // page déjà enrichie dont seuls les inventaires ont changé : elle garde son statut, l'IA n'est pas relancée
+        const keepStatus = !needLlm && prev && prev.status === 'enriched' && unchanged;
+        repo.saveDocument({ ...docBase, status: keepStatus ? 'enriched' : 'parsed', attrs: { ...docBase.attrs, obsoleteFragments: page.obsoleteFragments || 0, sections: page.sections.length, tables: page.tables.length } });
 
-        if (llm) {
+        if (llm && needLlm) {
           llmJobs.push(
             enrichPage({ llm, repo, page, p, nodeId, related, matcher, scope, counters, stats }).then((results) => {
               const failures = results.filter((x) => x.status === 'rejected');

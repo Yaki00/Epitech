@@ -66,12 +66,22 @@ function linkedNodes(repo, id, edgeType) {
 function applicationDetail(repo, id) {
   const app = repo.getNode(id);
   if (!app || app.type !== 'application') return null;
-  const docs = repo
-    .edgesFrom(id)
-    .filter((e) => e.type === 'documented_in')
-    .map((e) => repo.getNode(e.dst))
-    .filter(Boolean)
-    .map((d) => ({ id: d.id, name: d.name, url: d.attrs.url || null }));
+  // une page peut être rattachée par plusieurs sources (règles, tri IA) : une seule entrée, avec son contrôle d'architecture
+  const byDoc = new Map();
+  for (const e of repo.edgesFrom(id).filter((x) => x.type === 'documented_in')) {
+    const d = repo.getNode(e.dst);
+    if (!d) continue;
+    const prev = byDoc.get(d.id);
+    byDoc.set(d.id, {
+      id: d.id,
+      name: d.name,
+      url: d.attrs.url || null,
+      architecture: d.attrs.pageKind === 'architecture',
+      audit: prev?.audit || e.attrs.audit || null,
+    });
+  }
+  // pages d'architecture d'abord
+  const docs = [...byDoc.values()].sort((a, b) => Number(b.architecture) - Number(a.architecture) || a.name.localeCompare(b.name));
   return {
     ...applicationSummary(repo, app),
     attrs: app.attrs,
