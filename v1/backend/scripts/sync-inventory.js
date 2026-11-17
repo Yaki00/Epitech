@@ -11,7 +11,7 @@ const fs = require('fs');
 const config = require('../src/config');
 const { openStore, acquireLock } = require('../src/store/store');
 const { createRepo } = require('../src/store/repo');
-const { parseCsv } = require('../src/lib/csv');
+const { parseCsv, decodeText } = require('../src/lib/csv');
 const { ingestInventory, resolveInputFile, resolveMapping } = require('../src/ingest/inventory');
 const { createLogger } = require('../src/lib/logger');
 const { loadPerimeter, createMatcher, ensurePerimeterNodes } = require('../src/perimeter/perimeter');
@@ -45,9 +45,17 @@ function main() {
       const runId = repo.startRun(source);
       try {
         const file = resolveInputFile(config.root, mapping.file);
-        if (!file) throw new Error(`aucun fichier ne correspond à ${mapping.file}`);
-        const { records, headers, delimiter } = parseCsv(fs.readFileSync(file, 'utf8'));
-        log.info(`${source} : ${file} (${records.length} lignes, séparateur "${delimiter}", ${headers.length} colonnes)`);
+        if (!file) {
+          const message = `aucun fichier ne correspond à ${mapping.file}`;
+          // source pas encore disponible (ex. marketplace) : sautée, sauf si on l'a demandée explicitement
+          if (wanted.includes(source)) throw new Error(message);
+          repo.finishRun(runId, { status: 'skipped', error: message });
+          log.warn(`${source} sautée : ${message}`);
+          continue;
+        }
+        const { text, encoding } = decodeText(fs.readFileSync(file));
+        const { records, headers, delimiter } = parseCsv(text);
+        log.info(`${source} : ${file} (${records.length} lignes, séparateur "${delimiter}", ${headers.length} colonnes, ${encoding})`);
         const { resolved } = resolveMapping(mapping, headers);
         if (resolved.length) log.info(`${source} : colonnes par lettre`, Object.fromEntries(resolved.map((r) => [r.ref, r.header])));
         const stats = ingestInventory(repo, { source, records, headers, mapping, matcher, runId });

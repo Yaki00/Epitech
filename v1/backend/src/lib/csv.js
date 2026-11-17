@@ -83,4 +83,20 @@ function parseCsv(text, { delimiter } = {}) {
   return { headers, records, delimiter: delim };
 }
 
-module.exports = { parseCsv, detectDelimiter, columnLetter, columnIndex };
+/**
+ * Texte d'un fichier exporté : UTF-8 si le contenu est de l'UTF-8 valide, sinon Windows-1252
+ * (encodage par défaut des exports Excel « CSV (séparateur ; ) » sous Windows en français).
+ * @param {Buffer} buf
+ * @returns {{text: string, encoding: string}}
+ */
+function decodeText(buf) {
+  const utf8 = buf.toString('utf8');
+  if (!utf8.includes('\uFFFD')) return { text: utf8, encoding: 'utf-8' };
+  try {
+    return { text: new TextDecoder('windows-1252').decode(buf), encoding: 'windows-1252' };
+  } catch (err) {
+    return { text: buf.toString('latin1'), encoding: 'latin1' }; // Node sans ICU complet
+  }
+}
+
+module.exports = { parseCsv, detectDelimiter, columnLetter, columnIndex, decodeText };

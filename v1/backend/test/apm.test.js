@@ -97,3 +97,14 @@ describe('export APM des serveurs', () => {
     assert.throws(() => ingestInventory(repo, { source: 'apm', records, headers, mapping: apmMapping }), /Colonnes absentes.*CK/);
   });
 });
+
+describe('encodage des exports', () => {
+  const { decodeText } = require('../src/lib/csv');
+  test('UTF-8 gardé tel quel', () => {
+    assert.deepEqual(decodeText(Buffer.from('Équipe;Données', 'utf8')), { text: 'Équipe;Données', encoding: 'utf-8' });
+  });
+  test('export Excel Windows-1252 : accents et symboles corrects', () => {
+    const buf = Buffer.from([0xc9, 0x71, 0x75, 0x69, 0x70, 0x65, 0x3b, 0x80, 0x3b, 0x9c, 0x75, 0x76, 0x72, 0x65]); // "Équipe;€;œuvre"
+    assert.deepEqual(decodeText(buf), { text: 'Équipe;€;œuvre', encoding: 'windows-1252' });
+  });
+});

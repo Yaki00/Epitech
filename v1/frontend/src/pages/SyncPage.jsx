@@ -10,6 +10,7 @@ const STATUS = {
   partial: { label: 'Partiel', cls: 'bg-amber-50 text-amber-700' },
   error: { label: 'Échec', cls: 'bg-red-50 text-red-700' },
   running: { label: 'En cours', cls: 'bg-blue-50 text-blue-700' },
+  skipped: { label: 'Sautée', cls: 'bg-slate-100 text-slate-600' },
 };
 
 const SOURCE_NAMES = { marketplace: 'Marketplace', apm: 'APM', naemon: 'Naemon', confluence: 'Confluence', 'confluence+llm': 'Confluence + IA', servicenow: 'ServiceNow' };

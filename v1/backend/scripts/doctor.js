@@ -56,11 +56,24 @@ async function main() {
 
   // 3. fichiers de configuration
   fs.existsSync(path.join(config.root, '.env')) ? ok('backend/.env présent') : warn('backend/.env absent (lancez npm run setup ou copiez .env.example)');
+  // valeurs d'exemple encore présentes dans .env (ex : LLM_TOKEN=<jeton de la passerelle IA>)
+  const envFile = path.join(config.root, '.env');
+  if (fs.existsSync(envFile)) {
+    const placeholders = fs
+      .readFileSync(envFile, 'utf8')
+      .split(/\r?\n/)
+      .filter((l) => /^\s*[A-Z_]+\s*=.*<[^>]+>/.test(l))
+      .map((l) => l.split('=')[0].trim());
+    if (placeholders.length) ko(`backend/.env : valeurs d'exemple à remplacer (<…>) : ${placeholders.join(', ')}`);
+  }
   fs.existsSync(config.inventory.mappingFile) ? ok('config/mappings.json présent') : warn('config/mappings.json absent (copiez mappings.example.json)');
   try {
     const { loadPerimeter } = require('../src/perimeter/perimeter');
     const perimeter = loadPerimeter(config.perimeterFile);
-    if (perimeter) ok(`périmètre : ${perimeter.applications.length} applications (${perimeter.applications.map((a) => a.name).join(', ')})`);
+    const example = path.join(config.root, 'config', 'perimeter.example.json');
+    const sameAsExample = perimeter && fs.existsSync(example) && fs.readFileSync(example, 'utf8') === fs.readFileSync(config.perimeterFile, 'utf8');
+    if (sameAsExample) ko("config/perimeter.json = exemple (OrderHub, Billing Engine) : y mettre vos applications, sinon l'import APM ne garde aucune ligne");
+    else if (perimeter) ok(`périmètre : ${perimeter.applications.length} applications (${perimeter.applications.map((a) => a.name).join(', ')})`);
     else warn('config/perimeter.json absent : toutes les applications seront analysées (copiez perimeter.example.json)');
   } catch (err) {
     ko(`config/perimeter.json illisible : ${err.message}`);
