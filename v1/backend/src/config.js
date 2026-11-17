@@ -59,8 +59,21 @@ const config = {
   },
 
   confluence: {
-    // export local produit par le fetcher : un dossier par page (metadata.json + page.html)
+    // export local : un dossier par page (metadata.json + page.html), écrit par scripts/fetch-confluence.js
     exportDir: path.resolve(ROOT, env('CONFLUENCE_EXPORT_DIR', './data/raw/confluence')),
+    // récupération (scripts/fetch-confluence.js) : API REST Confluence Server / Data Center
+    baseUrl: env('CONFLUENCE_BASE_URL', ''),
+    token: env('CONFLUENCE_TOKEN', ''),
+    user: env('CONFLUENCE_USER', ''),
+    password: env('CONFLUENCE_PASSWORD', ''),
+    spaces: env('CONFLUENCE_SPACES', '')
+      .split(/[,;\s]+/)
+      .map((s) => s.trim())
+      .filter(Boolean),
+    concurrency: int('CONFLUENCE_CONCURRENCY', 4),
+    timeoutMs: int('CONFLUENCE_TIMEOUT_MS', 60000),
+    downloadImages: bool('CONFLUENCE_DOWNLOAD_IMAGES', 'true'),
+    maxAttachmentMb: int('CONFLUENCE_MAX_ATTACHMENT_MB', 20),
   },
 
   inventory: {

@@ -11,6 +11,7 @@
     "start": "node src/server.js",
     "dev": "node src/server.js",
     "doctor": "node scripts/doctor.js",
+    "fetch:confluence": "node scripts/fetch-confluence.js",
     "sync:inventory": "node scripts/sync-inventory.js",
     "sync:confluence": "node scripts/sync-confluence.js",
     "sync:confluence:llm": "node scripts/sync-confluence.js --llm",

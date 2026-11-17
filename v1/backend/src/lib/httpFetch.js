@@ -4,7 +4,7 @@
  * Seul client HTTP sortant du projet : utilisé par llmClient, mcpClient et doctor.
  *
  *   const res = await httpFetch(url, { method, headers, body, signal, timeoutMs });
- *   res.ok, res.status, await res.text(), await res.json()
+ *   res.ok, res.status, await res.text(), await res.json(), await res.buffer()
  *
  * - http et https selon l'URL
  * - timeout (timeoutMs) et annulation (signal d'un AbortController) -> erreur nommée AbortError
@@ -50,13 +50,16 @@ function httpFetch(url, { method = 'GET', headers = {}, body, signal, timeoutMs 
       res.on('data', (c) => chunks.push(c));
       res.on('error', (err) => done(reject, err));
       res.on('end', () => {
-        const text = Buffer.concat(chunks).toString('utf8');
+        const raw = Buffer.concat(chunks);
+        const text = raw.toString('utf8');
         done(resolve, {
           ok: res.statusCode >= 200 && res.statusCode < 300,
           status: res.statusCode,
           headers: res.headers,
           text: async () => text,
           json: async () => JSON.parse(text),
+          // contenu brut : images et pièces jointes
+          buffer: async () => raw,
         });
       });
     });

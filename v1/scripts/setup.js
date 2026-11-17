@@ -31,6 +31,7 @@ else {
 const copies = [
   ['backend/.env.example', 'backend/.env'],
   ['backend/config/mappings.example.json', 'backend/config/mappings.json'],
+  ['backend/config/perimeter.example.json', 'backend/config/perimeter.json'],
 ];
 for (const [from, to] of copies) {
   const dst = path.join(root, to);
@@ -41,8 +42,10 @@ for (const [from, to] of copies) {
   }
 }
 console.log('\nÀ faire maintenant :');
-console.log('  1. backend/.env : renseigner LLM_TOKEN et CONFLUENCE_EXPORT_DIR (dossier de l\'export Confluence)');
-console.log('  2. backend/config/mappings.json : mettre les vrais noms de colonnes de vos exports CSV');
-console.log('  3. npm run doctor   (vérifie tout, rapport à copier-coller)');
-console.log('  4. npm run sync     (construit le graphe)');
-console.log('  5. npm start\n');
+console.log('  1. backend/.env : tout est commenté ; au minimum LLM_*, CONFLUENCE_BASE_URL, CONFLUENCE_TOKEN, CONFLUENCE_SPACES');
+console.log('     (clés des espaces : node backend/scripts/fetch-confluence.js --list-spaces)');
+console.log('  2. backend/config/perimeter.json : les applications suivies (noms de la colonne A de l\'APM)');
+console.log('  3. backend/config/mappings.json : fichiers CSV (APM, marketplace) et colonnes');
+console.log('  4. npm run doctor   (vérifie tout, rapport à copier-coller)');
+console.log('  5. npm run sync:all (récupère Confluence, importe les CSV, analyse ; voir README)');
+console.log('  6. npm start\n');

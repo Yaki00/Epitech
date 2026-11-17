@@ -48,9 +48,40 @@ le backend le sert (`FRONTEND_DIST`). Le poste Node 16 n'exécute jamais Vite.
 - Le serveur API recharge les données si une synchro a écrit depuis (`reloadIfChanged`, vérifié à chaque requête `/api`).
 - `DATA_DIR` est reconstructible : on peut le supprimer et relancer `npm run sync`.
 
+## Mise en route (fichiers à remplir, ordre des commandes)
+
+| Fichier (non versionné) | Modèle versionné | Contenu |
+|---|---|---|
+| `backend/.env` | `backend/.env.example` | IA, Confluence (URL, jeton, espaces), chemins ; tout est commenté |
+| `backend/config/perimeter.json` | `perimeter.example.json` | les ~12 applications suivies (noms de la colonne A de l'APM) + alias |
+| `backend/config/mappings.json` | `mappings.example.json` | fichiers CSV (APM, marketplace) et colonnes (nom ou lettre Excel) |
+
+`npm run setup` copie les modèles s'ils manquent. Puis `npm run doctor` (teste IA, Confluence, fichiers).
+
+Commande unique : `npm run sync:all` = `fetch-confluence.js` (pages nouvelles ou modifiées) → `sync-inventory.js`
+(APM, marketplace) → `sync-confluence.js --llm` (pages nouvelles ou modifiées). Options `--no-fetch`, `--no-llm`,
+`--no-inventory`. Code de sortie non nul si une étape échoue (prévu pour un timer systemd ou le Planificateur de tâches).
+Premier passage : tester avec `fetch-confluence.js --limit 20` puis `sync-confluence.js --llm --limit 20`.
+
+## Récupération Confluence (`scripts/fetch-confluence.js`, `src/fetch/`)
+
+API REST Confluence Server / Data Center (`CONFLUENCE_BASE_URL` avec le chemin de contexte, ex. `/wiki`), jeton
+personnel en Bearer (`CONFLUENCE_TOKEN`) ou Basic (`CONFLUENCE_USER` / `CONFLUENCE_PASSWORD`). Espaces : `CONFLUENCE_SPACES`
+(`--list-spaces` pour les voir). Appels : `/rest/api/space/{key}/content/page?expand=version` (liste, 200 par appel),
+`/rest/api/content/{id}?expand=body.view,body.storage,version,ancestors,metadata.labels,space`,
+`/rest/api/content/{id}/child/attachment` + `_links.download`. Retry sur 429/5xx (Retry-After), redirections suivies.
+
+- Incrémental : `<export>/.fetch-state.json` garde la version de chaque page ; seules les pages nouvelles ou dont la
+  version a changé sont téléchargées. Titre changé : dossier renommé. Page supprimée : dossier supprimé
+  (jamais si l'espace renvoie 0 page ou une erreur ; jamais avec `--limit` ou `--dry-run`).
+- `--full` retélécharge tout (ex. une fois par semaine : un parent renommé ne change pas la version des enfants).
+- Une page est écrite dans un dossier temporaire puis renommée : jamais de page à moitié écrite.
+- Images (`image/*`) dans `images/<nom d'origine>` (le nom cité par le HTML), schémas draw.io dans `attachments/`,
+  liste dans `metadata.attachments` ; PDF et autres ignorés ; plus de `CONFLUENCE_MAX_ATTACHMENT_MB` ignorés.
+
 ## Source Confluence (export local, lecture seule)
 
-Lyra n'appelle pas Confluence : le fetcher a déjà tout téléchargé dans `CONFLUENCE_EXPORT_DIR`.
+La synchro lit l'export écrit par `fetch-confluence.js` dans `CONFLUENCE_EXPORT_DIR` (tout autre outil produisant le même format convient).
 
 ```
 <CONFLUENCE_EXPORT_DIR>/…/0006 - Paris Service Delivery/
@@ -91,6 +122,12 @@ src/
     viewHtml.js             page.html (rendu) -> sections (avec ancre), tableaux, liens, images (+ section), draw.io, Jira, entités
     storage.js              format storage -> même sortie
     drawio.js               diagramme draw.io -> nœuds, liens, conteneurs (sans vision)
+  fetch/
+    confluenceApi.js        client de l'API REST Confluence (auth, retry, pagination, téléchargement)
+    confluenceFetcher.js    récupération incrémentale des espaces vers l'export local
+  perimeter/
+    perimeter.js            applications suivies : variantes, fautes, sigles, serveurs ; rattachement des pages
+    architecture.js         pages d'architecture : reconnaissance et contrôle par rapport aux inventaires
   ingest/
     confluenceExport.js     parcours de l'export local, métadonnées, analyse d'une page, diagrammes
     confluence.js           page analysée -> graphe (mentions, documented_in, liens draw.io)
@@ -101,12 +138,12 @@ src/
   assistant/ask.js          chat avec outils ; LLM_TOOLS_MODE=native (function calling) ou json (repli, automatique sur refus 400)
   api/app.js                routes Express (+ sert FRONTEND_DIST)
   api/views.js              vues prêtes à afficher pour le front
-scripts/                    doctor.js, sync-inventory.js, sync-confluence.js
+scripts/                    doctor.js, fetch-confluence.js, sync-inventory.js, sync-confluence.js (+ ../scripts/sync-all.js)
 test/                       jest (*.test.js, assertions avec le module assert) + fixtures/confluence-export/
 ```
 
 Racine : `npm run setup` (installe le backend, et le frontend seulement si Node ≥ 20), `npm start` (backend seul si
-`frontend/dist` existe), `npm run doctor`, `npm run sync`, `npm test`.
+`frontend/dist` existe), `npm run doctor`, `npm run sync:all`, `npm run fetch`, `npm test`.
 
 ## Périmètre (config/perimeter.json, non versionné)
 
@@ -183,7 +220,7 @@ Règles : pas de 0 trompeur pour une source non branchée (afficher « non conne
 - [x] Étape 2b — V1 Node 16 : stockage JSON, export Confluence local (page.html rendu), IP stricte, texte barré ignoré, jest, chat sans function calling
 - [~] Étape 3 — IA : extraction des relations (fait) ; images à faire :
       hash des images (dédoublonnage) -> classification -> OCR (mistral-ocr) ou schéma (gemma, sortie nœuds/liens JSON).
-      `viewHtml` donne déjà, pour chaque image, son fichier d'origine et sa section ; il manque la correspondance avec `images/img_N` (à fournir par le fetcher).
+      `viewHtml` donne, pour chaque image, son fichier d'origine et sa section ; `fetch-confluence.js` enregistre les images sous ce même nom (`images/<nom>`).
 - [x] Étape 3a — Périmètre : 12 applications, variantes et fautes reconnues, tri IA des pages, rapports CSV
 - [x] Étape 3a bis — Applis retrouvées par leurs serveurs ; contrôle des pages d'architecture par rapport aux inventaires
 - [ ] Étape 3b — Jeu d'évaluation : 20 pages annotées à la main, comparer les modèles (précision, liens manqués, temps)
@@ -192,12 +229,6 @@ Règles : pas de 0 trompeur pour une source non branchée (afficher « non conne
 - [ ] Étape 6 — Recherche documentaire (embeddings + reranker) branchée dans `assistant/ask.js` (outil `search_docs`)
 - [x] Étape 7 — Frontend (frontend/) : Applications, recherche Serveur/IP, fiche appli à onglets, Architecture + simulation de panne, Synchronisation, Équipe, bulle de chat
 - [ ] Rapport d'écarts : serveurs non supervisés, supervisés hors marketplace, cités dans Confluence mais inconnus
-
-## Améliorations attendues du fetcher Confluence (hors Lyra)
-
-`parentId` + `ancestors` ; `version.number` (aujourd'hui 0) ; `page.storage.xml` (`expand=body.storage`) ;
-pièces jointes `.drawio` dans `attachments/` ; pour chaque image : nom d'origine, id de pièce jointe et `src` ;
-`labels`, `fetchedAt` ; `tables[].headers` remplis quand la 1re ligne est en `<th>` ; ne pas nettoyer `page.html`.
 
 ## Contrat d'API (pour le frontend)
 

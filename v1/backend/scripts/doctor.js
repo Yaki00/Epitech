@@ -66,7 +66,21 @@ async function main() {
     ko(`config/perimeter.json illisible : ${err.message}`);
   }
 
-  // 4. export Confluence
+  // 4. API Confluence (récupération des pages)
+  if (config.confluence.baseUrl) {
+    await check('API Confluence', async () => {
+      const { createConfluenceApi } = require('../src/fetch/confluenceApi');
+      const c = config.confluence;
+      const api = createConfluenceApi({ baseUrl: c.baseUrl, token: c.token, user: c.user, password: c.password, timeoutMs: 15000, maxRetries: 0 });
+      const t0 = Date.now();
+      await api.ping();
+      ok(`Confluence joignable (${Date.now() - t0} ms), authentification acceptée`);
+      if (!c.spaces.length) warn('CONFLUENCE_SPACES vide (node scripts/fetch-confluence.js --list-spaces)');
+      else info(`espaces à récupérer : ${c.spaces.join(', ')}`);
+    });
+  } else info('CONFLUENCE_BASE_URL vide : récupération Confluence non configurée (export déjà présent ?)');
+
+  // 5. export Confluence
   await check('export Confluence', async () => {
     const dir = config.confluence.exportDir;
     if (!fs.existsSync(dir)) return warn(`export Confluence absent : ${dir} (CONFLUENCE_EXPORT_DIR)`);

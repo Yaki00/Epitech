@@ -14,17 +14,21 @@ Architecture, conventions et feuille de route : voir **[ARCHITECTURE.md](ARCHITE
 ## Démarrage (poste Node 16)
 
 ```bash
-npm run setup      # npm install du backend + crée backend/.env et backend/config/mappings.json
-# renseigner dans backend/.env : LLM_TOKEN, CONFLUENCE_EXPORT_DIR (dossier de l'export Confluence)
-# adapter backend/config/mappings.json : colonnes (nom exact ou lettre Excel, ex. "CK") et fichiers CSV
-# export APM des serveurs : déposer le CSV dans backend/data/raw/apm/ (le plus récent est pris)
-# périmètre : copier backend/config/perimeter.example.json en perimeter.json et y lister les applications suivies
-# ordre : npm run sync:inventory (APM) PUIS la synchro Confluence ; rapports dans backend/data/rapports/
-npm run doctor     # vérifie tout et affiche un rapport à copier-coller
+npm run setup      # npm install du backend + crée backend/.env, config/mappings.json et config/perimeter.json depuis les modèles
+# 1. backend/.env : tout est commenté (IA, Confluence : URL, jeton, espaces ; chemins)
+#    clés des espaces Confluence : node backend/scripts/fetch-confluence.js --list-spaces
+# 2. backend/config/perimeter.json : les applications suivies (noms de la colonne A de l'APM)
+# 3. backend/config/mappings.json : fichiers CSV et colonnes (nom exact ou lettre Excel, ex. "CK")
+#    export APM : déposer le CSV dans backend/data/raw/apm/ (le plus récent est pris)
+npm run doctor     # vérifie IA, Confluence, fichiers ; rapport à copier-coller
 npm test           # tests du backend (jest), sans IA ni réseau
-npm run sync       # construit le graphe : inventaires CSV puis Confluence (sans IA)
+npm run sync:all   # récupère Confluence, importe les CSV, analyse avec l'IA (seulement ce qui a changé)
 npm start          # http://localhost:3001 (interface si frontend/dist est présent, sinon API seule)
 ```
+
+Premier passage : tester sur 20 pages avant de tout lancer :
+`node backend/scripts/fetch-confluence.js --limit 20` puis `node backend/scripts/sync-confluence.js --llm --limit 20`.
+Rapports (Excel) dans `backend/data/rapports/`.
 
 Si un `package-lock.json` d'une ancienne version traîne dans `backend/`, supprimez-le avec `backend/node_modules` avant `npm run setup`.
 
@@ -42,6 +46,8 @@ npm test           # vitest
 
 ```bash
 cd backend
+npm run fetch:confluence                  # récupère les pages nouvelles ou modifiées des espaces CONFLUENCE_SPACES
+node scripts/fetch-confluence.js --full   # retélécharge tout (ex. une fois par semaine)
 npm run sync:inventory                    # toutes les sources CSV de mappings.json
 node scripts/sync-inventory.js apm        # une seule
 npm run sync:confluence                   # sans IA : structure, tableaux, liens, draw.io, mentions
