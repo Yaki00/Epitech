@@ -1,6 +1,7 @@
 # Lyra v1 : architecture, conventions et feuille de route
 
-Lis ce fichier en entier avant de modifier le code.
+**Assistant de code : lis d'abord `../opencode.md`.** Sur ce poste, tu installes, configures et testes ;
+tu ne modifies pas le code (scripts, sources, tests, package.json). Ce fichier sert à comprendre le projet.
 
 ## Objectif
 
