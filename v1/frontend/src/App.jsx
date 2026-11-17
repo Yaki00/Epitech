@@ -5,8 +5,10 @@ import ApplicationDetailPage from './pages/ApplicationDetailPage';
 import SyncPage from './pages/SyncPage';
 import TeamPage from './pages/TeamPage';
 import { EmptyState } from './components/ui';
+import { useI18n } from './lib/i18n';
 
 export default function App() {
+  const { t } = useI18n();
   return (
     <Routes>
       <Route element={<Layout />}>
@@ -17,9 +19,9 @@ export default function App() {
         <Route
           path="*"
           element={
-            <EmptyState title="Page introuvable">
+            <EmptyState title={t('notFound.title')}>
               <Link to="/" className="text-blue-700 hover:underline">
-                Retour aux applications
+                {t('notFound.back')}
               </Link>
             </EmptyState>
           }

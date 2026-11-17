@@ -36,8 +36,8 @@ describe("reconnaître une page d'architecture", () => {
   test('environnement de la page', () => {
     assert.equal(pageEnvironment('Serveurs de production'), 'prod');
     assert.equal(pageEnvironment('Serveurs PRD'), 'prod');
-    assert.equal(pageEnvironment('Architecture recette'), 'hors-prod');
-    assert.equal(pageEnvironment('Architecture préproduction'), 'hors-prod');
+    assert.equal(pageEnvironment('Architecture recette'), 'nonprod');
+    assert.equal(pageEnvironment('Architecture préproduction'), 'nonprod');
     assert.equal(pageEnvironment('Architecture'), null);
   });
 });
@@ -84,10 +84,12 @@ describe("contrôle d'une page d'architecture", () => {
     assert.deepEqual(a.confirmed.sort(), ['ohbprd01', 'ohbprd02']);
     assert.deepEqual(a.missing, []);
     assert.equal(a.completeness, 1);
-    assert.deepEqual(a.otherApp, ['altoprd01 (Alto)']);
+    assert.deepEqual(a.otherApp, [{ server: 'altoprd01', applications: ['Alto'] }]);
     assert.ok(a.unknown.includes('vieuxsrv07'));
     assert.ok(a.unknown.includes('10.9.9.9'));
-    assert.deepEqual(a.ipMismatch, ['ohbprd02 : page 10.1.0.99 / inventaire 10.1.0.2']);
+    assert.ok(!a.unknown.includes('10.1.0.99')); // déjà dans les IP différentes
+    assert.deepEqual(a.ipMismatch, [{ server: 'ohbprd02', page: ['10.1.0.99'], inventory: ['10.1.0.2'] }]);
+    assert.deepEqual(a.problems.map((x) => x.code), ['otherApp', 'unknown', 'ipMismatch', 'old']);
     assert.match(a.verdict, /autre application/);
     assert.match(a.verdict, /il y a 7 ans/);
   });
@@ -98,10 +100,10 @@ describe("contrôle d'une page d'architecture", () => {
     assert.equal(a.expected, 3);
     assert.deepEqual(a.missing.sort(), ['ohbprd02', 'ohbrec01']);
     assert.equal(a.completeness, 0.33);
-    assert.equal(a.sections.sauvegarde, true);
-    assert.equal(a.sections.supervision, true);
-    assert.equal(a.sections.flux, true);
-    assert.deepEqual(a.absentSections.sort(), ['bases de données', 'contacts', 'redondance / PRA', 'schéma'].sort());
+    assert.equal(a.sections.backup, true);
+    assert.equal(a.sections.monitoring, true);
+    assert.equal(a.sections.flows, true);
+    assert.deepEqual([...a.absentSections].sort(), ['contacts', 'databases', 'diagram', 'redundancy']);
   });
 
   test('page conforme', () => {
@@ -111,5 +113,6 @@ describe("contrôle d'une page d'architecture", () => {
     ]);
     const a = auditArchitecturePage(repo, m, p, 'application:orderhub', { now: Date.parse('2020-02-01') });
     assert.equal(a.verdict, 'cohérente avec les inventaires');
+    assert.equal(a.ok, true);
   });
 });

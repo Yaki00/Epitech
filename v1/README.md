@@ -64,6 +64,7 @@ npm run fetch:confluence                  # récupère les pages nouvelles ou mo
 npm run fetch:inventory                   # télécharge la marketplace (MARKETPLACE_URL) si pas encore fait aujourd'hui
 node scripts/fetch-inventory.js --force   # retélécharge même si déjà vérifié aujourd'hui
 node scripts/fetch-confluence.js --full   # retélécharge tout (ex. une fois par semaine)
+node scripts/summarize-apps.js            # résumé IA des applications (après sync-confluence --llm)
 npm run sync:inventory                    # toutes les sources CSV de mappings.json
 node scripts/sync-inventory.js apm        # une seule
 npm run sync:confluence                   # sans IA : structure, tableaux, liens, draw.io, mentions
@@ -72,6 +73,7 @@ npm run sync:confluence:llm               # tout, avec IA (incrémental : seules
 ```
 
 Les synchros peuvent tourner pendant que le serveur est lancé : il recharge les données tout seul.
+Elles se lancent aussi depuis la page Synchronisation de l'interface (boutons Confluence, APM, Marketplace, Tout relancer).
 
 ## Format attendu de l'export Confluence
 

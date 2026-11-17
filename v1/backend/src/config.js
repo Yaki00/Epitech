@@ -85,6 +85,9 @@ const config = {
   // rapports lisibles dans Excel (pages par application, orthographes rencontrées)
   reportsDir: path.resolve(ROOT, env('REPORTS_DIR', './data/rapports')),
 
+  // synchros lançables depuis la page Synchronisation de l'interface
+  allowUiSync: bool('ALLOW_UI_SYNC', 'true'),
+
   logLevel: env('LOG_LEVEL', 'info'),
 };
 

@@ -1,5 +1,6 @@
 /** Petits composants d'interface partagés. */
-import { CRITICALITY, normalizeCriticality, initials, SOURCE_LABELS } from '../lib/format';
+import { CRITICALITY, normalizeCriticality, initials, criticalityLabel, sourceLabel } from '../lib/format';
+import { useI18n } from '../lib/i18n';
 import { AlertIcon } from './Icons';
 
 export function Card({ className = '', children, ...rest }) {
@@ -33,11 +34,13 @@ export function StatCard({ value, label, accent = 'none', hint, centered = false
 }
 
 export function CriticalityBadge({ value, size = 'md' }) {
-  const c = CRITICALITY[normalizeCriticality(value)];
+  useI18n(); // se redessine au changement de langue
+  const level = normalizeCriticality(value);
+  const c = CRITICALITY[level];
   return (
     <span className={`inline-flex items-center gap-1.5 rounded-full ${c.soft} ${c.text} ${size === 'sm' ? 'px-2 py-0.5 text-xs' : 'px-3 py-1 text-sm'} font-medium`}>
       <span className={`h-1.5 w-1.5 rounded-full ${c.dot}`} />
-      {c.label}
+      {criticalityLabel(level)}
     </span>
   );
 }
@@ -49,26 +52,28 @@ export function AppAvatar({ name, criticality, size = 'md', solid = false }) {
   return <div className={`flex shrink-0 items-center justify-center rounded-xl font-bold ${sizes[size]} ${color}`}>{initials(name)}</div>;
 }
 
-export function Spinner({ label = 'Chargement…' }) {
+export function Spinner({ label }) {
+  const { t } = useI18n();
   return (
     <div className="flex items-center gap-3 py-10 text-sm text-slate-500">
       <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-blue-600" />
-      {label}
+      {label || t('common.loading')}
     </div>
   );
 }
 
 export function ErrorBox({ error, onRetry }) {
+  const { t } = useI18n();
   return (
     <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
       <AlertIcon className="mt-0.5 shrink-0" width={18} height={18} />
       <div className="flex-1">
-        <div className="font-medium">Impossible de charger les données</div>
+        <div className="font-medium">{t('common.loadError')}</div>
         <div className="text-red-700">{error?.message || String(error)}</div>
       </div>
       {onRetry && (
         <button onClick={onRetry} className="rounded-lg border border-red-300 bg-white px-3 py-1 text-red-700 hover:bg-red-100">
-          Réessayer
+          {t('common.retry')}
         </button>
       )}
     </div>
@@ -86,11 +91,8 @@ export function EmptyState({ title, children }) {
 
 /** Indicateur "source non connectée" : jamais un 0 trompeur. */
 export function NotConnected({ source }) {
-  return (
-    <EmptyState title={`${source} n'est pas encore connecté`}>
-      Les données apparaîtront ici une fois la synchronisation {source} en place.
-    </EmptyState>
-  );
+  const { t } = useI18n();
+  return <EmptyState title={t('common.notConnectedTitle', { source })}>{t('common.notConnectedText', { source })}</EmptyState>;
 }
 
 /** Contrôle segmenté (pilules noires comme la v1). */
@@ -115,10 +117,11 @@ export function Segmented({ options, value, onChange, className = '' }) {
 }
 
 export function SourcePill({ source, confidence }) {
+  useI18n();
   const ai = source === 'llm';
   return (
     <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs ${ai ? 'bg-violet-50 text-violet-700' : 'bg-slate-100 text-slate-600'}`}>
-      {SOURCE_LABELS[source] || source}
+      {sourceLabel(source)}
       {confidence !== undefined && confidence < 1 && <span className="ml-1 opacity-70">{Math.round(confidence * 100)}%</span>}
     </span>
   );

@@ -125,8 +125,9 @@ function listTeams(repo) {
     t.applications.push({ id: a.id, name: a.name, criticality: a.criticality });
   }
   return [...teams.values()]
-    .map((t) => ({ ...t, owners: [...t.owners] }))
-    .sort((a, b) => (a.name === 'Non renseignée') - (b.name === 'Non renseignée') || b.applications.length - a.applications.length);
+    // unassigned : l'interface affiche « Non renseignée » / « Not specified » selon sa langue
+    .map((t) => ({ ...t, owners: [...t.owners], unassigned: t.name === 'Non renseignée' }))
+    .sort((a, b) => a.unassigned - b.unassigned || b.applications.length - a.applications.length);
 }
 
 /** Configuration utile au front (liens externes, sources branchées). */

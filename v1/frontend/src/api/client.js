@@ -1,4 +1,5 @@
 /** Accès à l'API Lyra (proxy Vite /api -> backend :3001). */
+import { t } from '../lib/i18n';
 
 export class ApiError extends Error {
   constructor(message, status) {
@@ -15,7 +16,7 @@ async function request(path, options = {}) {
       ...options,
     });
   } catch {
-    throw new ApiError('Backend injoignable (le serveur est-il lancé sur :3001 ?)', 0);
+    throw new ApiError(t('common.backendUnreachable'), 0);
   }
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new ApiError(body.error || `Erreur ${res.status}`, res.status);
@@ -35,5 +36,7 @@ export const api = {
   impact: (id, { depth = 4, minConfidence = 0.5 } = {}) => request(`/impact/${enc(id)}?depth=${depth}&minConfidence=${minConfidence}`),
   syncRuns: () => request('/sync/runs?limit=50'),
   syncErrors: (runId) => request(`/sync/runs/${runId}/errors`),
-  ask: (question, history) => request('/ask', { method: 'POST', body: JSON.stringify({ question, history }) }),
+  syncJobs: () => request('/sync/jobs'),
+  startSyncJob: (job) => request('/sync/jobs', { method: 'POST', body: JSON.stringify({ job }) }),
+  ask: (question, history, lang = 'fr') => request('/ask', { method: 'POST', body: JSON.stringify({ question, history, lang }) }),
 };

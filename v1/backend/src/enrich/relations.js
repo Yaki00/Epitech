@@ -155,14 +155,16 @@ function applyRelations(repo, extracted, { sourceRef, docId = null, matcher = nu
   const typeOf = new Map(extracted.entities.map((e) => [e.name.toLowerCase(), e.type]));
   const ensure = (name) => {
     const declared = typeOf.get(name.toLowerCase());
-    if (matcher) {
+    // une base, un serveur, un chemin… déclarés par l'IA ne sont jamais ramenés à une application
+    if (matcher && (!declared || declared === 'application')) {
       const m = matcher.resolveAppName(name);
       if (m) {
         if (m.kind !== 'exact' && m.kind !== 'alias' && counters) counters.renamed = (counters.renamed || 0) + 1;
         return m.app.id;
       }
     }
-    const [known] = repo.resolve(name);
+    // nœud existant du même nom ; une entité déclarée base / serveur… ne se rattache pas à une application homonyme
+    const known = repo.resolve(name).find((n) => !declared || declared === 'application' || declared === 'other' || n.type !== 'application');
     if (known) {
       if (matcher && matcher.ignoreOthers && known.type === 'application' && !known.attrs.perimeter) return null;
       return known.id;

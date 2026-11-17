@@ -1,18 +1,31 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api/client';
 import { ChatIcon, CloseIcon, SendIcon } from './Icons';
+import { useI18n } from '../lib/i18n';
 
-const SUGGESTIONS = ['Que se passe-t-il si srvalto01 redémarre ?', 'Sur quels serveurs tourne ALTO ?', 'Quelles applis utilisent la base ORA_ALTO ?'];
-
-const TOOL_LABELS = { search_entities: 'recherche', impact_analysis: "analyse d'impact", dependencies: 'dépendances' };
+/** Une vraie application et un vrai serveur du graphe, pour les questions d'exemple. */
+async function loadExamples() {
+  const [apps, servers] = await Promise.all([api.applications(), api.servers('')]);
+  return { app: (apps.find((a) => a.inPerimeter && a.servers) || apps[0])?.name || null, server: servers[0]?.name || null };
+}
 
 /** Bulle de chat flottante (bas droite) reliée à POST /api/ask. */
 export default function ChatWidget() {
+  const { t, lang } = useI18n();
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
+  const [examples, setExamples] = useState(null);
   const endRef = useRef(null);
+
+  useEffect(() => {
+    if (open && !examples) loadExamples().then(setExamples, () => setExamples({ app: null, server: null }));
+  }, [open, examples]);
+  // questions écrites dans la langue de l'interface
+  const server = examples?.server || t('chat.q.genericServer');
+  const app = examples?.app || t('chat.q.genericApp');
+  const suggestions = examples ? [t('chat.q.restart', { server }), t('chat.q.servers', { app }), t('chat.q.depends', { app })] : [];
 
   useEffect(() => {
     // bloc explicite : les navigateurs récents renvoient une Promise depuis scrollIntoView
@@ -27,10 +40,10 @@ export default function ChatWidget() {
     setInput('');
     setBusy(true);
     try {
-      const r = await api.ask(question, history);
+      const r = await api.ask(question, history, lang);
       setMessages((m) => [...m, { role: 'assistant', content: r.answer, tools: r.toolTrace }]);
     } catch (err) {
-      setMessages((m) => [...m, { role: 'assistant', content: err.message, error: true }]);
+      setMessages((m) => [...m, { role: 'assistant', content: err.status === 502 ? `${t('chat.unavailable')}${t('common.colon')} ${err.message}` : err.message, error: true }]);
     } finally {
       setBusy(false);
     }
@@ -42,10 +55,10 @@ export default function ChatWidget() {
         <div className="fixed bottom-28 right-8 z-40 flex h-[560px] w-[420px] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
           <div className="flex items-center justify-between border-b border-slate-200 bg-blue-600 px-5 py-4 text-white">
             <div>
-              <div className="font-semibold">Assistant Lyra</div>
-              <div className="text-xs text-blue-100">Réponses basées sur le graphe d'infrastructure</div>
+              <div className="font-semibold">{t('chat.title')}</div>
+              <div className="text-xs text-blue-100">{t('chat.subtitle')}</div>
             </div>
-            <button onClick={() => setOpen(false)} aria-label="Fermer" className="rounded-lg p-1 hover:bg-blue-500">
+            <button onClick={() => setOpen(false)} aria-label={t('chat.close')} className="rounded-lg p-1 hover:bg-blue-500">
               <CloseIcon />
             </button>
           </div>
@@ -53,8 +66,8 @@ export default function ChatWidget() {
           <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
             {!messages.length && (
               <div className="space-y-2">
-                <div className="text-sm text-slate-500">Posez une question sur une application, un serveur ou une IP :</div>
-                {SUGGESTIONS.map((s) => (
+                <div className="text-sm text-slate-500">{t('chat.intro')}</div>
+                {suggestions.map((s) => (
                   <button key={s} onClick={() => send(s)} className="block w-full rounded-xl border border-slate-200 px-3 py-2 text-left text-sm text-slate-700 hover:border-blue-300 hover:bg-blue-50">
                     {s}
                   </button>
@@ -71,7 +84,7 @@ export default function ChatWidget() {
                   {m.content}
                   {m.tools?.length > 0 && (
                     <div className="mt-2 border-t border-slate-200 pt-1.5 text-xs text-slate-500">
-                      Sources : {m.tools.map((t) => TOOL_LABELS[t.tool] || t.tool).join(', ')}
+                      {t('chat.sources')}{t('common.colon')} {m.tools.map((x) => t(`tool.${x.tool}`)).join(', ')}
                     </div>
                   )}
                 </div>
@@ -97,10 +110,10 @@ export default function ChatWidget() {
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Votre question…"
+              placeholder={t('chat.placeholder')}
               className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
             />
-            <button type="submit" disabled={busy || !input.trim()} aria-label="Envoyer" className="rounded-xl bg-blue-600 p-2.5 text-white hover:bg-blue-700 disabled:opacity-40">
+            <button type="submit" disabled={busy || !input.trim()} aria-label={t('chat.send')} className="rounded-xl bg-blue-600 p-2.5 text-white hover:bg-blue-700 disabled:opacity-40">
               <SendIcon width={18} height={18} />
             </button>
           </form>
@@ -109,7 +122,7 @@ export default function ChatWidget() {
 
       <button
         onClick={() => setOpen((o) => !o)}
-        aria-label="Ouvrir l'assistant"
+        aria-label={t('chat.open')}
         className="fixed bottom-8 right-8 z-40 flex h-16 w-16 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg shadow-blue-600/30 transition hover:bg-blue-700"
       >
         {open ? <CloseIcon width={26} height={26} /> : <ChatIcon width={26} height={26} />}

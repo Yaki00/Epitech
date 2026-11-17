@@ -61,7 +61,9 @@ le backend le sert (`FRONTEND_DIST`). Le poste Node 16 n'exécute jamais Vite.
 
 Commande unique : `npm run sync:all` = `fetch-confluence.js` (pages nouvelles ou modifiées) → `fetch-inventory.js`
 (exports CSV à lien direct, une fois par jour) → `sync-inventory.js` (APM, marketplace) → `sync-confluence.js --llm`
-(pages nouvelles ou modifiées). Options `--no-fetch`, `--no-download`, `--no-llm`, `--no-inventory`. Code de sortie non nul si une étape échoue (prévu pour un timer systemd ou le Planificateur de tâches).
+(pages nouvelles ou modifiées) → `summarize-apps.js` (résumés IA dont les entrées ont changé). Options `--no-fetch`,
+`--no-download`, `--no-llm`, `--no-inventory`. Les mêmes tâches se lancent depuis la page Synchronisation
+(`src/api/jobs.js`, routes `GET/POST /api/sync/jobs`, une à la fois, `ALLOW_UI_SYNC=false` pour les retirer). Code de sortie non nul si une étape échoue (prévu pour un timer systemd ou le Planificateur de tâches).
 Premier passage : tester avec `fetch-confluence.js --limit 20` puis `sync-confluence.js --llm --limit 20`.
 
 ## Récupération Confluence (`scripts/fetch-confluence.js`, `src/fetch/`)
@@ -88,6 +90,17 @@ remplacement atomique seulement si le contenu change ; une page HTML, un .xlsx o
 l'ancien fichier est gardé. État dans `<fichier>.telechargement.json` (jamais l'URL). Redirections suivies.
 Fichier écrit : `file`, ou `downloadTo` si `file` contient `*`. Fichier le plus récent d'un motif : date du nom,
 sinon jour de modification.
+
+## Résumé IA des applications (`scripts/summarize-apps.js`, `src/enrich/summary.js`)
+
+Pour chaque application du périmètre : ses pages (`documented_in`, architecture d'abord, puis pertinence et date,
+14 000 caractères au plus, texte gardé dans `document.attrs.excerpt` par la synchro Confluence) + les faits sûrs du
+graphe (serveurs, environnements, OS, bases, échanges). Modèle `LLM_MODEL_SUMMARY`. Consignes : rien d'inventé,
+info d'une page de plus de 2 ans signalée, contradictions dites. Résultat dans `attrs.summary`, `summarySources`,
+`summaryAt` ; refait seulement si l'empreinte des entrées (`summaryHash`) change (`--force` pour tout refaire).
+
+Règles de rattachement versionnées (`RULES_VERSION` dans `perimeter.js`) : l'incrémenter relance l'analyse par
+règles de toutes les pages au passage suivant, sans relancer l'IA.
 
 ## Source Confluence (export local, lecture seule)
 
@@ -195,6 +208,14 @@ React 18 + Vite 6 + Tailwind 3 + react-router 6 + cytoscape/cytoscape-dagre. Por
 `src/components/` (Layout, ui, GraphView, ChatWidget, Icons SVG maison), `src/pages/` (une page par écran).
 Règles : pas de 0 trompeur pour une source non branchée (afficher « non connecté ») ; classes Tailwind écrites en entier.
 
+**Bilingue français / anglais** (`src/lib/i18n.jsx`, bouton FR | EN en bas du menu, choix gardé dans le navigateur) :
+aucun texte affiché n'est écrit en dur dans un composant ; tout passe par `t('cle')` (hook `useI18n()`), avec les deux
+dictionnaires dans le même fichier (un test vérifie qu'ils ont les mêmes clés). Le serveur renvoie des données
+structurées que l'interface traduit : contrôle d'architecture (`problems: [{code, n}]`, rubriques par identifiant),
+équipe `unassigned`, tâches de synchro par identifiant. Le résumé IA est rédigé en français et en anglais
+(`summary`, `summaryEn`) ; le chat reçoit `lang` et répond dans la langue de l'interface. Les journaux des
+scripts et les rapports CSV restent en français.
+
 ## Conventions (à respecter)
 
 1. **Lien `src -> dst` = « src dépend de dst »** (app `runs_on` serveur, app `uses_db` base, app `calls` app).
@@ -256,6 +277,7 @@ Règles : pas de 0 trompeur pour une source non branchée (afficher « non conne
 | `GET /api/impact/:id?depth=&minConfidence=` | simulation d'impact |
 | `GET /api/dependencies/:id` | dépendances |
 | `GET /api/sync/runs`, `/api/sync/runs/:id/errors` | page Synchronisation |
+| `GET /api/sync/jobs`, `POST /api/sync/jobs` `{job}` | boutons de lancement (confluence, apm, marketplace, all) et journal en direct |
 | `POST /api/ask` `{question, history}` | bulle de chat (réponse : `answer`, `toolTrace`, `toolsMode`) |
 
 Tickets / Changements / PRs : afficher « non connecté » tant que la source n'existe pas (jamais 0 trompeur).

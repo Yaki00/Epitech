@@ -27,7 +27,7 @@ const { ingestConfluencePage, documentId } = require('../src/ingest/confluence')
 const { readExportPages, exportHash, analyseEntry, loadDiagrams } = require('../src/ingest/confluenceExport');
 const { extractRelations, applyRelations, triagePage, chunkText } = require('../src/enrich/relations');
 const { loadPerimeter, createMatcher, ensurePerimeterNodes } = require('../src/perimeter/perimeter');
-const { architectureScore, auditArchitecturePage, DEFAULT_KEYWORDS } = require('../src/perimeter/architecture');
+const { architectureScore, auditArchitecturePage, DEFAULT_KEYWORDS, SECTION_LABELS_FR } = require('../src/perimeter/architecture');
 const { writeCsvReport } = require('../src/lib/report');
 const { createLlmClient } = require('../src/lib/llmClient');
 const { createLogger } = require('../src/lib/logger');
@@ -66,6 +66,7 @@ async function enrichPage({ llm, repo, page, p, nodeId, related, matcher, scope,
     for (const f of found) {
       const m = matcher.resolveAppName(f.name);
       if (!m) continue;
+      repo.upsertNode({ type: 'document', key: documentId(p.id), name: page.title, source: 'confluence', attrs: { excerpt: pageExcerpt(page), updatedAt: p.updatedAt || null } });
       const confidence = +(0.6 * f.confidence + 0.1).toFixed(2); // tri IA : 0.46 à 0.7, sous les règles
       repo.addEdge({ src: m.app.id, dst: nodeId, type: 'documented_in', source: 'llm', sourceRef: p.id, confidence, attrs: { evidence: f.evidence } });
       if (!pageApps.includes(m.app.name)) pageApps.push(m.app.name);
@@ -142,9 +143,15 @@ function writeArchitectureReports(repo, matcher) {
       for (const n of a.confirmed) documented.add(n.toLowerCase());
       if (a.completeness !== null && (best === null || a.completeness > best)) best = a.completeness;
       rows.push([
-        app.name, doc.name, doc.attrs.url || '', doc.attrs.updatedAt || '', a.environment || '',
+        app.name, doc.name, doc.attrs.url || '', doc.attrs.updatedAt || '', a.environment === 'prod' ? 'production' : a.environment === 'nonprod' ? 'hors production' : '',
         a.completeness === null ? '' : `${Math.round(a.completeness * 100)} %`,
-        a.confirmed, a.missing, a.otherApp, a.unknown, a.ipMismatch, a.absentSections, a.verdict,
+        a.confirmed,
+        a.missing,
+        a.otherApp.map((o) => `${o.server} (${o.applications.join(', ')})`),
+        a.unknown,
+        a.ipMismatch.map((m) => `${m.server} : page ${m.page.join(', ')} / inventaire ${m.inventory.join(', ')}`),
+        a.absentSections.map((k) => SECTION_LABELS_FR[k] || k),
+        a.verdict,
       ]);
     }
     const never = [...app.servers].map((id) => repo.getNode(id)?.name).filter((n) => n && !documented.has(n.toLowerCase()));
@@ -159,6 +166,15 @@ function writeArchitectureReports(repo, matcher) {
     ),
     writeCsvReport(config.reportsDir, 'architecture-applications', ['application', "pages d'architecture", 'meilleure complétude', 'serveurs (inventaires)', "serveurs documentés dans aucune page d'architecture", 'remarque'], summary),
   ];
+}
+
+/** Texte d'une page pour le résumé IA : titres et paragraphes, 4000 caractères au plus. */
+function pageExcerpt(page) {
+  return page.sections
+    .map((s) => [s.heading, s.text].filter(Boolean).join('\n'))
+    .join('\n\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .slice(0, 4000);
 }
 
 /** Serveurs des applications de la page qui sont cités dans la page (indice pour l'IA). */
@@ -212,11 +228,13 @@ async function main() {
       const docId = `confluence:${p.id}`;
       const hash = exportHash(entry);
       const prev = repo.getDocument(docId);
+      // contenu et liste des applications inchangés : l'IA n'a pas à repasser
       const unchanged = !opt.force && prev && prev.content_hash === hash && prev.status !== 'error' && (prev.attrs?.perimeterHash || null) === (matcher ? matcher.hash : null);
-      // inventaires réimportés (serveurs des applications changés) : on refait les règles et les contrôles, pas l'IA
-      const serversChanged = Boolean(matcher) && (prev?.attrs?.serversHash || null) !== matcher.serversHash;
+      // inventaires réimportés ou règles de rattachement modifiées : on refait les règles et les contrôles, pas l'IA
+      const rulesChanged =
+        Boolean(matcher) && ((prev?.attrs?.serversHash || null) !== matcher.serversHash || (prev?.attrs?.rulesVersion || null) !== matcher.rulesVersion);
       const needLlm = opt.llm && !(unchanged && prev.status === 'enriched');
-      if (unchanged && !serversChanged && !needLlm) {
+      if (unchanged && !rulesChanged && !needLlm) {
         stats.skipped++;
         continue;
       }
@@ -228,9 +246,13 @@ async function main() {
         const r = ingestConfluencePage(repo, page, { drawioResults: diagrams.results, url: p.url, attrs: docAttrs });
         const nodeId = `document:${documentId(p.id)}`;
         // applications du périmètre reconnues par les règles (sans IA)
-        const related = matcher ? matcher.scanPage({ ...page, ancestors: p.ancestors || page.ancestors || [] }).filter((x) => x.score >= 0.6) : [];
+        // applications du périmètre citées (envoi à l'IA dès 0.5 : une simple mention peut porter une relation) ;
+        // la page n'est rangée dans la documentation d'une application que si elle en parle vraiment :
+        // titre, page parente, serveur de l'application, ou nom répété dans le texte (score >= 0.8)
+        const related = matcher ? matcher.scanPage({ ...page, ancestors: p.ancestors || page.ancestors || [] }).filter((x) => x.score >= 0.5) : [];
+        const about = related.filter((x) => x.score >= 0.6 && (x.score >= 0.8 || x.reasons.some((r) => !r.startsWith('texte'))));
         if (matcher) {
-          docBase.attrs = { perimeterHash: matcher.hash, serversHash: matcher.serversHash, perimeterApps: related.map((x) => ({ id: x.id, score: x.score })) };
+          docBase.attrs = { perimeterHash: matcher.hash, serversHash: matcher.serversHash, rulesVersion: matcher.rulesVersion, perimeterApps: about.map((x) => ({ id: x.id, score: x.score })) };
           // page d'architecture : contrôlée par rapport aux inventaires pour chaque application concernée
           const archi = architectureScore(page, { keywords: perimeter.architectureKeywords || DEFAULT_KEYWORDS, ancestors: p.ancestors || [] });
           const isArchi = archi.score >= 0.6;
@@ -238,7 +260,9 @@ async function main() {
             stats.architecturePages++;
             repo.upsertNode({ type: 'document', key: documentId(p.id), name: page.title, source: 'confluence', attrs: { pageKind: 'architecture', architecture: archi } });
           }
-          for (const x of related) {
+          // texte gardé pour le résumé IA des applications (seulement les pages du périmètre)
+          if (about.length) repo.upsertNode({ type: 'document', key: documentId(p.id), name: page.title, source: 'confluence', attrs: { excerpt: pageExcerpt(page), updatedAt: p.updatedAt || null } });
+          for (const x of about) {
             const audit = isArchi ? auditArchitecturePage(repo, matcher, { ...page, updatedAt: p.updatedAt || page.updatedAt }, x.id) : undefined;
             repo.addEdge({ src: x.id, dst: nodeId, type: 'documented_in', source: 'confluence', sourceRef: p.id, confidence: x.score, attrs: { reasons: x.reasons, spellings: x.spellings, audit } });
           }

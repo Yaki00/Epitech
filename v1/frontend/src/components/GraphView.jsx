@@ -43,7 +43,7 @@ const STYLE = [
       'target-arrow-color': '#cbd5e1',
       'target-arrow-shape': 'triangle',
       'curve-style': 'bezier',
-      label: 'data(type)',
+      label: 'data(label)',
       'font-size': 9,
       color: '#64748b',
       'text-background-color': '#f8fafc',
@@ -64,8 +64,11 @@ const STYLE = [
  * @param rootId    nœud mis en avant
  * @param highlight { failing: id, impacted: [ids] } pour la simulation de panne
  * @param onNodeClick (data) => void
+ * @param edgeLabel   (type) => libellé affiché sur un lien
  */
-export default function GraphView({ elements, rootId, highlight, onNodeClick, height = 520 }) {
+export default function GraphView({ elements, rootId, highlight, onNodeClick, height = 520, edgeLabel = (x) => x }) {
+  // libellé des liens dans la langue de l'interface (runs_on -> "tourne sur" / "runs on")
+  const edgeText = edgeLabel('runs_on') + edgeLabel('calls');
   const ref = useRef(null);
   const cyRef = useRef(null);
 
@@ -73,7 +76,7 @@ export default function GraphView({ elements, rootId, highlight, onNodeClick, he
     if (!ref.current || !elements) return undefined;
     const cy = cytoscape({
       container: ref.current,
-      elements: [...elements.nodes, ...elements.edges],
+      elements: [...elements.nodes, ...elements.edges.map((e) => ({ ...e, data: { ...e.data, label: edgeLabel(e.data.type) } }))],
       style: STYLE,
       layout: { name: 'dagre', rankDir: 'LR', nodeSep: 40, rankSep: 110, padding: 30 },
       wheelSensitivity: 0.2,
@@ -85,7 +88,7 @@ export default function GraphView({ elements, rootId, highlight, onNodeClick, he
     cyRef.current = cy;
     return () => cy.destroy();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [elements, rootId]);
+  }, [elements, rootId, edgeText]);
 
   useEffect(() => {
     const cy = cyRef.current;
@@ -99,7 +102,7 @@ export default function GraphView({ elements, rootId, highlight, onNodeClick, he
       else n.addClass('faded');
     });
     cy.edges().forEach((e) => (hit.has(e.source().id()) && hit.has(e.target().id()) ? e.addClass('impacted') : e.addClass('faded')));
-  }, [highlight, elements]);
+  }, [highlight, elements, edgeText]); // le graphe est recréé au changement de langue : on remet la simulation
 
   return <div ref={ref} style={{ height }} className="w-full rounded-xl bg-slate-50" />;
 }

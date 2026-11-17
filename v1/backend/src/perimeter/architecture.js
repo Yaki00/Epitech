@@ -19,16 +19,42 @@ const DEFAULT_KEYWORDS = [
   'environnement', 'environnements', 'socle', 'machines', 'vm',
 ];
 
-// rubriques attendues dans une page d'architecture : présentes si un de ces mots apparaît (titres ou texte)
+// rubriques attendues dans une page d'architecture : présentes si un de ces mots apparaît (titres ou texte).
+// Les clés sont des identifiants : l'interface et les rapports les traduisent (SECTION_LABELS_FR pour les rapports).
 const SECTIONS = {
-  serveurs: ['serveur', 'serveurs', 'server', 'servers', 'hostname', 'vm', 'machine'],
-  'bases de données': ['base', 'bases', 'bdd', 'sgbd', 'base de donnees', 'database', 'oracle', 'sql server', 'postgres', 'mysql', 'mongodb', 'db'],
-  flux: ['flux', 'flow', 'interface', 'interfaces', 'echange', 'echanges', 'api', 'mq', 'sftp', 'port'],
-  sauvegarde: ['sauvegarde', 'sauvegardes', 'backup', 'backups', 'restauration', 'restore'],
-  supervision: ['supervision', 'monitoring', 'naemon', 'nagios', 'alerte', 'alertes'],
-  'redondance / PRA': ['redondance', 'cluster', 'actif passif', 'active passive', 'failover', 'bascule', 'pra', 'pca', 'drp', 'haute disponibilite', 'load balancer', 'f5', 'vip'],
+  servers: ['serveur', 'serveurs', 'server', 'servers', 'hostname', 'vm', 'machine'],
+  databases: ['base', 'bases', 'bdd', 'sgbd', 'base de donnees', 'database', 'oracle', 'sql server', 'postgres', 'mysql', 'mongodb', 'db'],
+  flows: ['flux', 'flow', 'interface', 'interfaces', 'echange', 'echanges', 'api', 'mq', 'sftp', 'port'],
+  backup: ['sauvegarde', 'sauvegardes', 'backup', 'backups', 'restauration', 'restore'],
+  monitoring: ['supervision', 'monitoring', 'naemon', 'nagios', 'alerte', 'alertes'],
+  redundancy: ['redondance', 'cluster', 'actif passif', 'active passive', 'failover', 'bascule', 'pra', 'pca', 'drp', 'haute disponibilite', 'load balancer', 'f5', 'vip'],
   contacts: ['contact', 'contacts', 'equipe', 'support', 'responsable', 'owner', 'astreinte'],
 };
+
+const SECTION_LABELS_FR = {
+  servers: 'serveurs',
+  databases: 'bases de données',
+  flows: 'flux',
+  backup: 'sauvegarde',
+  monitoring: 'supervision',
+  redundancy: 'redondance / PRA',
+  contacts: 'contacts',
+  diagram: 'schéma',
+};
+
+/** Problèmes d'un contrôle en français (rapports CSV, journaux). L'interface les écrit elle-même dans sa langue. */
+function verdictFr(problems) {
+  if (!problems.length) return 'cohérente avec les inventaires';
+  const text = {
+    noReference: () => 'aucun serveur de référence (import APM / marketplace ?)',
+    missing: (n) => `${n} serveur(s) manquant(s)`,
+    otherApp: (n) => `${n} serveur(s) d'une autre application`,
+    unknown: (n) => `${n} serveur(s) ou IP inconnu(s)`,
+    ipMismatch: (n) => `${n} IP différente(s)`,
+    old: (n) => `page modifiée il y a ${n} ans`,
+  };
+  return problems.map((p) => text[p.code](p.n)).join(' ; ');
+}
 
 // en-têtes de colonnes (mots entiers) : pas "nom" ni "adresse", trop fréquents dans les tableaux de contacts
 const HOST_HEADERS = ['serveur', 'serveurs', 'server', 'servers', 'hostname', 'host', 'hote', 'machine', 'vm', 'fqdn'];
@@ -76,15 +102,15 @@ function architectureScore(page, { keywords = DEFAULT_KEYWORDS, ancestors = [] }
 /** Environnement visé par la page d'après son titre ("Serveurs de production" -> prod). */
 function pageEnvironment(title) {
   const t = normalize(title);
-  if (/\b(preprod|pre prod|preproduction|pre production|recette|uat|qualif|homologation)\b/.test(t)) return 'hors-prod';
-  if (/\b(dev|developpement|test|tests)\b/.test(t)) return 'hors-prod';
+  if (/\b(preprod|pre prod|preproduction|pre production|recette|uat|qualif|homologation)\b/.test(t)) return 'nonprod';
+  if (/\b(dev|developpement|test|tests)\b/.test(t)) return 'nonprod';
   if (/\b(prod|production|prd)\b/.test(t)) return 'prod';
   return null;
 }
 const serverEnv = (s) => {
   const e = normalize(s?.attrs?.environment || '');
   if (!e) return null;
-  return /\b(prod|production|prd|p)\b/.test(e) && !/pre/.test(e) ? 'prod' : 'hors-prod';
+  return /\b(prod|production|prd|p)\b/.test(e) && !/pre/.test(e) ? 'prod' : 'nonprod';
 };
 
 const ipsOf = (node) =>
@@ -129,10 +155,7 @@ function auditArchitecturePage(repo, matcher, page, appId, { now = Date.now() } 
 
   const confirmed = [...cited].filter((id) => app.servers.has(id));
   const missing = expected.filter((s) => !cited.has(s.id)).map((s) => s.name);
-  const otherApp = [...cited].filter((id) => !app.servers.has(id)).map((id) => {
-    const owners = matcher.apps.filter((a) => a.servers.has(id)).map((a) => a.name);
-    return `${name(id)} (${owners.join(', ')})`;
-  });
+  const otherApp = [...cited].filter((id) => !app.servers.has(id)).map((id) => ({ server: name(id), applications: matcher.apps.filter((a) => a.servers.has(id)).map((a) => a.name) }));
 
   // hôtes du texte ou des tableaux qui ne correspondent à aucun serveur connu
   const unknown = new Set();
@@ -140,34 +163,36 @@ function auditArchitecturePage(repo, matcher, page, appId, { now = Date.now() } 
     if (isIPv4(h)) continue;
     if (!repo.resolve(h).some((n) => n.type === 'server')) unknown.add(canonicalHost(h) || h);
   }
-  const unknownIps = (page.entities?.ips || []).filter((ip) => !repo.resolve(ip).some((n) => n.type === 'server'));
-
   const ipMismatch = [];
+  const wrongIps = new Set();
   for (const c of ipChecks) {
     const [server] = repo.resolve(c.host).filter((n) => n.type === 'server');
     const known = ipsOf(server && repo.getNode(server.id));
     if (!server || !known.length || !c.ips.length) continue;
     const wrong = c.ips.filter((ip) => !known.includes(ip));
-    if (wrong.length) ipMismatch.push(`${server.name} : page ${wrong.join(', ')} / inventaire ${known.join(', ')}`);
+    for (const ip of wrong) wrongIps.add(ip);
+    if (wrong.length) ipMismatch.push({ server: server.name, page: wrong, inventory: known });
   }
+  // une IP déjà signalée comme différente pour un serveur connu n'est pas comptée une 2e fois comme inconnue
+  const unknownIps = (page.entities?.ips || []).filter((ip) => !wrongIps.has(ip) && !repo.resolve(ip).some((n) => n.type === 'server'));
 
   const all = normalize(text);
   const sections = Object.fromEntries(Object.entries(SECTIONS).map(([k, words]) => [k, words.some((w) => hasWord(all, w))]));
-  if ((page.diagrams || []).length) sections['schéma'] = true;
-  else sections['schéma'] = false;
+  sections.diagram = (page.diagrams || []).length > 0;
 
   const updated = page.updatedAt ? new Date(page.updatedAt).getTime() : NaN;
   const ageDays = Number.isFinite(updated) ? Math.round((now - updated) / 86400000) : null;
 
   const completeness = expected.length ? +(confirmed.filter((id) => expectedIds.has(id)).length / expected.length).toFixed(2) : null;
+  // problèmes sous forme de codes : l'interface les affiche en français ou en anglais
   const problems = [];
-  if (!expected.length) problems.push("aucun serveur de référence (import APM / marketplace ?)");
-  if (missing.length) problems.push(`${missing.length} serveur(s) manquant(s)`);
-  if (otherApp.length) problems.push(`${otherApp.length} serveur(s) d'une autre application`);
-  if (unknown.size || unknownIps.length) problems.push(`${unknown.size + unknownIps.length} serveur(s) ou IP inconnu(s)`);
-  if (ipMismatch.length) problems.push(`${ipMismatch.length} IP différente(s)`);
+  if (!expected.length) problems.push({ code: 'noReference' });
+  if (missing.length) problems.push({ code: 'missing', n: missing.length });
+  if (otherApp.length) problems.push({ code: 'otherApp', n: otherApp.length });
+  if (unknown.size || unknownIps.length) problems.push({ code: 'unknown', n: unknown.size + unknownIps.length });
+  if (ipMismatch.length) problems.push({ code: 'ipMismatch', n: ipMismatch.length });
   const absent = Object.entries(sections).filter(([, ok]) => !ok).map(([k]) => k);
-  if (ageDays !== null && ageDays > 730) problems.push(`page modifiée il y a ${Math.round(ageDays / 365)} ans`);
+  if (ageDays !== null && ageDays > 730) problems.push({ code: 'old', n: Math.round(ageDays / 365) });
 
   return {
     environment: env,
@@ -181,8 +206,10 @@ function auditArchitecturePage(repo, matcher, page, appId, { now = Date.now() } 
     sections,
     absentSections: absent,
     ageDays,
-    verdict: problems.length ? problems.join(' ; ') : 'cohérente avec les inventaires',
+    problems,
+    ok: problems.length === 0,
+    verdict: verdictFr(problems),
   };
 }
 
-module.exports = { architectureScore, auditArchitecturePage, pageEnvironment, DEFAULT_KEYWORDS, SECTIONS };
+module.exports = { architectureScore, auditArchitecturePage, pageEnvironment, verdictFr, DEFAULT_KEYWORDS, SECTIONS, SECTION_LABELS_FR };

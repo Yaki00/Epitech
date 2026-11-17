@@ -85,6 +85,16 @@ describe('recherche dans un texte', () => {
   test('le début du nom complet ne compte pas comme nom incomplet', () => {
     assert.deepEqual(kinds('La Gestion Commerciale Entreprises tourne la nuit.')['application:gestion-commerciale-entreprises'], ['exact']);
   });
+  test('un seul mot du nom ("Gestion", "Batch") ne suffit pas', () => {
+    assert.deepEqual(kinds('Gestion des incidents du soir'), {});
+    const m2 = createMatcher(loadPerimeter(perimeterFile({ applications: ['Batch Comptable'] })));
+    assert.equal(m2.scanText('Batch de nuit des créances').size, 0);
+    assert.equal(m2.scanText('Le Batch Comptable démarre').size, 1);
+  });
+  test('un identifiant avec _ ne contient pas le sigle (ORA_ORH n\'est pas OrderHub)', () => {
+    assert.deepEqual(kinds('Base ORA_ORH et dossier srv_orh_01'), {});
+    assert.equal(m.resolveAppName('ORA_ORH'), null);
+  });
   test('mots courants et sigles en minuscules ignorés', () => {
     assert.deepEqual(kinds('la gestion des orh et des alternatives, gce en minuscules'), {});
   });
@@ -194,6 +204,13 @@ describe('IA avec périmètre', () => {
     assert.deepEqual(repo.edgesFrom('application:orderhub').map((e) => e.dst), ['server:srvorh09']);
     assert.equal(repo.edgesFrom('application:billing-engine')[0].confidence, 0.4);
     assert.ok(!repo.getNode('application:inconnue'));
+  });
+
+  test('une base dont le nom ressemble à un sigle du périmètre reste une base', () => {
+    const counters = { dropped: 0, renamed: 0 };
+    const extracted = { entities: [{ name: 'OrderHub', type: 'application' }, { name: 'ORH', type: 'database' }], relations: [{ from: 'OrderHub', to: 'ORH', type: 'uses_db', confidence: 1 }] };
+    assert.equal(applyRelations(repo, extracted, { sourceRef: 'p', matcher: m, counters }), 1);
+    assert.equal(repo.edgesFrom('application:orderhub')[0].dst, 'database:orh');
   });
 
   test('sans périmètre : comportement d\'origine (application inconnue créée)', () => {

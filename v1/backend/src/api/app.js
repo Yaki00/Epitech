@@ -10,7 +10,11 @@ const views = require('./views');
 const path = require('path');
 const fs = require('fs');
 
-function createApp({ repo, llm, logger, frontendDist, toolsMode = 'native' }) {
+/**
+ * @param {object} deps { repo, llm, logger, frontendDist, toolsMode, jobs }
+ *   jobs : lanceur de synchros (createJobRunner) ; absent = boutons de synchro désactivés
+ */
+function createApp({ repo, llm, logger, frontendDist, toolsMode = 'native', jobs = null }) {
   const app = express();
   app.use(express.json({ limit: '1mb' }));
   app.use((req, res, next) => {
@@ -80,13 +84,23 @@ function createApp({ repo, llm, logger, frontendDist, toolsMode = 'native' }) {
   });
 
   app.get('/api/sync/runs', (req, res) => res.json(repo.lastRuns(intOr(req.query.limit, 20))));
+  // synchros lancées depuis l'interface
+  app.get('/api/sync/jobs', (req, res) => res.json(jobs ? { enabled: true, ...jobs.status() } : { enabled: false, jobs: [], current: null }));
+  app.post('/api/sync/jobs', (req, res) => {
+    if (!jobs) return res.status(403).json({ error: 'Lancement depuis l\'interface désactivé (ALLOW_UI_SYNC=false dans backend/.env)' });
+    try {
+      res.status(202).json({ enabled: true, ...jobs.start(String(req.body?.job || '')) });
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  });
   app.get('/api/sync/runs/:id/errors', (req, res) => res.json(repo.errorsOfRun(intOr(req.params.id, 0))));
 
   app.post('/api/ask', async (req, res) => {
     const question = String(req.body?.question || '').trim();
     if (!question) return res.status(400).json({ error: 'question vide' });
     try {
-      res.json(await ask({ llm, repo, question, history: req.body.history || [], toolsMode }));
+      res.json(await ask({ llm, repo, question, history: req.body.history || [], toolsMode, lang: req.body.lang === 'en' ? 'en' : 'fr' }));
     } catch (err) {
       logger?.error('ask en échec', { erreur: err.message });
       res.status(502).json({ error: `IA indisponible : ${err.message}` });

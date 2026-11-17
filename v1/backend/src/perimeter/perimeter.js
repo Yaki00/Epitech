@@ -46,6 +46,9 @@ function editDistance(a, b, max = 2) {
   return prev[b.length];
 }
 
+// à incrémenter quand les règles de rattachement changent : les pages sont réanalysées au passage suivant
+const RULES_VERSION = 3;
+
 // scores d'une mention selon la façon dont elle a été reconnue
 const SCORE = { exact: 1, alias: 1, colle: 0.95, auid: 0.9, sigle: 0.7, faute: 0.75, partiel: 0.6 };
 const FUZZY_MIN = 5; // pas de recherche de faute sous 5 lettres : trop de faux positifs
@@ -170,7 +173,8 @@ function createMatcher(perimeter, repo = null) {
    * @returns {Map<appId, Array<{kind, score, found}>>}
    */
   function scanText(text) {
-    const tokens = String(text || '').match(/[\p{L}\p{N}]+/gu) || [];
+    // "_" fait partie du mot : ORA_BILL ou srv_bill_01 ne contiennent pas le sigle BILL
+    const tokens = String(text || '').match(/[\p{L}\p{N}_]+/gu) || [];
     const norms = tokens.map((t) => normalize(t));
     const hits = new Map();
     const seen = new Set();
@@ -182,7 +186,6 @@ function createMatcher(perimeter, repo = null) {
       hits.get(app.id).push({ kind, score: SCORE[kind], found });
     };
     const isUpper = (t) => t === t.toUpperCase() && /\p{L}/u.test(t);
-    const isCapitalized = (t) => /^\p{Lu}/u.test(t);
 
     for (let i = 0; i < tokens.length; i++) {
       for (let n = 1; n <= maxWords && i + n <= tokens.length; n++) {
@@ -199,8 +202,9 @@ function createMatcher(perimeter, repo = null) {
               const max = v.compact.length >= 9 ? 2 : 1;
               if (editDistance(gramCompact, v.compact, max) <= max) add(app, 'faute', found);
             } else if (v.words.length >= 2 && n < v.words.length && gramNorm === v.words.slice(0, n).join(' ') && norms[i + n] !== v.words[n]) {
-              // nom incomplet (et pas le début du nom complet) : au moins 2 mots, ou 1 mot écrit avec une majuscule
-              if (n >= 2 || (isCapitalized(tokens[i]) && gramCompact.length >= FUZZY_MIN)) add(app, 'partiel', found);
+              // nom incomplet (et pas le début du nom complet) : au moins 2 mots. Un seul mot ("Batch", "Gestion",
+              // "Portail"…) est trop courant : il passe par un alias déclaré ou par le tri IA.
+              if (n >= 2) add(app, 'partiel', found);
             }
           }
           if (n === 1 && app.sigle && norms[i] === app.sigle && isUpper(tokens[i])) add(app, 'sigle', found);
@@ -286,7 +290,7 @@ function createMatcher(perimeter, repo = null) {
   // empreinte des serveurs connus de chaque application : change à chaque réimport d'inventaire qui modifie le périmètre
   const serversHash = sha256(JSON.stringify(apps.map((a) => [a.id, [...a.servers].sort()]))).slice(0, 12);
 
-  return { apps, matchName, resolveAppName, scanText, scanPage, serversIn, ignoreOthers: perimeter.ignoreOtherApplications, hash: perimeter.hash, serversHash };
+  return { apps, matchName, resolveAppName, scanText, scanPage, serversIn, ignoreOthers: perimeter.ignoreOtherApplications, hash: perimeter.hash, serversHash, rulesVersion: RULES_VERSION };
 }
 
 /**

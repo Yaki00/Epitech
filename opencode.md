@@ -70,7 +70,7 @@ Toutes les commandes se lancent depuis `v1/`, sauf indication contraire.
 5. **Export APM** : le fichier CSV fourni par l'utilisateur va dans `backend/data/raw/apm/`.
    Vérifier que **la ligne 1 contient les en-têtes** (sinon le signaler, ne pas modifier le fichier).
 6. **Contrôle** : `npm run doctor`. Objectif : `--- aucune erreur ---`. Les `WARN` sont à lister dans le rapport.
-7. **Tests** : `npm test`. Tous les tests doivent passer (135 ou plus). Aucun ne nécessite le réseau.
+7. **Tests** : `npm test`. Tous les tests doivent passer (148 ou plus). Aucun ne nécessite le réseau.
 8. **Essai sur 20 pages** (puis s'arrêter et montrer le résultat à l'utilisateur) :
    ```
    node backend/scripts/fetch-confluence.js --limit 20
@@ -78,12 +78,17 @@ Toutes les commandes se lancent depuis `v1/`, sauf indication contraire.
    node backend/scripts/sync-inventory.js
    node backend/scripts/sync-confluence.js --limit 20
    node backend/scripts/sync-confluence.js --llm --limit 20
+   node backend/scripts/summarize-apps.js
    ```
    Regarder les rapports dans `backend/data/rapports/` (fichiers CSV) et résumer : pages par application,
-   orthographes trouvées, noms proches non importés, pages d'architecture et leurs problèmes.
+   orthographes trouvées, noms proches non importés, pages d'architecture et leurs problèmes,
+   et les résumés IA affichés sur la fiche des applications (pertinents ? inventés ?).
 9. **Passage complet**, seulement après accord : `npm run sync:all` (le premier passage peut être long).
 10. **Démarrer** : `npm start`, puis ouvrir `http://localhost:3001`. Si `frontend/dist` est absent,
     seule l'API répond : c'est normal, le signaler.
+
+Les mêmes synchros se lancent depuis la page Synchronisation de l'interface ; ne pas en lancer une depuis
+l'interface pendant qu'une autre tourne en ligne de commande (la seconde s'arrêtera sur « Une synchro tourne déjà »).
 
 Les commandes ne refont que ce qui a changé : on peut les relancer sans risque. Si l'une s'arrête sur
 « Une synchro tourne déjà », vérifier qu'aucune autre synchro n'est en cours avant de supprimer le

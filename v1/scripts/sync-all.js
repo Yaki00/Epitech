@@ -5,6 +5,7 @@
  *   1. récupération Confluence (seulement les pages nouvelles ou modifiées) si CONFLUENCE_BASE_URL est rempli
  *   2. téléchargement des exports CSV qui ont un lien (une fois par jour), puis import des inventaires (APM, marketplace)
  *   3. analyse Confluence, avec l'IA (seulement les pages nouvelles ou modifiées)
+ *   4. résumé IA de chaque application (seulement celles dont les pages ou les faits ont changé)
  * Une étape en échec n'empêche pas les suivantes de tourner sur les données déjà là ;
  * le code de sortie est non nul si une étape a échoué (visible par systemd / le Planificateur de tâches).
  *
@@ -22,6 +23,7 @@ const steps = [
   { name: 'téléchargement des exports CSV', script: 'fetch-inventory.js', args: [], skip: args.includes('--no-download') || args.includes('--no-inventory') },
   { name: 'inventaires CSV', script: 'sync-inventory.js', args: [], skip: args.includes('--no-inventory') },
   { name: 'analyse Confluence', script: 'sync-confluence.js', args: args.includes('--no-llm') ? [] : ['--llm'], skip: false },
+  { name: 'résumés des applications (IA)', script: 'summarize-apps.js', args: [], skip: args.includes('--no-llm') },
 ];
 
 const t0 = Date.now();

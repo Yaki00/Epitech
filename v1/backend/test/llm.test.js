@@ -156,3 +156,12 @@ describe('assistant ask sans function calling (LLM_TOOLS_MODE=json)', () => {
     assert.equal(f.calls[1].body.tools, undefined);
   });
 });
+
+describe('langue du chat', () => {
+  const { systemFor } = require('../src/assistant/ask');
+  test('français par défaut, anglais sur demande', () => {
+    assert.match(systemFor('fr'), /Tu réponds en français/);
+    assert.match(systemFor('en'), /Answer in English/);
+    assert.doesNotMatch(systemFor('en'), /Tu réponds en français/);
+  });
+});

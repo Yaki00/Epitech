@@ -40,6 +40,9 @@ const TOOLS = [
   },
 ];
 
+/** Consigne système dans la langue de l'interface (fr par défaut, en sur demande). */
+const systemFor = (lang) => (lang === 'en' ? SYSTEM.replace('Tu réponds en français, de façon concise.', 'Answer in English, concisely. Keep server, application and IP names exactly as they are.') : SYSTEM);
+
 const compact = (r) =>
   r && {
     start: { id: r.start.id, name: r.start.name, type: r.start.type },
@@ -62,9 +65,9 @@ function runTool(repo, name, args) {
 }
 
 /** Consigne du mode "json" : pour les passerelles qui ne gèrent pas le champ tools (function calling). */
-function jsonToolsPrompt() {
+function jsonToolsPrompt(lang = 'fr') {
   const list = TOOLS.map((t) => `- ${t.function.name}(${Object.keys(t.function.parameters.properties).join(', ')}) : ${t.function.description}`).join('\n');
-  return `${SYSTEM}
+  return `${systemFor(lang)}
 
 Outils disponibles :
 ${list}
@@ -97,8 +100,8 @@ async function askNative({ llm, repo, messages, toolTrace, maxRounds }) {
   return { answer: FAILED, toolTrace };
 }
 
-async function askJson({ llm, repo, messages, toolTrace, maxRounds }) {
-  messages[0] = { role: 'system', content: jsonToolsPrompt() };
+async function askJson({ llm, repo, messages, toolTrace, maxRounds, lang }) {
+  messages[0] = { role: 'system', content: jsonToolsPrompt(lang) };
   for (let round = 0; round < maxRounds; round++) {
     const res = await llm.chat({ task: 'chat', messages, json: true, temperature: 0.2, maxTokens: 1500, cache: false });
     let msg;
@@ -126,15 +129,15 @@ const toolsRejected = (err) => err && err.status === 400 && /tool|function/i.tes
  *   toolsMode 'native' : function calling ; si la passerelle le refuse, bascule automatiquement en 'json'.
  * @returns {Promise<{answer: string, toolTrace: Array, toolsMode: string}>}
  */
-async function ask({ llm, repo, question, history = [], maxRounds = 5, toolsMode = 'native' }) {
-  const fresh = () => [{ role: 'system', content: SYSTEM }, ...history.slice(-10), { role: 'user', content: question }];
-  if (toolsMode === 'json') return { ...(await askJson({ llm, repo, messages: fresh(), toolTrace: [], maxRounds })), toolsMode: 'json' };
+async function ask({ llm, repo, question, history = [], maxRounds = 5, toolsMode = 'native', lang = 'fr' }) {
+  const fresh = () => [{ role: 'system', content: systemFor(lang) }, ...history.slice(-10), { role: 'user', content: question }];
+  if (toolsMode === 'json') return { ...(await askJson({ llm, repo, messages: fresh(), toolTrace: [], maxRounds, lang })), toolsMode: 'json' };
   try {
     return { ...(await askNative({ llm, repo, messages: fresh(), toolTrace: [], maxRounds })), toolsMode: 'native' };
   } catch (err) {
     if (!toolsRejected(err)) throw err;
-    return { ...(await askJson({ llm, repo, messages: fresh(), toolTrace: [], maxRounds })), toolsMode: 'json' };
+    return { ...(await askJson({ llm, repo, messages: fresh(), toolTrace: [], maxRounds, lang })), toolsMode: 'json' };
   }
 }
 
-module.exports = { ask, runTool, TOOLS, jsonToolsPrompt };
+module.exports = { ask, runTool, TOOLS, jsonToolsPrompt, systemFor };
