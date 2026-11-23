@@ -11,7 +11,7 @@ import { useI18n } from '../lib/i18n';
 import { useTitle } from '../lib/useTitle';
 import { appHref } from '../lib/links';
 import { normalize } from '../lib/search';
-import { currentCount, filterTeams, isCurrent, orderTeams, roleKey, teamCounts } from '../lib/teams';
+import { filterTeams, isCurrent, orderTeams, roleKey, tallySummary, teamCounts, teamTally } from '../lib/teams';
 import { cn } from '../lib/cn';
 import { Badge, Button, Card, EmptyState, ErrorState, PageHeader, SkeletonRows } from '../components/ui';
 import { SearchInput } from '../components/filters';
@@ -94,8 +94,8 @@ export default function TeamsPage() {
 
 function TeamCard({ team, highlight }: { team: Team; highlight: boolean }) {
   const { t } = useI18n();
-  const current = currentCount(team);
-  const formerOnly = current === 0;
+  const summary = tallySummary(teamTally(team));
+  const formerOnly = summary.kind !== 'current';
   return (
     <section
       aria-label={team.name}
@@ -107,13 +107,19 @@ function TeamCard({ team, highlight }: { team: Team; highlight: boolean }) {
           <h2 className={cn('truncate text-sm font-semibold', formerOnly ? 'text-ink-3' : 'text-ink')}>{team.name}</h2>
           <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
             <Badge>{t(team.kind === 'team' ? 'teams.kind.team' : 'teams.kind.person')}</Badge>
-            {formerOnly && <OwnerPeriodBadge period="past" />}
+            {summary.kind === 'formerOnly' && <OwnerPeriodBadge period="past" />}
+            {summary.kind === 'targetOnly' && <OwnerPeriodBadge period="target" />}
           </div>
         </div>
-        <div className="shrink-0 text-right">
-          <div className="tabular text-lg leading-6 font-semibold text-ink">{current}</div>
-          <div className="text-2xs text-ink-3">{t('nav.applications')}</div>
-        </div>
+        {summary.kind === 'current' ? (
+          <div className="shrink-0 text-right">
+            <div className="tabular text-lg leading-6 font-semibold text-ink">{summary.current}</div>
+            <div className="text-2xs text-ink-3">{t('teams.tally.currentLabel', { n: summary.current })}</div>
+            {summary.past > 0 && <div className="text-2xs text-ink-3">{t('teams.tally.past', { n: summary.past })}</div>}
+          </div>
+        ) : (
+          <div className="max-w-28 shrink-0 text-right text-xs text-ink-3">{t(summary.kind === 'formerOnly' ? 'teams.tally.formerOnly' : 'teams.tally.targetOnly')}</div>
+        )}
       </header>
       <ul className="divide-y divide-line">
         {team.applications.map((a) => (
@@ -160,7 +166,7 @@ function UnassignedCard({ team }: { team: Team }) {
         </div>
         <div className="shrink-0 text-right">
           <div className="tabular text-lg leading-6 font-semibold text-ink">{team.applications.length}</div>
-          <div className="text-2xs text-ink-3">{t('nav.applications')}</div>
+          <div className="text-2xs text-ink-3">{t('teams.appsLabel', { n: team.applications.length })}</div>
         </div>
       </header>
       <ul className="flex flex-wrap gap-2 p-4">

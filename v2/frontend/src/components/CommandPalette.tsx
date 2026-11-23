@@ -8,7 +8,7 @@ import { Command } from 'cmdk';
 import { useNavigate } from 'react-router';
 import { AppWindow, LoaderCircle, Search, Server, User, Users } from 'lucide-react';
 import { api, type ApplicationSummary, type ServerSummary, type Team } from '../lib/api';
-import { currentCount, teamsHref } from '../lib/teams';
+import { tallySummary, teamTally, teamsHref, type TallySummary } from '../lib/teams';
 import { useI18n } from '../lib/i18n';
 import { rankByText } from '../lib/search';
 import { NAV_ITEMS } from '../app/nav';
@@ -132,6 +132,13 @@ export function CommandPalette({ open, onOpenChange }: Props) {
     if (!open) setQuery('');
   }, [open]);
 
+  const tallyText = (s: TallySummary) =>
+    s.kind === 'formerOnly'
+      ? t('teams.tally.formerOnly')
+      : s.kind === 'targetOnly'
+        ? t('teams.tally.targetOnly')
+        : [t('teams.tally.current', { n: s.current }), s.past ? t('teams.tally.past', { n: s.past }) : ''].filter(Boolean).join(' ');
+
   const go = (to: string) => {
     onOpenChange(false);
     navigate(to);
@@ -201,7 +208,7 @@ export function CommandPalette({ open, onOpenChange }: Props) {
                   <Icon aria-hidden size={15} strokeWidth={1.75} className="text-ink-3" />
                   <span className="truncate font-medium">{p.name}</span>
                   <span className="truncate text-xs text-ink-3">{t(p.kind === 'team' ? 'teams.kind.team' : 'teams.kind.person')}</span>
-                  <span className="ml-auto shrink-0 text-xs text-ink-3">{t('count.applications', { n: currentCount(p) })}</span>
+                  <span className="ml-auto shrink-0 text-xs text-ink-3">{tallyText(tallySummary(teamTally(p)))}</span>
                 </Command.Item>
               );
             })}

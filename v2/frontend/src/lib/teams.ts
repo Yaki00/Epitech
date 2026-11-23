@@ -54,6 +54,39 @@ export function sortOwners(owners: readonly AppOwner[]): AppOwner[] {
 /** Nombre d'applications actuelles d'une carte. */
 export const currentCount = (team: Team) => team.applications.filter(isCurrent).length;
 
+export interface TeamTally {
+  /** applications actuelles */
+  current: number;
+  /** applications lues dans une page ancienne */
+  past: number;
+  /** applications lues dans une page qui décrit une cible */
+  target: number;
+}
+
+/** Compte des applications d'une carte par période. */
+export function teamTally(team: Pick<Team, 'applications'>): TeamTally {
+  const out: TeamTally = { current: 0, past: 0, target: 0 };
+  for (const a of team.applications) {
+    if (a.period === 'past') out.past += 1;
+    else if (a.period === 'target') out.target += 1;
+    else out.current += 1;
+  }
+  return out;
+}
+
+/**
+ * Résumé du compte d'une carte (en-tête et palette) : nombre d'applications actuelles et anciennes, ou,
+ * sans application actuelle, « ancien responsable » (seulement des anciennes) ou « responsable prévu » (cibles).
+ */
+export type TallySummary = { kind: 'current'; current: number; past: number } | { kind: 'formerOnly' } | { kind: 'targetOnly' };
+
+export function tallySummary(t: TeamTally): TallySummary {
+  if (t.current > 0) return { kind: 'current', current: t.current, past: t.past };
+  if (t.past > 0) return { kind: 'formerOnly' };
+  if (t.target > 0) return { kind: 'targetOnly' };
+  return { kind: 'current', current: 0, past: 0 };
+}
+
 /**
  * Ordre des cartes : celles qui ont des applications actuelles d'abord (le plus d'applications, puis le nom),
  * les anciens seulement ensuite, le groupe « Non renseignée » toujours en dernier.

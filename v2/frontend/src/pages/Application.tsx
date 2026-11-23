@@ -244,22 +244,22 @@ function OverviewTab({ app }: { app: ApplicationDetail }) {
         <EnvStatesCard app={app} />
       </div>
       <div className="flex min-w-0 flex-col gap-4 self-start">
-      <Card title={t('appDetail.facts')} padded={false}>
-        <Facts
-          items={[
-            { label: t('appDetail.fact.criticality'), value: app.criticality ?? <Muted>{t('common.notSpecified')}</Muted> },
-            { label: t('appDetail.fact.perimeter'), value: app.inPerimeter ? t('apps.filter.in') : t('apps.filter.out') },
-            { label: t('appDetail.fact.servers'), value: <span className="tabular">{app.servers}</span> },
-            { label: t('appDetail.fact.databases'), value: <span className="tabular">{app.databases}</span> },
-            { label: t('common.docScore'), value: <ScoreMeter score={app.docScore?.score ?? 0} label={t('common.docScore')} /> },
-            {
-              label: t('appDetail.fact.lastSync'),
-              value: app.lastSync ? <span title={formatDateTime(sqlDate(app.lastSync), lang)}>{relativeTime(sqlDate(app.lastSync), lang)}</span> : <Muted>{t('time.never')}</Muted>,
-            },
-          ]}
-        />
-      </Card>
-      <OwnersCard app={app} />
+        <Card title={t('appDetail.facts')} padded={false}>
+          <Facts
+            items={[
+              { label: t('appDetail.fact.criticality'), value: app.criticality ?? <Muted>{t('common.notSpecified')}</Muted> },
+              { label: t('appDetail.fact.perimeter'), value: app.inPerimeter ? t('apps.filter.in') : t('apps.filter.out') },
+              { label: t('appDetail.fact.servers'), value: <span className="tabular">{app.servers}</span> },
+              { label: t('appDetail.fact.databases'), value: <span className="tabular">{app.databases}</span> },
+              { label: t('common.docScore'), value: <ScoreMeter score={app.docScore?.score ?? 0} label={t('common.docScore')} /> },
+              {
+                label: t('appDetail.fact.lastSync'),
+                value: app.lastSync ? <span title={formatDateTime(sqlDate(app.lastSync), lang)}>{relativeTime(sqlDate(app.lastSync), lang)}</span> : <Muted>{t('time.never')}</Muted>,
+              },
+            ]}
+          />
+        </Card>
+        <OwnersCard app={app} />
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AppOwner, Team, TeamApp } from './api';
-import { criticalityTone, filterTeams, initials, orderTeams, sortOwners, sortTeamApps, teamCounts, teamsHref } from './teams';
+import { criticalityTone, filterTeams, initials, orderTeams, sortOwners, sortTeamApps, tallySummary, teamCounts, teamTally, teamsHref } from './teams';
 import { LINK_MARK_META, linkMark, pagePeriodKey } from './trust';
 
 const app = (name: string, extra: Partial<TeamApp> = {}): TeamApp => ({
@@ -134,5 +134,24 @@ describe('linkMark', () => {
     expect(pagePeriodKey('target')).toBe('appDetail.docs.period.target');
     expect(pagePeriodKey('current')).toBeNull();
     expect(pagePeriodKey(null)).toBeNull();
+  });
+});
+
+describe('teamTally et tallySummary', () => {
+  it('ancien seulement : aucune application actuelle, « ancien responsable »', () => {
+    const tally = teamTally({ applications: [app('Sirius', { period: 'past' })] });
+    expect(tally).toEqual({ current: 0, past: 1, target: 0 });
+    expect(tallySummary(tally)).toEqual({ kind: 'formerOnly' });
+  });
+
+  it('mélange : actuelles comptées à part des anciennes', () => {
+    const tally = teamTally({ applications: [app('A'), app('B', { period: null }), app('C', { period: 'past' }), app('D', { period: 'target' })] });
+    expect(tally).toEqual({ current: 2, past: 1, target: 1 });
+    expect(tallySummary(tally)).toEqual({ kind: 'current', current: 2, past: 1 });
+  });
+
+  it('cible seulement : « responsable prévu » ; carte vide : zéro actuelle', () => {
+    expect(tallySummary(teamTally({ applications: [app('N', { period: 'target' })] }))).toEqual({ kind: 'targetOnly' });
+    expect(tallySummary(teamTally({ applications: [] }))).toEqual({ kind: 'current', current: 0, past: 0 });
   });
 });
