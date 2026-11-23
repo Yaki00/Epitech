@@ -8,7 +8,7 @@
  */
 
 /** Version de la lecture : à augmenter quand les consignes ou la forme de la réponse changent. */
-const READING_VERSION = 1;
+const READING_VERSION = 2;
 
 const SYSTEM = `Tu lis une page de documentation technique interne (Confluence) pour cartographier des applications et leur infrastructure. Réponds uniquement par un objet JSON, sans texte autour.
 
@@ -71,6 +71,7 @@ LINKS (relations écrites ou dessinées, au sens « from dépend de to »)
 - reads_from, writes_to : application vers la base, la file, le chemin ou l'URL qu'elle lit ou alimente.
 - depends_on : autre dépendance écrite.
 from et to reprennent des noms rendus dans applications ou entities. Pour une flèche de schéma, la citation est la ligne du schéma.
+Dans une page d'architecture, un tableau qui liste les serveurs (ou les bases) de l'application donne ces liens même si aucune phrase ne les écrit : runs_on (application vers chaque serveur du tableau), uses_db (application vers chaque base), db_on (base vers son serveur si la ligne le donne). La citation est la ligne du tableau, recopiée avec ses cellules séparées par « | » (exemple : « srvapp01 | PRD | 10.0.0.1 »).
 
 OWNERS (personnes et équipes qui s'occupent d'une application, souvent dans un tableau « Contacts »)
 - name : le nom seul de la personne ou de l'équipe.
@@ -112,10 +113,17 @@ const dateOf = (d) => {
  * @param {string[]} [p.knownApps]          applications reconnues dans les morceaux précédents
  * @param {{index:number,count:number}} [p.part] position du morceau (page découpée)
  */
+/**
+ * Lignes d'en-tête envoyées à l'IA avant le texte (titre, pages parentes) : le contrôle des citations
+ * les ajoute au texte de la page, une citation « Titre : X » est donc retrouvée.
+ */
+function pageHeaderLines({ title, ancestors = [] }) {
+  return [`Titre : ${title || '(sans titre)'}`, `Pages parentes : ${(ancestors || []).filter(Boolean).join(' > ') || '(aucune)'}`];
+}
+
 function buildReadingMessages({ title, ancestors = [], space, updatedAt, text, diagramsText, apps, consignes, knownApps = [], part = null }) {
   const head = [
-    `Titre : ${title || '(sans titre)'}`,
-    `Pages parentes : ${(ancestors || []).filter(Boolean).join(' > ') || '(aucune)'}`,
+    ...pageHeaderLines({ title, ancestors }),
     space ? `Espace : ${space}` : null,
     dateOf(updatedAt) ? `Dernière modification : ${dateOf(updatedAt)}` : null,
     part && part.count > 1 ? `Morceau ${part.index} sur ${part.count} de la page.` : null,
@@ -129,4 +137,4 @@ function buildReadingMessages({ title, ancestors = [], space, updatedAt, text, d
   ];
 }
 
-module.exports = { buildReadingMessages, READING_VERSION, SYSTEM };
+module.exports = { buildReadingMessages, pageHeaderLines, READING_VERSION, SYSTEM };

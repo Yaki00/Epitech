@@ -39,8 +39,8 @@ const userText = (call) => call.messages.filter((m) => m.role === 'user').map((m
 const systemText = (call) => call.messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n');
 
 describe('lecture IA d\'une page', () => {
-  test('READING_VERSION is 1', () => {
-    assert.equal(READING_VERSION, 1);
+  test('READING_VERSION is 2 (table rule added to the system prompt)', () => {
+    assert.equal(READING_VERSION, 2);
   });
 
   test('sanitize keeps only allowed values', () => {
@@ -114,6 +114,20 @@ describe('lecture IA d\'une page', () => {
     assert.equal(r.links.length, 1);
   });
 
+  test('environment synonyms come only from the configuration (mappings.json), not from the code', () => {
+    const { configureEnvironments } = require('../src/lib/environment');
+    const raw = { page: { kind: 'other', period: 'current', env: 'recette', topics: [] }, entities: [{ name: 'srv-u', type: 'server', env: 'UAT', status: 'active', evidence: 'srv-u' }] };
+    assert.equal(sanitizeReading(raw).page.env, null);
+    configureEnvironments({ STG: ['recette', 'uat'] });
+    try {
+      const r = sanitizeReading(raw);
+      assert.equal(r.page.env, 'STG');
+      assert.equal(r.entities[0].env, 'STG');
+    } finally {
+      configureEnvironments(null);
+    }
+  });
+
   test('french enum values are mapped (ancienne → past, décommissionné → decommissioned, sujet → subject)', () => {
     const r = sanitizeReading({
       page: { kind: 'Réunion', period: 'Ancienne', env: 'recette', topics: [] },
@@ -129,14 +143,15 @@ describe('lecture IA d\'une page', () => {
       ],
       owners: [{ name: 'Alice Martin', kind: 'person', application: null, role: 'Responsable', evidence: 'Alice Martin' }],
     });
-    assert.deepEqual(r.page, { kind: 'meeting', period: 'past', env: 'STG', topics: [] });
+    // « recette » et « UAT » : vocabulaire maison, sans synonyme réglé ils ne donnent aucun environnement
+    assert.deepEqual(r.page, { kind: 'meeting', period: 'past', env: null, topics: [] });
     assert.deepEqual(r.applications.map((a) => a.role), ['subject', 'cited']);
     assert.deepEqual(
       r.entities.map((e) => [e.name, e.env, e.status]),
       [
         ['srv-a', 'PRD', 'decommissioned'],
         ['srv-b', 'DEV', 'planned'],
-        ['srv-c', 'STG', 'active'],
+        ['srv-c', null, 'active'],
         ['srv-d', 'STG', 'decommissioned'],
       ]
     );
@@ -416,3 +431,35 @@ describe('ip des serveurs', () => {
     assert.deepEqual(r.entities.map((e) => e.ip), ['10.1.2.3', null, null, null]);
   });
 });
+
+describe('règle des tableaux de serveurs (consignes système)', () => {
+  test('the system prompt states that a server or database table of an architecture page gives runs_on / uses_db / db_on', () => {
+    const [system] = buildReadingMessages({ title: 'T', text: 'x', apps: APPS });
+    assert.match(system.content, /tableau qui liste les serveurs \(ou les bases\)/);
+    assert.match(system.content, /runs_on \(application vers chaque serveur du tableau\)/);
+    assert.match(system.content, /« \| »/);
+    assert.ok(READING_VERSION >= 2);
+  });
+
+  test('a table row quote is accepted as evidence for a runs_on link', () => {
+    const { openStore } = require('../src/store/store');
+    const { createRepo } = require('../src/store/repo');
+    const { createMatcher, ensurePerimeterNodes } = require('../src/perimeter/perimeter');
+    const { verifyReading } = require('../src/reading/verify');
+    const repo = createRepo(openStore(':memory:'));
+    const perimeter = { applications: [{ name: 'Facturation', aliases: [] }], ignoreOtherApplications: true };
+    ensurePerimeterNodes(repo, perimeter);
+    // texte d'un tableau tel que la page le rend : cellules séparées par « | »
+    const pageText = 'Facturation : architecture\nServeur | Environnement | IP\nsrvfac01 | PRD | 10.1.2.3';
+    const reading = sanitizeReading({
+      page: { kind: 'architecture', period: 'current', env: 'PRD', topics: ['servers'] },
+      applications: [{ name: 'Facturation', written: 'Facturation', role: 'subject', evidence: 'Facturation : architecture' }],
+      entities: [{ name: 'srvfac01', type: 'server', env: 'PRD', ip: '10.1.2.3', status: 'active', evidence: 'srvfac01 | PRD | 10.1.2.3' }],
+      links: [{ from: 'Facturation', to: 'srvfac01', type: 'runs_on', evidence: 'srvfac01 | PRD | 10.1.2.3' }],
+    });
+    const v = verifyReading(reading, { pageText, repo, matcher: createMatcher(perimeter, repo), naemonHosts: new Set(), pageUpdatedAt: '2026-10-01T00:00:00Z', now: Date.parse('2026-11-23T00:00:00Z') });
+    assert.deepEqual(v.rejected, []);
+    assert.deepEqual(v.links.map((l) => [l.src, l.type, l.dst, l.trust]), [['application:facturation', 'runs_on', 'server:srvfac01', 'added']]);
+  });
+});
+

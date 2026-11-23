@@ -141,11 +141,11 @@ describe('verifyReading', () => {
     const env = setup();
     const r = reading({
       page: { kind: 'architecture', period: 'target', env: null, topics: [] },
-      links: [runsOn('srvorh01', 'srvorh01'), { from: 'OrderHub', to: 'Billing Engine', type: 'calls', evidence: 'appelle Billing' }],
+      links: [runsOn('srvorh01', 'srvorh01'), { from: 'OrderHub', to: 'Billing Engine', type: 'calls', evidence: 'appelle Billing Engine' }],
     });
-    const v = verifyReading(r, ctxOf(env, { pageText: 'srvorh01 appelle Billing' }));
+    const v = verifyReading(r, ctxOf(env, { pageText: 'srvorh01 appelle Billing Engine' }));
     assert.deepEqual(v.links.map((l) => l.period), ['target', 'target']);
-    const past = verifyReading({ ...r, page: { ...r.page, period: 'past' } }, ctxOf(env, { pageText: 'srvorh01 appelle Billing' }));
+    const past = verifyReading({ ...r, page: { ...r.page, period: 'past' } }, ctxOf(env, { pageText: 'srvorh01 appelle Billing Engine' }));
     assert.deepEqual(past.links.map((l) => l.period), ['past', 'past']);
   });
 
@@ -153,9 +153,9 @@ describe('verifyReading', () => {
     const env = setup();
     const r = reading({
       entities: [{ name: 'DB_ORDERS', type: 'database', env: null, status: 'active', evidence: 'DB_ORDERS' }],
-      links: [{ from: 'ORH', to: 'Billing Engine', type: 'calls', evidence: 'appelle Billing' }, { from: 'OrderHub', to: 'DB_ORDERS', type: 'uses_db', evidence: 'base DB_ORDERS' }],
+      links: [{ from: 'ORH', to: 'Billing Engine', type: 'calls', evidence: 'ORH appelle Billing' }, { from: 'OrderHub', to: 'DB_ORDERS', type: 'uses_db', evidence: 'base DB_ORDERS' }],
     });
-    const v = verifyReading(r, ctxOf(env, { pageText: 'appelle Billing, base DB_ORDERS' }));
+    const v = verifyReading(r, ctxOf(env, { pageText: 'ORH appelle Billing, base DB_ORDERS' }));
     assert.deepEqual(v.links.map((l) => [l.type, l.trust, l.period]), [['calls', 'added', 'current'], ['uses_db', 'added', 'current']]);
     assert.equal(v.links[0].src, 'application:orderhub');
     assert.equal(v.links[0].dst, 'application:billing-engine');
@@ -200,13 +200,13 @@ describe('verifyReading', () => {
     const r = reading({
       page: { kind: 'architecture', period: null, env: null, topics: [] },
       applications: [{ name: 'OrderHub', written: 'OrderHub', role: 'subject', evidence: 'OrderHub' }],
-      links: [runsOn('srvorh01', 'srvorh01'), { from: 'OrderHub', to: 'Billing Engine', type: 'calls', evidence: 'Billing' }],
+      links: [runsOn('srvorh01', 'srvorh01'), { from: 'OrderHub', to: 'Billing Engine', type: 'calls', evidence: 'Billing Engine' }],
       owners: [{ name: 'Awa', kind: 'person', application: 'ORH', role: 'owner', evidence: 'Awa Diallo' }],
     });
-    const v = verifyReading(r, ctxOf(env, { pageText: 'OrderHub srvorh01 Billing Awa Diallo' }));
+    const v = verifyReading(r, ctxOf(env, { pageText: 'OrderHub srvorh01 Billing Engine Awa Diallo' }));
     assert.deepEqual(v.links.map((l) => l.trust), ['confirmed', 'toValidate']);
     assert.equal(v.apps.length, 1);
-    assert.equal(v.owners[0].period, 'current');
+    assert.equal(v.owners[0].period, null); // période inconnue : jamais comptée comme actuelle
   });
 
   test('null server status makes its link toValidate', () => {

@@ -95,7 +95,6 @@ const ALIASES = {
   },
   appRole: { sujet: 'subject', principal: 'subject', cite: 'cited', citee: 'cited', mentionne: 'cited', mentionnee: 'cited' },
   ownerRole: { responsable: 'owner', astreinte: 'oncall', autre: 'other' },
-  env: { recette: 'STG', uat: 'STG' },
 };
 
 /**
@@ -108,10 +107,13 @@ const pick = (v, allowed, { aliases = {}, empty = null, unknown = empty } = {}) 
   const f = fold(s);
   return allowed.find((a) => fold(a) === f) || aliases[f] || unknown;
 };
-/** Environnement : PRD, STG, DEV, synonymes connus (dont ceux de mappings.json) ou null. */
+/**
+ * Environnement : PRD, STG, DEV, synonymes réglés (bloc « environnements » de mappings.json) ou null.
+ * Aucun vocabulaire maison ici : « recette », « UAT »... se règlent dans mappings.json et les consignes.
+ */
 const envOf = (v) => {
   const s = opt(v);
-  return s ? normalizeEnv(s) || ALIASES.env[fold(s)] || null : null;
+  return s ? normalizeEnv(s) || null : null;
 };
 
 // ---------- données personnelles ----------
