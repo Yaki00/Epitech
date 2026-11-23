@@ -122,3 +122,74 @@ Quand une commande échoue ou qu'un résultat paraît faux, ne corrige rien et d
 6. ce que tu as déjà essayé (uniquement des changements de configuration autorisés).
 
 Ce rapport est transmis au responsable du projet, qui fait la correction dans le code.
+
+---
+
+# Lyra v2 (dossier `v2/`)
+
+Mêmes rôle, mêmes interdits et mêmes droits que pour la v1 (voir plus haut), en remplaçant `v1/` par `v2/` :
+tu **installes, configures, lances et testes**, tu ne modifies jamais le code (`v2/backend/src/`, `v2/backend/scripts/`,
+`v2/backend/test/`, `v2/frontend/` y compris `dist/`, `v2/scripts/`), ni `package.json`, ni les fichiers `*.example*`, ni les
+fichiers de documentation. Tu ne touches jamais à `v1/` depuis la v2. Documentation : `v2/README.md` et `v2/ARCHITECTURE.md`.
+
+Fichiers que tu peux modifier : `v2/backend/.env`, `v2/backend/config/perimeter.json`, `v2/backend/config/mappings.json`
+(proposition puis accord de l'utilisateur), `v2/backend/data/raw/...`, `v2/logs/`.
+
+## Commandes (depuis `v2/`, Node 16.20.x)
+
+| Commande | Rôle |
+|---|---|
+| `npm run setup` | installe le backend, crée `backend/.env` et les configs ; **reprend la v1** si `../v1/backend/.env` existe |
+| `npm run doctor` | vérifie Node, IA, Confluence, Naemon, fichiers ; objectif : `--- aucune erreur ---` |
+| `npm test` | tests du backend : **241 tests** doivent passer, sans réseau |
+| `npm start` | http://localhost:3002 (interface incluse, car `frontend/dist` est dans le dépôt) |
+| `npm run sync:all` | Confluence, CSV, analyse IA (seulement après l'essai sur 20 pages validé) |
+
+Ne lance jamais `npm run build`, `npm run test:front` ni `npm install` dans `v2/frontend/` (Vite demande Node >= 22.12).
+L'interface est déjà compilée dans `v2/frontend/dist` ; si elle manque, seule l'API répond : le signaler.
+
+## Mise en route de la v2
+
+1. `node -v` doit afficher `v16.20.x`.
+2. `cd v2 && npm run setup`.
+   - **Avec la v1 configurée à côté** : la reprise est automatique. Lire sa sortie et la citer dans le rapport : config copiée, cache IA,
+     store, CSV, `.env` créé avec `PORT=3002`, `DEMO_MODE=false`, `CONFLUENCE_FETCH=false`. Relancer `setup` est sans risque (rien n'est écrasé).
+   - **Sans v1** : `backend/.env` est créé avec **`DEMO_MODE=true`** (données fictives). Pour les vraies données, remplir `.env` comme pour la v1
+     (voir plus haut) puis mettre `DEMO_MODE=false`.
+3. Vérifier dans `v2/backend/.env` : `DEMO_MODE`, `PORT=3002`, `CONFLUENCE_EXPORT_DIR` (export de la v1 si `CONFLUENCE_FETCH=false`), `DATA_DIR`.
+4. `npm run doctor`, puis `npm test` (241 verts).
+5. `npm start` et ouvrir http://localhost:3002. La v1 (3001) et la v2 (3002) peuvent tourner ensemble.
+
+## Ce qu'on règle dans `.env` pour la v2
+
+| Variable | Valeur |
+|---|---|
+| `DEMO_MODE` | `true` pour essayer sans données, `false` pour les vraies |
+| `PORT` | `3002` (la v1 reste sur 3001) |
+| `CONFLUENCE_FETCH` | `false` si la v1 récupère Confluence (reprise), `true` sinon |
+| `HISTORY_KEEP` | nombre d'imports gardés dans l'historique (50 par défaut) |
+| `NAEMON_SOURCE` | `off` (défaut), `thruk` ou `csv` |
+| `NAEMON_THRUK_URL`, `NAEMON_TOKEN` ou `NAEMON_USER` et `NAEMON_PASSWORD` | pour `thruk` ; valeurs fournies par l'utilisateur, jamais inventées, masquées dans les rapports |
+| `NAEMON_CSV_FILE` | pour `csv` ; les colonnes sont décrites dans le bloc `naemon` de `mappings.json` (proposer, attendre l'accord) |
+| `NAEMON_POLL_MINUTES` | minutes entre deux relevés (5 par défaut) |
+| `NAEMON_URL_TEMPLATE` | lien du bouton « Monitoring Naemon », `{app}` = nom de l'application |
+
+`NODE_EXTRA_CA_CERTS` (certificat d'entreprise) se définit dans l'environnement **système**, pas dans `.env`.
+
+## Erreurs fréquentes (v2)
+
+| Message ou symptôme | Cause probable | Que faire |
+|---|---|---|
+| `Interface non disponible : frontend/dist absent` | dépôt incomplet ou `git pull` manquant | `git pull` (sur demande), sinon le signaler |
+| Données fictives affichées (« Mode démo ») | `DEMO_MODE=true` | mettre `false` dans `.env`, relancer `npm start` |
+| `EADDRINUSE` sur 3002 | une autre instance tourne | l'arrêter ; ne pas changer le port sans accord |
+| `Thruk HTTP 401` ou `jeton ou identifiants refusés` | jeton Naemon faux ou expiré | demander un nouveau jeton |
+| `Thruk : page HTML reçue (connexion ?)` | mauvaise URL Thruk ou authentification absente | comparer l'URL avec celle du navigateur (avec `/thruk`) |
+| Supervision « inconnue » partout | `NAEMON_SOURCE=off` ou première relève pas encore faite | normal avec `off` ; sinon attendre un relevé et voir la page Supervision |
+| Hôtes « non rapprochés » | noms Naemon différents de ceux de l'inventaire | les lister dans le rapport, ne rien modifier |
+| `backend/.env existe déjà : reprise de la v1 ignorée` | `.env` créé avant la reprise | le dire à l'utilisateur ; ne pas supprimer le `.env` sans accord |
+| `unable to get local issuer certificate` | certificat d'entreprise | `NODE_EXTRA_CA_CERTS` (variable système) |
+| Applications du périmètre toutes à « inconnu » après reprise | `perimeter.json` ou export APM absent | vérifier `data/raw/apm/` et `config/perimeter.json` |
+
+Pour rapporter un problème : mêmes règles que pour la v1 (commande exacte, sortie complète sans secret, `node -v`, `npm run doctor`,
+hypothèse présentée comme telle, ce qui a déjà été essayé).
