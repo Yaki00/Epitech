@@ -81,9 +81,12 @@ async function main() {
 
   // 3b. consignes de lecture et synonymes d'environnement
   try {
-    const { loadConsignes, MAX_CHARS } = require('../src/reading/consignes');
+    const { loadConsignes, sameAsExample, MAX_CHARS } = require('../src/reading/consignes');
     const c = loadConsignes(config.consignesFile);
-    if (!c.chars) info('consignes de lecture : aucune (config/consignes-ia.md absent ou vide, facultatif ; modèle : consignes-ia.example.md)');
+    const exampleConsignes = path.join(config.root, 'config', 'consignes-ia.example.md');
+    if (sameAsExample(config.consignesFile, exampleConsignes))
+      warn("consignes d'exemple non adaptées : config/consignes-ia.md est la copie du modèle (exemples fictifs donnés à l'IA) ; l'adapter à vos conventions ou le vider");
+    else if (!c.chars) info('consignes de lecture : aucune (config/consignes-ia.md absent ou vide, facultatif ; modèle : consignes-ia.example.md)');
     else if (c.truncated) warn(`consignes de lecture : fichier trop long, seuls les ${MAX_CHARS} premiers caractères sont donnés à l'IA (raccourcir config/consignes-ia.md)`);
     else ok(`consignes de lecture : ${c.chars} caractères (limite ${MAX_CHARS})`);
   } catch (err) {

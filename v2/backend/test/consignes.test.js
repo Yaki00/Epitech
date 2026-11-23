@@ -3,7 +3,7 @@ const assert = require('assert').strict;
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { loadConsignes } = require('../src/reading/consignes');
+const { loadConsignes, sameAsExample } = require('../src/reading/consignes');
 
 describe('consignes de lecture', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lyra-consignes-'));
@@ -35,5 +35,15 @@ describe('consignes de lecture', () => {
     fs.writeFileSync(f, 'UAT = STG, recette = STG');
     assert.notEqual(loadConsignes(f).hash, a.hash);
     assert.equal(typeof a.hash, 'string');
+  });
+
+  test('consignes identical to the example are detected (doctor warns)', () => {
+    const example = path.join(__dirname, '..', 'config', 'consignes-ia.example.md');
+    const copy = path.join(dir, 'copie.md');
+    fs.writeFileSync(copy, fs.readFileSync(example, 'utf8').replace(/\n/g, '\r\n') + '\n\n');
+    assert.equal(sameAsExample(copy, example), true);
+    fs.writeFileSync(copy, 'Les serveurs de production finissent par p.');
+    assert.equal(sameAsExample(copy, example), false);
+    assert.equal(sameAsExample(path.join(dir, 'absent.md'), example), false);
   });
 });

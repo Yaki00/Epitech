@@ -9,6 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const { migrateFromV1 } = require('./lib/migrate');
+const { copyMissingConfig } = require('./lib/configFiles');
 
 const root = path.resolve(__dirname, '..');
 const major = Number(process.versions.node.split('.')[0]);
@@ -39,20 +40,8 @@ if (fs.existsSync(path.join(v1Root, 'backend', '.env'))) {
   migrated = Boolean(migrateFromV1({ v1Root, v2Root: root, log: (m) => console.log(`✔ ${m}`) }).migrated);
 }
 
-const copies = [
-  ['backend/.env.example', 'backend/.env'],
-  ['backend/config/mappings.example.json', 'backend/config/mappings.json'],
-  ['backend/config/perimeter.example.json', 'backend/config/perimeter.json'],
-  ['backend/config/consignes-ia.example.md', 'backend/config/consignes-ia.md'],
-];
-for (const [from, to] of copies) {
-  const dst = path.join(root, to);
-  if (fs.existsSync(dst)) console.log(`✔ ${to} existe déjà (conservé)`);
-  else {
-    fs.copyFileSync(path.join(root, from), dst);
-    console.log(`✔ ${to} créé depuis ${path.basename(from)}`);
-  }
-}
+// consignes-ia.md n'est jamais copié : absent = aucune consigne ; on l'écrit à partir du modèle
+copyMissingConfig(root, (m) => console.log(`✔ ${m}`));
 if (migrated) {
   console.log('\nReprise de la v1 terminée. À faire maintenant :');
   console.log('  1. npm run doctor   (vérifie tout, rapport à copier-coller)');
@@ -67,6 +56,7 @@ if (migrated) {
   console.log('     (clés des espaces : node backend/scripts/fetch-confluence.js --list-spaces)');
   console.log('  3. backend/config/perimeter.json : les applications suivies (noms de la colonne A de l\'APM)');
   console.log('  4. backend/config/mappings.json : fichiers CSV (APM, marketplace) et colonnes');
-  console.log('  5. npm run doctor   (vérifie tout, rapport à copier-coller)');
-  console.log('  6. npm run sync:all (récupère Confluence, importe les CSV, analyse ; voir README)\n');
+  console.log('  5. facultatif : backend/config/consignes-ia.md, consignes de lecture pour l\'IA (à écrire à partir de consignes-ia.example.md)');
+  console.log('  6. npm run doctor   (vérifie tout, rapport à copier-coller)');
+  console.log('  7. npm run sync:all (récupère Confluence, importe les CSV, analyse ; voir README)\n');
 }

@@ -6,6 +6,7 @@ const path = require('path');
 const dotenv = require('dotenv');
 
 const { migrateFromV1, BLOCK_MARKER } = require('../../scripts/lib/migrate');
+const { copyMissingConfig } = require('../../scripts/lib/configFiles');
 const { jobDefinitions } = require('../src/api/jobs');
 
 const write = (file, text) => {
@@ -154,5 +155,20 @@ describe('migrateFromV1', () => {
     assert.ok(!fs.existsSync(path.join(t.v2b, 'data', 'store', '.sync.lock')));
     assert.ok(!fs.existsSync(path.join(t.v2b, 'data', 'store', 'g.json.tmp')));
     assert.ok(!migrateFromV1({ v1Root: t.v1Root, v2Root: t.v2Root, log: () => {} }).migrated);
+  });
+});
+
+describe('setup : fichiers de configuration créés depuis les modèles', () => {
+  test('consignes are never copied from the example (absent means no consigne)', () => {
+    const { v2Root, v2b } = makeTree({ withV1: false });
+    write(path.join(v2b, '.env.example'), 'DEMO_MODE=true');
+    write(path.join(v2b, 'config', 'mappings.example.json'), '{}');
+    write(path.join(v2b, 'config', 'perimeter.example.json'), '{"applications":[]}');
+    write(path.join(v2b, 'config', 'consignes-ia.example.md'), '# Modèle');
+    write(path.join(v2b, 'config', 'perimeter.json'), '{"applications":["Alpha"]}');
+    const created = copyMissingConfig(v2Root);
+    assert.deepEqual(created, ['backend/.env', 'backend/config/mappings.json']);
+    assert.equal(read(path.join(v2b, 'config', 'perimeter.json')), '{"applications":["Alpha"]}'); // jamais écrasé
+    assert.equal(fs.existsSync(path.join(v2b, 'config', 'consignes-ia.md')), false);
   });
 });

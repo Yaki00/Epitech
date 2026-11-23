@@ -183,8 +183,8 @@ L'interface est déjà compilée dans `v2/frontend/dist` ; si elle manque, seule
 ## Lecture des pages par l'IA et consignes (v2)
 
 L'IA lit chaque page Confluence et le code vérifie ses citations : plus aucune règle de repérage dans le code. Les conventions de
-l'entreprise (noms de serveurs, sens de « recette », vocabulaire) se disent dans `v2/backend/config/consignes-ia.md`, créé par
-`npm run setup` depuis le modèle. Tu peux proposer une modification de ce fichier, comme pour `perimeter.json`, et l'écrire
+l'entreprise (noms de serveurs, sens de « recette », vocabulaire) se disent dans `v2/backend/config/consignes-ia.md`, absent au
+départ (`npm run setup` ne le crée pas), à écrire à partir du modèle en remplaçant ses exemples fictifs. Tu peux proposer une modification de ce fichier, comme pour `perimeter.json`, et l'écrire
 seulement après l'accord de l'utilisateur. Ne jamais y mettre de mot de passe, de jeton ni de donnée personnelle. Modifier les
 consignes fait relire toutes les pages au prochain passage : le dire à l'utilisateur avant.
 
@@ -212,7 +212,7 @@ consignes fait relire toutes les pages au prochain passage : le dire à l'utilis
 | `backend/.env existe déjà : reprise de la v1 ignorée` | `.env` créé avant la reprise | le dire à l'utilisateur ; ne pas supprimer le `.env` sans accord |
 | `unable to get local issuer certificate` | certificat d'entreprise | `NODE_EXTRA_CA_CERTS` (variable système) |
 | Réponses vides ou coupées de l'IA (`réponse vide`, `réponse coupée`, pages en erreur, doctor le signale) | le modèle « réfléchit » et épuise sa place | proposer `LLM_REASONING_EFFORT=none` dans `.env`, relancer `npm run doctor` puis l'essai sur 20 pages |
-| `doctor` : consignes absentes, vides ou trop longues | `consignes-ia.md` manquant ou > 8 000 caractères | proposer de le créer depuis le modèle ou de le raccourcir (accord de l'utilisateur) |
+| `doctor` : consignes absentes, vides, trop longues ou « consignes d'exemple non adaptées » | `consignes-ia.md` manquant, > 8 000 caractères ou copie telle quelle du modèle | proposer de l'écrire à partir du modèle (exemples remplacés par les conventions de l'entreprise) ou de le raccourcir (accord de l'utilisateur) |
 | Aucune équipe ni serveur cité après la synchro | pas de `--llm`, IA injoignable ou pages en erreur | lancer avec `--llm`, voir `lectures-rejets.csv` et le journal |
 | Applications du périmètre toutes à « inconnu » après reprise | `perimeter.json` ou export APM absent | vérifier `data/raw/apm/` et `config/perimeter.json` |
 

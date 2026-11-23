@@ -74,7 +74,7 @@ npm run setup      # npm install du backend + backend/.env, config/mappings.json
 #    clés des espaces Confluence : node backend/scripts/fetch-confluence.js --list-spaces
 # 2. backend/config/perimeter.json : les applications suivies (noms de la colonne A de l'APM)
 # 3. backend/config/mappings.json : fichiers CSV et colonnes (nom exact ou lettre Excel, ex. "CK")
-# 4. backend/config/consignes-ia.md : consignes de lecture pour l'IA (copie du modèle faite par setup, voir plus bas)
+# 4. facultatif : backend/config/consignes-ia.md, consignes de lecture pour l'IA, à écrire à partir du modèle (voir plus bas)
 #    export APM : déposer le CSV dans backend/data/raw/apm/ (le plus récent est pris)
 npm run doctor     # vérifie IA, Confluence, Naemon, fichiers ; rapport à copier-coller
 npm test           # tests du backend (jest), sans IA ni réseau
@@ -145,9 +145,9 @@ par défaut). L'IA ne calcule jamais un impact ni un état : cela reste le trava
 ### Le fichier de consignes
 
 Tout ce qui dépend des conventions de l'entreprise (noms de serveurs, sens des environnements, vocabulaire, pages à ignorer) s'écrit en
-texte libre dans `backend/config/consignes-ia.md`, sans toucher au code. `npm run setup` le crée depuis le modèle
-`backend/config/consignes-ia.example.md` (4 rubriques, exemples fictifs à remplacer). Le fichier n'est pas versionné et se règle avec
-`CONSIGNES_FILE` dans `.env`.
+texte libre dans `backend/config/consignes-ia.md`, sans toucher au code. `npm run setup` ne le crée pas : on l'écrit à partir du
+modèle `backend/config/consignes-ia.example.md` (4 rubriques, exemples fictifs à remplacer, jamais à garder tels quels : `npm run doctor`
+signale une copie non adaptée du modèle). Le fichier n'est pas versionné et se règle avec `CONSIGNES_FILE` dans `.env`.
 
 - Phrases simples, une règle par ligne. Au-delà de 8 000 caractères, la fin est ignorée (`npm run doctor` le signale).
 - Fichier absent ou vide : l'analyse marche quand même, avec les seules règles générales.
