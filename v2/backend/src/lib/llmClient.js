@@ -18,12 +18,14 @@ const { stableHash } = require('./hash');
 const { createLogger } = require('./logger');
 
 class LlmError extends Error {
-  constructor(message, { status, retryable = false, body } = {}) {
+  constructor(message, { status, retryable = false, body, code, content } = {}) {
     super(message);
     this.name = 'LlmError';
     this.status = status;
     this.retryable = retryable;
     this.body = body;
+    this.code = code; // 'empty' | 'truncated' | 'invalid_json' (réponse inexploitable)
+    this.content = content;
   }
 }
 
@@ -114,39 +116,69 @@ function createLlmClient(cfg, deps = {}) {
    * @param {boolean}[p.cache]     par défaut : actif si temperature === 0 et sans outils
    * @returns {Promise<{content:string, toolCalls:Array, raw:object, cached:boolean}>}
    */
-  async function chat({ task = 'chat', messages, temperature = 0, maxTokens = 2048, json = false, tools, cache }) {
+  async function chat({ task = 'chat', messages, temperature = 0, maxTokens = 2048, json = false, tools, cache, validate }) {
     const body = { model: modelFor(task), messages, temperature, max_tokens: maxTokens };
     if (tools) body.tools = tools;
+    if (cfg.reasoningEffort) body.reasoning_effort = cfg.reasoningEffort;
     if (json && jsonModeSupported) body.response_format = { type: 'json_object' };
 
     const useCache = cache ?? (temperature === 0 && !tools);
     const key = useCache ? stableHash({ ep: 'chat', ...body, response_format: undefined }) : null;
     if (key) {
       const hit = cacheGet(key);
-      if (hit) {
+      // Une ancienne entrée vide (écrite avant ce contrôle) n'est pas servie.
+      if (hit && (hit.content || (hit.toolCalls && hit.toolCalls.length))) {
         stats.cacheHits++;
         return { ...hit, cached: true };
       }
     }
 
-    return limit(async () => {
-      stats.calls++;
+    const callOnce = async (reqBody) => {
       let raw;
       try {
-        raw = await post('/chat/completions', body);
+        raw = await post('/chat/completions', reqBody);
       } catch (err) {
         // Passerelle qui refuse response_format : on le coupe pour la suite et on réessaie.
-        if (err.status === 400 && body.response_format && /response_format|json/i.test(err.body || '')) {
+        if (err.status === 400 && reqBody.response_format && /response_format|json/i.test(err.body || '')) {
           log.warn('response_format refusé par la passerelle, désactivé pour la suite');
           jsonModeSupported = false;
-          delete body.response_format;
-          raw = await post('/chat/completions', body);
+          delete reqBody.response_format;
+          raw = await post('/chat/completions', reqBody);
         } else throw err;
       }
-      const msg = raw?.choices?.[0]?.message || {};
+      const choice = raw?.choices?.[0] || {};
+      const msg = choice.message || {};
       stats.promptTokens += raw?.usage?.prompt_tokens || 0;
       stats.completionTokens += raw?.usage?.completion_tokens || 0;
       const result = { content: msg.content ?? '', toolCalls: msg.tool_calls || [], raw: { usage: raw?.usage, model: raw?.model } };
+      if (choice.finish_reason === 'length') {
+        throw new LlmError(`Réponse coupée (max_tokens ${reqBody.max_tokens} atteint)`, { code: 'truncated', content: result.content });
+      }
+      if (!String(result.content).trim() && !result.toolCalls.length) {
+        throw new LlmError('Réponse vide du modèle (réflexion trop longue ? essayez LLM_REASONING_EFFORT=none)', { code: 'empty' });
+      }
+      return result;
+    };
+
+    return limit(async () => {
+      stats.calls++;
+      let result;
+      try {
+        result = await callOnce(body);
+      } catch (err) {
+        if (err.code !== 'empty' && err.code !== 'truncated') throw err;
+        // Une seule nouvelle tentative, avec le double de place (hors essais réseau).
+        log.warn(`réponse ${err.code}, nouvel essai avec max_tokens doublé`, { max_tokens: body.max_tokens * 2 });
+        stats.calls++;
+        result = await callOnce({ ...body, max_tokens: body.max_tokens * 2 });
+      }
+      if (validate) {
+        try {
+          validate(result.content);
+        } catch (err) {
+          throw new LlmError(err.message, { code: 'invalid_json', content: result.content });
+        }
+      }
       if (key) cacheSet(key, result);
       return { ...result, cached: false };
     });
@@ -157,31 +189,33 @@ function createLlmClient(cfg, deps = {}) {
    * on renvoie l'erreur au modèle une seule fois pour qu'il corrige.
    */
   async function chatJson({ schema, ...params }) {
-    const first = await chat({ ...params, json: true });
-    const attempt = (content) => {
+    const validate = (content) => {
       const data = parseLlmJson(content);
       const errors = schema ? validateShape(data, schema) : [];
       if (errors.length) throw new Error(`JSON invalide : ${errors.join(', ')}`);
       return data;
     };
     try {
-      return attempt(first.content);
+      const first = await chat({ ...params, json: true, validate });
+      return validate(first.content);
     } catch (err) {
+      if (err.code !== 'invalid_json') throw err;
       log.warn('JSON invalide, tentative de réparation', { erreur: err.message });
       const repaired = await chat({
         ...params,
         json: true,
         cache: false,
+        validate,
         messages: [
           ...params.messages,
-          { role: 'assistant', content: first.content },
+          { role: 'assistant', content: err.content },
           {
             role: 'user',
             content: `Ta réponse n'est pas exploitable (${err.message}). Renvoie UNIQUEMENT l'objet JSON corrigé, sans texte autour.`,
           },
         ],
       });
-      return attempt(repaired.content);
+      return validate(repaired.content);
     }
   }
 

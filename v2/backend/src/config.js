@@ -45,6 +45,10 @@ const config = {
     },
     timeoutMs: int('LLM_TIMEOUT_MS', 120000),
     maxRetries: int('LLM_MAX_RETRIES', 3),
+    // Réflexion des modèles qui en ont une (ex : none) : vide = rien n'est envoyé.
+    reasoningEffort: env('LLM_REASONING_EFFORT', ''),
+    // Place de réponse par tâche (la lecture des pages passe maxTokens.extract).
+    maxTokens: { extract: int('LLM_MAX_TOKENS_EXTRACT', 4096) },
     concurrency: int('LLM_CONCURRENCY', 4),
     mock: bool('LLM_MOCK', 'false'),
     cacheDir: path.resolve(ROOT, env('LLM_CACHE_DIR', './data/cache/llm')),

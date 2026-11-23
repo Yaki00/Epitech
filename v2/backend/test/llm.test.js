@@ -68,6 +68,70 @@ describe('llmClient', () => {
     assert.match(f.calls[1].body.messages.at(-1).content, /pas exploitable/);
   });
 
+  test('sends reasoning_effort when configured', async () => {
+    const f = fakeFetch([{ status: 200, body: reply('ok') }]);
+    const llm = createLlmClient({ ...baseCfg, reasoningEffort: 'none' }, { fetch: f, logger: silent });
+    await llm.chat({ messages: [{ role: 'user', content: 'x' }] });
+    assert.equal(f.calls[0].body.reasoning_effort, 'none');
+  });
+
+  test('does not send reasoning_effort by default', async () => {
+    const f = fakeFetch([{ status: 200, body: reply('ok') }]);
+    const llm = createLlmClient(baseCfg, { fetch: f, logger: silent });
+    await llm.chat({ messages: [{ role: 'user', content: 'x' }] });
+    assert.equal('reasoning_effort' in f.calls[0].body, false);
+  });
+
+  test('empty answer is not cached and is retried with doubled max_tokens', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lyra-cache-'));
+    const f = fakeFetch([{ status: 200, body: reply('') }, { status: 200, body: reply('bonjour') }]);
+    const llm = createLlmClient({ ...baseCfg, cacheDir: dir }, { fetch: f, logger: silent });
+    const r = await llm.chat({ messages: [{ role: 'user', content: 'x' }], maxTokens: 100 });
+    assert.equal(r.content, 'bonjour');
+    assert.deepEqual(f.calls.map((c) => c.body.max_tokens), [100, 200]);
+    // le cache de la requête d'origine ne contient que la bonne réponse
+    const f2 = fakeFetch([]);
+    const again = await createLlmClient({ ...baseCfg, cacheDir: dir }, { fetch: f2, logger: silent }).chat({ messages: [{ role: 'user', content: 'x' }], maxTokens: 100 });
+    assert.equal(again.content, 'bonjour');
+    assert.equal(f2.calls.length, 0);
+  });
+
+  test('empty answer after retry throws empty and caches nothing', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lyra-cache-'));
+    const f = fakeFetch([{ status: 200, body: reply('') }, { status: 200, body: reply('  ') }]);
+    const llm = createLlmClient({ ...baseCfg, cacheDir: dir }, { fetch: f, logger: silent });
+    await assert.rejects(() => llm.chat({ messages: [{ role: 'user', content: 'x' }] }), (e) => e.code === 'empty');
+    assert.equal(fs.readdirSync(dir).length, 0);
+  });
+
+  test('length-truncated answer throws truncated after one retry', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lyra-cache-'));
+    const cut = { choices: [{ message: { content: 'début de répon' }, finish_reason: 'length' }] };
+    const f = fakeFetch([{ status: 200, body: cut }, { status: 200, body: cut }]);
+    const llm = createLlmClient({ ...baseCfg, cacheDir: dir }, { fetch: f, logger: silent });
+    await assert.rejects(() => llm.chat({ messages: [{ role: 'user', content: 'x' }], maxTokens: 50 }), (e) => e.code === 'truncated');
+    assert.deepEqual(f.calls.map((c) => c.body.max_tokens), [50, 100]);
+    assert.equal(fs.readdirSync(dir).length, 0);
+  });
+
+  test('valid answer is cached as before', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lyra-cache-'));
+    const ok = { choices: [{ message: { content: 'fini' }, finish_reason: 'stop' }] };
+    const f = fakeFetch([{ status: 200, body: ok }]);
+    const llm = createLlmClient({ ...baseCfg, cacheDir: dir }, { fetch: f, logger: silent });
+    await llm.chat({ messages: [{ role: 'user', content: 'x' }] });
+    assert.equal((await llm.chat({ messages: [{ role: 'user', content: 'x' }] })).cached, true);
+    assert.equal(f.calls.length, 1);
+  });
+
+  test('invalid JSON after repair throws invalid_json and caches nothing', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lyra-cache-'));
+    const f = fakeFetch([{ status: 200, body: reply('pas du json') }, { status: 200, body: reply('toujours pas') }]);
+    const llm = createLlmClient({ ...baseCfg, cacheDir: dir }, { fetch: f, logger: silent });
+    await assert.rejects(() => llm.chatJson({ messages: [{ role: 'user', content: 'x' }] }), (e) => e.code === 'invalid_json');
+    assert.equal(fs.readdirSync(dir).length, 0);
+  });
+
   test('cache disque : deuxième appel identique sans réseau', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lyra-cache-'));
     const f = fakeFetch([{ status: 200, body: reply('A') }]);

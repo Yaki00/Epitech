@@ -212,6 +212,17 @@ async function main() {
         r.ok === true ? ok(`chat JSON OK : ${config.llm.models[task]} (${Date.now() - t0} ms)`) : warn(`${config.llm.models[task]} répond mais JSON inattendu : ${JSON.stringify(r)}`);
       });
     }
+    await check("LLM lecture d'essai (extract)", async () => {
+      info(`LLM_REASONING_EFFORT = ${config.llm.reasoningEffort || '(non envoyé)'}, LLM_MAX_TOKENS_EXTRACT = ${config.llm.maxTokens.extract}`);
+      const t0 = Date.now();
+      try {
+        const r = await llm.chat({ task: 'extract', cache: false, maxTokens: config.llm.maxTokens.extract, messages: [{ role: 'user', content: 'Résume en une phrase : le serveur web01 héberge l\'application Facture.' }] });
+        ok(`lecture d'essai OK (${Date.now() - t0} ms, ${r.content.length} caractères)`);
+      } catch (err) {
+        if (err.code === 'empty' || err.code === 'truncated') warn(`lecture d'essai ${err.code === 'empty' ? 'vide' : 'coupée'} : régler LLM_REASONING_EFFORT=none dans backend/.env`);
+        else throw err;
+      }
+    });
     await check('LLM outils (function calling)', async () => {
       const tool = { type: 'function', function: { name: 'ping', description: 'Renvoie pong', parameters: { type: 'object', properties: {} } } };
       try {
