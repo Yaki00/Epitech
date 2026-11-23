@@ -246,3 +246,159 @@ describe('verifyReading', () => {
     assert.equal(v.links[0].trust, 'otherApp');
   });
 });
+
+describe('période propre d\'un lien', () => {
+  const page = (period) => ({ kind: 'project', period, env: null, topics: [] });
+  const text = [
+    'Existant : OrderHub tourne sur srvorh01',
+    'Cible : OrderHub sur srvnew77',
+    'Billing Engine appelle OrderHub depuis 2020',
+    'Ancien serveur srvold55 arrêté, OrderHub y tournait',
+    'srvfut66 à créer pour OrderHub',
+  ].join('\n');
+
+  test('the link period wins over the page period ; missing link period = page period', () => {
+    const env = setup();
+    const r = reading({
+      page: page('target'),
+      entities: [server('srvorh01', 'OrderHub tourne sur srvorh01'), server('srvnew77', 'OrderHub sur srvnew77', { status: 'planned' })],
+      links: [
+        runsOn('srvorh01', 'Existant : OrderHub tourne sur srvorh01', { period: 'current' }),
+        runsOn('srvnew77', 'Cible : OrderHub sur srvnew77', { period: null }),
+        { from: 'Billing Engine', to: 'OrderHub', type: 'calls', period: 'current', evidence: 'Billing Engine appelle OrderHub depuis 2020' },
+        { from: 'OrderHub', to: 'Billing Engine', type: 'depends_on', evidence: 'Billing Engine appelle OrderHub depuis 2020' },
+      ],
+    });
+    const v = verifyReading(r, ctxOf(env, { pageText: text }));
+    assert.deepEqual(v.links.map((l) => [l.dstName, l.type, l.period, l.trust]), [
+      ['srvorh01', 'runs_on', 'current', 'confirmed'],
+      ['srvnew77', 'runs_on', 'target', 'toValidate'],
+      ['OrderHub', 'calls', 'current', 'added'],
+      ['Billing Engine', 'depends_on', 'target', 'added'],
+    ]);
+  });
+
+  test('a link marked current to a server said decommissioned or planned stays past or target', () => {
+    const env = setup();
+    const r = reading({
+      page: page('current'),
+      entities: [server('srvold55', 'Ancien serveur srvold55 arrêté', { status: 'decommissioned' }), server('srvfut66', 'srvfut66 à créer', { status: 'planned' })],
+      links: [runsOn('srvold55', 'Ancien serveur srvold55 arrêté, OrderHub y tournait', { period: 'current' }), runsOn('srvfut66', 'srvfut66 à créer pour OrderHub', { period: 'current' })],
+    });
+    const v = verifyReading(r, ctxOf(env, { pageText: text }));
+    assert.deepEqual(v.links.map((l) => [l.dstName, l.period]), [['srvold55', 'past'], ['srvfut66', 'target']]);
+  });
+
+  test('a link marked past in a current page is past ; unreadable page keeps links to validate', () => {
+    const env = setup();
+    const links = [{ from: 'Billing Engine', to: 'OrderHub', type: 'calls', period: 'past', evidence: 'Billing Engine appelle OrderHub depuis 2020' }];
+    assert.equal(verifyReading(reading({ page: page('current'), links }), ctxOf(env, { pageText: text })).links[0].period, 'past');
+    const unreadable = verifyReading(reading({ page: page(null), links: [{ ...links[0], period: null }] }), ctxOf(env, { pageText: text })).links[0];
+    assert.deepEqual([unreadable.period, unreadable.trust], ['current', 'toValidate']);
+  });
+});
+
+describe('environnement de la page : seulement s\'il est écrit', () => {
+  const text = 'Topologie OrderHub\nsrvdoc09 | 10.0.0.9\nServeurs de production\nEnvironnement : recette';
+  const withEnv = (env, envEvidence) => reading({ page: { kind: 'architecture', period: 'current', env, envEvidence, topics: [] }, entities: [server('srvdoc09', 'srvdoc09 | 10.0.0.9')] });
+
+  test('kept when the quote is in the page and names the environment', () => {
+    const env = setup();
+    const v = verifyReading(withEnv('PRD', 'Serveurs de production'), ctxOf(env, { pageText: text }));
+    assert.equal(v.env, 'PRD');
+    assert.deepEqual(v.rejected.filter((r) => r.what.startsWith('environnement')), []);
+  });
+
+  test('dropped without a quote, with a quote absent from the page, or with a quote that does not name it', () => {
+    const env = setup();
+    for (const [ev, reason] of [
+      [null, 'no_evidence'],
+      ['Serveurs de développement', 'no_evidence'],
+      ['srvdoc09 | 10.0.0.9', 'evidence_mismatch'], // déduit d'un nom de serveur : refusé
+      ['Topologie OrderHub', 'evidence_mismatch'],
+    ]) {
+      const v = verifyReading(withEnv('PRD', ev), ctxOf(env, { pageText: text }));
+      assert.equal(v.env, null, String(ev));
+      assert.deepEqual(v.rejected, [{ what: 'environnement de la page (PRD)', reason }], String(ev));
+    }
+  });
+
+  test('a dropped page env is not given to the servers of the page ; « pré-production » is not production', () => {
+    const env = setup();
+    const v = verifyReading(withEnv('PRD', 'srvdoc09 | 10.0.0.9'), ctxOf(env, { pageText: text }));
+    assert.equal(v.servers.find((s) => s.name === 'srvdoc09').env, null);
+    const pre = verifyReading(withEnv('PRD', 'Environnement de pré-production'), ctxOf(env, { pageText: `${text}\nEnvironnement de pré-production` }));
+    assert.equal(pre.env, null);
+    const stg = verifyReading(withEnv('STG', 'Environnement de pré-production'), ctxOf(env, { pageText: `${text}\nEnvironnement de pré-production` }));
+    assert.equal(stg.env, 'STG');
+  });
+
+  test('house words count only once declared in mappings.json (environnements block)', () => {
+    const { configureEnvironments } = require('../src/lib/environment');
+    const env = setup();
+    assert.equal(verifyReading(withEnv('STG', 'Environnement : recette'), ctxOf(env, { pageText: text })).env, null);
+    configureEnvironments({ STG: ['recette'] });
+    try {
+      assert.equal(verifyReading(withEnv('STG', 'Environnement : recette'), ctxOf(env, { pageText: text })).env, 'STG');
+    } finally {
+      configureEnvironments(null);
+    }
+  });
+});
+
+describe('lien vers un serveur depuis une base (ou une file) : applications de la base d\'abord', () => {
+  // page sur OrderHub qui cite la base de Billing Engine, hébergée sur le serveur de Billing Engine
+  const text = 'OrderHub architecture\nBILREF | PostgreSQL | srvbil01\nBilling Engine utilise BILREF\nORHDB | srvbil01';
+  const page = (links) =>
+    reading({
+      applications: [
+        { name: 'OrderHub', written: 'OrderHub', role: 'subject', evidence: 'OrderHub architecture' },
+        { name: 'Billing Engine', written: 'Billing Engine', role: 'cited', evidence: 'Billing Engine utilise BILREF' },
+      ],
+      entities: [{ name: 'BILREF', type: 'database', status: 'active', evidence: 'BILREF | PostgreSQL | srvbil01' }, { name: 'ORHDB', type: 'database', status: 'active', evidence: 'ORHDB | srvbil01' }],
+      links,
+    });
+  const dbOn = (db, evidence) => ({ from: db, to: 'srvbil01', type: 'db_on', evidence });
+  const usesDb = (app, db, evidence) => ({ from: app, to: db, type: 'uses_db', evidence });
+
+  test('database of the server owner, said in the page: added, not toValidate', () => {
+    const env = setup();
+    const v = verifyReading(page([usesDb('OrderHub', 'BILREF', 'BILREF | PostgreSQL | srvbil01'), usesDb('Billing Engine', 'BILREF', 'Billing Engine utilise BILREF'), dbOn('BILREF', 'BILREF | PostgreSQL | srvbil01')]), ctxOf(env, { pageText: text }));
+    assert.deepEqual(v.links.find((l) => l.type === 'db_on').trust, 'added');
+  });
+
+  test('database of the server owner, known from the active graph (another page or an inventory): added', () => {
+    const env = setup();
+    env.repo.upsertNode({ type: 'database', key: 'bilref', name: 'BILREF', source: 'llm', attrs: { fromLlm: true } });
+    env.repo.addEdge({ src: 'application:billing-engine', dst: 'database:bilref', type: 'uses_db', source: 'llm', sourceRef: '99', attrs: { trust: 'added', period: 'current' } });
+    const v = verifyReading(page([usesDb('OrderHub', 'BILREF', 'BILREF | PostgreSQL | srvbil01'), dbOn('BILREF', 'BILREF | PostgreSQL | srvbil01')]), ctxOf(env, { pageText: text }));
+    assert.equal(v.links.find((l) => l.type === 'db_on').trust, 'added');
+  });
+
+  test('inactive graph links do not count ; a database used only by the page application stays toValidate', () => {
+    const env = setup();
+    env.repo.upsertNode({ type: 'database', key: 'bilref', name: 'BILREF', source: 'llm', attrs: { fromLlm: true } });
+    env.repo.addEdge({ src: 'application:billing-engine', dst: 'database:bilref', type: 'uses_db', source: 'llm', sourceRef: '99', attrs: { trust: 'added', period: 'past' } });
+    const v = verifyReading(page([usesDb('OrderHub', 'BILREF', 'BILREF | PostgreSQL | srvbil01'), dbOn('BILREF', 'BILREF | PostgreSQL | srvbil01'), usesDb('OrderHub', 'ORHDB', 'ORHDB | srvbil01'), dbOn('ORHDB', 'ORHDB | srvbil01')]), ctxOf(env, { pageText: text }));
+    assert.deepEqual(v.links.filter((l) => l.type === 'db_on').map((l) => [l.srcName, l.trust]), [['BILREF', 'toValidate'], ['ORHDB', 'toValidate']]);
+  });
+});
+
+describe('serveur hors inventaire corroboré par une autre page', () => {
+  test('an old page citing a server that another recent current page cites as active: added', () => {
+    const env = setup();
+    env.repo.upsertNode({ type: 'server', key: 'srvora01', name: 'srvora01', source: 'llm', attrs: { fromLlm: true, outOfInventory: true } });
+    const doc = (key, updatedAt) => env.repo.upsertNode({ type: 'document', key, name: key, source: 'confluence', attrs: { updatedAt } });
+    const r = reading({ entities: [server('srvora01', 'ORADB sur srvora01'), { name: 'ORADB', type: 'database', status: 'active', evidence: 'ORADB sur srvora01' }], links: [{ from: 'ORADB', to: 'srvora01', type: 'db_on', evidence: 'ORADB sur srvora01' }] });
+    const ctx = ctxOf(env, { pageText: 'ORADB sur srvora01', pageUpdatedAt: OLD });
+    // seulement une page ancienne ou une citation non actuelle : pas corroboré
+    env.repo.addEdge({ src: doc('confluence-1', OLD), dst: 'server:srvora01', type: 'mentions', source: 'confluence', sourceRef: '1', attrs: { status: 'active', period: 'current' } });
+    env.repo.addEdge({ src: doc('confluence-2', RECENT), dst: 'server:srvora01', type: 'mentions', source: 'confluence', sourceRef: '2', attrs: { status: 'active', period: 'target' } });
+    env.repo.addEdge({ src: doc('confluence-3', RECENT), dst: 'server:srvora01', type: 'mentions', source: 'confluence', sourceRef: '3', attrs: { status: 'decommissioned', period: 'current' } });
+    assert.equal(verifyReading(r, ctx).links[0].trust, 'toValidate');
+    env.repo.addEdge({ src: doc('confluence-4', RECENT), dst: 'server:srvora01', type: 'mentions', source: 'confluence', sourceRef: '4', attrs: { status: 'active', period: 'current' } });
+    const v = verifyReading(r, ctx);
+    assert.equal(v.servers[0].corroborated, true);
+    assert.equal(v.links[0].trust, 'added');
+  });
+});

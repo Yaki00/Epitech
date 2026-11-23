@@ -203,6 +203,23 @@ describe('analyse Confluence par lecture IA', () => {
     assert.match(rejects, /OrderHub - Architecture;srvghost42;citation qui ne nomme pas l'élément/);
   });
 
+  test('the date of the day is sent to the model but is not a valid quote', async () => {
+    const dated = { name: 'OrderHub', written: 'OrderHub', role: 'cited', evidence: 'Date du jour : 2026-11-23' };
+    fake.state.answer = (title) => (title === P3 ? { ...READINGS[P3], applications: [dated] } : READINGS[title]);
+    await run();
+    assert.ok(fake.state.calls.every((c) => c.user.includes('Date du jour : 2026-11-23')));
+    assert.deepEqual(repo.getDocument('confluence:7003').attrs.rejected, [{ what: 'OrderHub', reason: 'no_evidence' }]);
+    assert.ok(!repo.edgesFrom('application:orderhub').some((e) => e.type === 'documented_in' && e.dst === DOC[P3]));
+  });
+
+  test('page env is kept only with a quote that writes it', async () => {
+    fake.state.answer = (title) => (title === P1 ? { ...READINGS[P1], page: { ...READINGS[P1].page, envEvidence: 'srvnew01 | 10.20.40.12' } } : READINGS[title]);
+    await run();
+    const e = repo.edgesFrom('application:orderhub').find((x) => x.type === 'documented_in' && x.dst === DOC[P1]);
+    assert.equal(e.attrs.audit.environment, null);
+    assert.ok(repo.getDocument('confluence:7001').attrs.rejected.some((r) => r.what === 'environnement de la page (PRD)' && r.reason === 'evidence_mismatch'));
+  });
+
   test('a quote of the header line sent to the model (« Titre : X ») is accepted', async () => {
     const subject = { name: 'OrderHub', written: 'OrderHub', role: 'subject', evidence: `Titre : ${P1}` };
     fake.state.answer = (title) => (title === P1 ? { ...READINGS[P1], applications: [subject] } : READINGS[title]);

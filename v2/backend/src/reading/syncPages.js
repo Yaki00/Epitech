@@ -127,6 +127,8 @@ async function runConfluenceSync({
   const verifyHash = verifyHashOf(repo, naemon, now);
   const apps = perimeter ? perimeter.applications.map((a) => ({ name: a.name, aliases: a.aliases })) : [];
   const perimeterIds = new Set(matcher ? matcher.apps.map((a) => a.id) : []);
+  // date du jour donnée à l'IA pour juger la période des pages (« Plan 2026 » est actuel en 2026)
+  const today = new Date(now).toISOString().slice(0, 10);
 
   /** Vérifie une lecture, l'écrit dans le graphe et enregistre la ligne document. */
   function applyAndSave(ctx, reading, readingAttrs) {
@@ -179,7 +181,7 @@ async function runConfluenceSync({
     try {
       reading = await readPage(
         llm,
-        { title: page.title || p.title, ancestors: p.ancestors || [], space: p.spaceKey, updatedAt: p.updatedAt, sections: page.sections, diagramsText: ctx.diagramsText, apps, consignes },
+        { title: page.title || p.title, ancestors: p.ancestors || [], space: p.spaceKey, updatedAt: p.updatedAt, today, sections: page.sections, diagramsText: ctx.diagramsText, apps, consignes },
         { chunkChars, maxTokens }
       );
     } catch (err) {

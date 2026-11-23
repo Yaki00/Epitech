@@ -5,7 +5,8 @@
  * seule la lecture du graphe est faite. Voir docs/2026-11-23-v2-reperage-ia-conception.md.
  *
  * Verified = {
- *   kind, period, env, topics,
+ *   kind, period, env, topics,          env : celui de la page, seulement si sa citation (envEvidence) est
+ *                                       retrouvée et contient un mot qui désigne cet environnement
  *   apps: [{ appId, role, written, evidence }],
  *   servers: [{ nodeId|null, name, ip|null, env, status, inInventory, corroborated, evidence }],
  *   ips: [{ ip, status, evidence }],   IP citées sans serveur connu (aucun nœud créé)
@@ -17,14 +18,22 @@
  * nom court ou FQDN d'un serveur, une des deux extrémités d'un lien (`evidence_mismatch`).
  * Confiance d'un lien vers un serveur : runs_on suit le tableau de la conception (confirmed, otherApp,
  * added, toValidate) ; tout autre lien vers un serveur hors inventaire non corroboré, ou rattaché dans
- * l'inventaire à une autre application que celle du lien (ou de la page), est `toValidate`.
+ * l'inventaire à une autre application que celle du lien, est `toValidate`. Quand l'autre extrémité
+ * n'est pas une application (base, file, URL...), ses applications sont celles qui l'utilisent (liens
+ * uses_db, reads_from, writes_to de la page et du graphe actif), puis celles de la page.
+ * Un serveur hors inventaire est corroboré par Naemon, par cette page si elle est actuelle et récente
+ * (moins de 24 mois) et le dit actif, ou par une autre page actuelle et récente qui le cite comme actif
+ * (liens mentions déjà écrits).
+ * Période d'un lien : la sienne (lue par l'IA), sinon celle de la page ; serveur dit arrêté : past,
+ * prévu : target.
  * src/dst : identifiant du nœud s'il existe, sinon `type:clé` du nœud à créer.
  */
-const { hasEvidence, quoteNames } = require('./evidence');
+const { hasEvidence, quoteNames, normalizeText } = require('./evidence');
 const { canonicalHost } = require('../resolve/entities');
 const { normKey } = require('./schema');
-const { serverEnv } = require('../lib/environment');
+const { serverEnv, normalizeEnv } = require('../lib/environment');
 const { nodeKey } = require('../store/repo');
+const { isInactiveEdge } = require('../graph/impact');
 
 const CORROBORATION_DAYS = 730;
 const DAY = 86400000;
@@ -35,6 +44,31 @@ const DOC_SOURCES = new Set(['confluence', 'drawio', 'llm', 'reading', 'manual',
 const LINK_END_TYPES = new Set(['server', 'application', 'database', 'url', 'queue', 'path']);
 
 const isRetired = (x) => Boolean(x && x.attrs && x.attrs.retired);
+
+/** Liens qui rattachent une application à une base, une file, un chemin ou une URL. */
+const USE_TYPES = new Set(['uses_db', 'reads_from', 'writes_to']);
+
+/**
+ * Environnements que nomme une citation : mots (ou deux mots accolés, « pré production ») qui désignent
+ * PRD, STG ou DEV (valeurs, synonymes par défaut et bloc « environnements » de mappings.json).
+ */
+function envsNamed(quote) {
+  const words = normalizeText(quote)
+    .split(/[^\p{L}\p{N}-]+/u)
+    .filter(Boolean);
+  const out = new Set();
+  for (let i = 0; i < words.length; i++) {
+    const pair = i + 1 < words.length ? normalizeEnv(`${words[i]}${words[i + 1]}`) : null;
+    if (pair) {
+      out.add(pair);
+      i++;
+      continue;
+    }
+    const one = normalizeEnv(words[i]);
+    if (one) out.add(one);
+  }
+  return out;
+}
 
 function verifyReading(reading, ctx) {
   const { repo, matcher, naemonHosts = new Set(), pageUpdatedAt = null, now = Date.now() } = ctx;
@@ -56,7 +90,22 @@ function verifyReading(reading, ctx) {
   const page = reading.page || {};
   const pagePeriod = page.period === undefined ? 'current' : page.period; // null = illisible
   const pageReliable = pagePeriod !== null;
-  const recentPage = pagePeriod === 'current' && pageUpdatedAt && now - Date.parse(pageUpdatedAt) < CORROBORATION_DAYS * DAY;
+  const recent = (at) => {
+    const t = Date.parse(at);
+    return Number.isFinite(t) && now - t < CORROBORATION_DAYS * DAY;
+  };
+  const recentPage = pagePeriod === 'current' && pageUpdatedAt && recent(pageUpdatedAt);
+
+  // ---- environnement de la page : retenu seulement si la page l'écrit (jamais déduit des serveurs cités) ----
+  let pageEnv = page.env || null;
+  if (pageEnv) {
+    const what = `environnement de la page (${pageEnv})`;
+    if (!ok(what, page.envEvidence)) pageEnv = null;
+    else if (!envsNamed(page.envEvidence).has(pageEnv)) {
+      rejected.push({ what, reason: 'evidence_mismatch' });
+      pageEnv = null;
+    }
+  }
 
   // ---- applications ----
   const openApps = new Map(); // applications hors périmètre acceptées (ignoreOtherApplications faux)
@@ -110,6 +159,16 @@ function verifyReading(reading, ctx) {
     const ipList = String(a.ip || '').split(/[,;|\s]+/);
     return [name, canonicalHost(name), node && node.name, a.fqdn, canonicalHost(a.fqdn), ...ipList].filter(Boolean);
   }
+  /** Une autre page actuelle, modifiée depuis moins de 24 mois, cite ce serveur comme actif. */
+  function citedActiveElsewhere(node) {
+    if (!node) return false;
+    return repo.edgesTo(node.id).some((e) => {
+      const a = e.attrs || {};
+      if (e.type !== 'mentions' || a.retired || a.status !== 'active' || a.period !== 'current') return false;
+      const doc = repo.getNode(e.src);
+      return Boolean(doc && doc.attrs && recent(doc.attrs.updatedAt));
+    });
+  }
   function isSupervised(name, node) {
     const names = [name, node && node.name, node && node.attrs && node.attrs.fqdn].filter(Boolean).map((s) => String(s).toLowerCase());
     const isIp = (n) => /^\d{1,3}(\.\d{1,3}){3}$/.test(n);
@@ -123,14 +182,14 @@ function verifyReading(reading, ctx) {
     const entry = {
       nodeId: node ? node.id : null,
       name: node ? node.name : name,
-      env: (e && e.env) || (node ? serverEnv(node) : null) || page.env || null,
+      env: (e && e.env) || (node ? serverEnv(node) : null) || pageEnv || null,
       status: e && e.status !== undefined ? e.status : 'active',
       ip: (e && e.ip) || null,
       inInventory,
       corroborated: false,
       evidence: e ? e.evidence : '',
     };
-    if (!inInventory) entry.corroborated = isSupervised(name, node) || Boolean(recentPage && entry.status === 'active');
+    if (!inInventory) entry.corroborated = isSupervised(name, node) || Boolean(recentPage && entry.status === 'active') || citedActiveElsewhere(node);
     serverByKey.set(k, entry);
     servers.push(entry);
     return entry;
@@ -192,7 +251,8 @@ function verifyReading(reading, ctx) {
   const subjects = apps.filter((a) => a.role === 'subject').map((a) => a.appId);
   const pageApps = subjects.length ? subjects : apps.map((a) => a.appId);
 
-  const links = [];
+  // liens dont la citation est retrouvée et dont les deux extrémités sont connues
+  const found = [];
   for (const l of reading.links || []) {
     const what = `${l.from} ${l.type} ${l.to}`;
     if (!ok(what, l.evidence)) continue;
@@ -203,8 +263,32 @@ function verifyReading(reading, ctx) {
       rejected.push({ what, reason: 'out_of_scope' });
       continue;
     }
+    found.push({ l, from, to });
+  }
+
+  // applications qui utilisent une extrémité qui n'est pas une application (base, file, URL...) :
+  // liens de cette page, puis liens actifs du graphe (inventaires ou autres pages)
+  const usersInPage = new Map();
+  for (const { l, from, to } of found) {
+    if (!USE_TYPES.has(l.type) || from.kind !== 'application' || to.kind === 'application' || to.kind === 'server') continue;
+    if (!usersInPage.has(to.id)) usersInPage.set(to.id, new Set());
+    usersInPage.get(to.id).add(from.id);
+  }
+  function usersOf(end) {
+    const out = new Set(usersInPage.get(end.id) || []);
+    for (const e of repo.edgesTo(end.id)) {
+      if (!USE_TYPES.has(e.type) || isInactiveEdge(e)) continue;
+      const src = repo.getNode(e.src);
+      if (src && src.type === 'application' && !isRetired(src)) out.add(e.src);
+    }
+    return [...out];
+  }
+
+  const links = [];
+  for (const { l, from, to } of found) {
     let trust = 'added';
-    let period = pageReliable ? pagePeriod : 'current';
+    // période propre du lien, sinon celle de la page (illisible : actuelle, et le lien est à valider plus bas)
+    let period = l.period || (pageReliable ? pagePeriod : 'current');
     // extrémité serveur du lien (la cible d'abord) : l'inventaire reste la référence
     const srv = to.kind === 'server' ? to : from.kind === 'server' ? from : null;
     const other = srv === to ? from : to;
@@ -216,8 +300,9 @@ function verifyReading(reading, ctx) {
         else if (owners.size) trust = 'otherApp';
         else trust = entry && entry.corroborated ? 'added' : 'toValidate';
       } else if (owners.size) {
-        // serveur d'une autre application de l'inventaire : à valider
-        const linked = other.kind === 'application' ? [other.id] : pageApps;
+        // serveur d'une autre application de l'inventaire : à valider. Pour une base (file, URL...) :
+        // applications qui l'utilisent d'abord (« base de B sur un serveur de B » est juste), puis celles de la page
+        const linked = other.kind === 'application' ? [other.id] : [...usersOf(other), ...pageApps];
         if (linked.length && !linked.some((id) => owners.has(id))) trust = 'toValidate';
       } else if (!(entry && (entry.inInventory || entry.corroborated))) {
         trust = 'toValidate'; // serveur hors inventaire que rien ne corrobore
@@ -244,7 +329,7 @@ function verifyReading(reading, ctx) {
     owners.push({ appId, name: o.name, kind: o.kind, role: o.role, period: pageReliable ? pagePeriod : null, evidence: o.evidence });
   }
 
-  return { kind: page.kind, period: page.period === undefined ? 'current' : page.period, env: page.env || null, topics: page.topics || [], apps, servers, ips, links, owners, rejected };
+  return { kind: page.kind, period: page.period === undefined ? 'current' : page.period, env: pageEnv, topics: page.topics || [], apps, servers, ips, links, owners, rejected };
 }
 
 module.exports = { verifyReading, DOC_SOURCES };

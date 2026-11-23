@@ -91,7 +91,7 @@ function chunkPage(input, chunkChars) {
 
 /**
  * @param {object} llm   client créé par createLlmClient
- * @param {object} input { title, ancestors, space, updatedAt, sections?|text, diagramsText, apps, consignes, knownApps? }
+ * @param {object} input { title, ancestors, space, updatedAt, today (AAAA-MM-JJ), sections?|text, diagramsText, apps, consignes, knownApps? }
  * @param {object} [opts] { chunkChars = 12000, maxTokens } (l'appelant passe config.llm.maxTokens.extract)
  * @returns {Promise<Reading>}
  */
@@ -108,6 +108,7 @@ async function readPage(llm, input, { chunkChars = 12000, maxTokens = 4096 } = {
       ancestors: input.ancestors,
       space: input.space,
       updatedAt: input.updatedAt,
+      today: input.today,
       text: chunks[i].text,
       diagramsText: chunks[i].diagramsText,
       apps: input.apps,

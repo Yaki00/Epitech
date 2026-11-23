@@ -1,6 +1,6 @@
 {
   "OrderHub - Architecture": {
-    "page": { "kind": "architecture", "period": "current", "env": "PRD", "topics": ["servers", "databases", "contacts"] },
+    "page": { "kind": "architecture", "period": "current", "env": "PRD", "envEvidence": "le nouveau serveur srvnew01 en production", "topics": ["servers", "databases", "contacts"] },
     "applications": [{ "name": "OrderHub", "written": "OrderHub", "role": "subject", "evidence": "OrderHub tourne sur srvorh01" }],
     "entities": [
       { "name": "srvorh01", "type": "server", "env": "PRD", "ip": "10.20.40.11", "status": "active", "evidence": "srvorh01 | 10.20.40.11" },

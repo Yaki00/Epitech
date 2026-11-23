@@ -39,8 +39,8 @@ const userText = (call) => call.messages.filter((m) => m.role === 'user').map((m
 const systemText = (call) => call.messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n');
 
 describe('lecture IA d\'une page', () => {
-  test('READING_VERSION is 2 (table rule added to the system prompt)', () => {
-    assert.equal(READING_VERSION, 2);
+  test('READING_VERSION is 3 (date du jour, période par lien, environnement cité, définition de architecture)', () => {
+    assert.equal(READING_VERSION, 3);
   });
 
   test('sanitize keeps only allowed values', () => {
@@ -64,7 +64,7 @@ describe('lecture IA d\'une page', () => {
         { name: 'Alice Martin', kind: 'robot', application: null, role: 'owner', evidence: 'Alice Martin' },
       ],
     });
-    assert.deepEqual(r.page, { kind: 'other', period: null, env: 'PRD', topics: ['servers', 'contacts'] });
+    assert.deepEqual(r.page, { kind: 'other', period: null, env: 'PRD', envEvidence: null, topics: ['servers', 'contacts'] });
     assert.deepEqual(
       r.applications.map((a) => [a.name, a.written, a.role]),
       [
@@ -85,7 +85,7 @@ describe('lecture IA d\'une page', () => {
 
   test('sanitize tolerates missing or broken parts', () => {
     const r = sanitizeReading({ page: null, applications: 'x', entities: [null, 3], links: undefined });
-    assert.deepEqual(r, emptyReading({ page: { kind: 'other', period: 'current', env: null, topics: [] } }));
+    assert.deepEqual(r, emptyReading({ page: { kind: 'other', period: 'current', env: null, envEvidence: null, topics: [] } }));
     assert.deepEqual(sanitizeReading(null).applications, []);
     const o = sanitizeReading({ page: {}, owners: [{ name: 'Équipe Socle', kind: 'team', application: 'null', role: 'support', evidence: 'Équipe Socle' }] });
     assert.equal(o.owners[0].application, null);
@@ -144,7 +144,7 @@ describe('lecture IA d\'une page', () => {
       owners: [{ name: 'Alice Martin', kind: 'person', application: null, role: 'Responsable', evidence: 'Alice Martin' }],
     });
     // « recette » et « UAT » : vocabulaire maison, sans synonyme réglé ils ne donnent aucun environnement
-    assert.deepEqual(r.page, { kind: 'meeting', period: 'past', env: null, topics: [] });
+    assert.deepEqual(r.page, { kind: 'meeting', period: 'past', env: null, envEvidence: null, topics: [] });
     assert.deepEqual(r.applications.map((a) => a.role), ['subject', 'cited']);
     assert.deepEqual(
       r.entities.map((e) => [e.name, e.env, e.status]),
@@ -452,7 +452,7 @@ describe('règle des tableaux de serveurs (consignes système)', () => {
     // texte d'un tableau tel que la page le rend : cellules séparées par « | »
     const pageText = 'Facturation : architecture\nServeur | Environnement | IP\nsrvfac01 | PRD | 10.1.2.3';
     const reading = sanitizeReading({
-      page: { kind: 'architecture', period: 'current', env: 'PRD', topics: ['servers'] },
+      page: { kind: 'architecture', period: 'current', env: null, topics: ['servers'] },
       applications: [{ name: 'Facturation', written: 'Facturation', role: 'subject', evidence: 'Facturation : architecture' }],
       entities: [{ name: 'srvfac01', type: 'server', env: 'PRD', ip: '10.1.2.3', status: 'active', evidence: 'srvfac01 | PRD | 10.1.2.3' }],
       links: [{ from: 'Facturation', to: 'srvfac01', type: 'runs_on', evidence: 'srvfac01 | PRD | 10.1.2.3' }],
@@ -463,3 +463,80 @@ describe('règle des tableaux de serveurs (consignes système)', () => {
   });
 });
 
+
+describe('banc 1 : date du jour, période par lien, environnement de page, nature architecture', () => {
+  const { pageHeaderLines, SYSTEM } = require('../src/reading/prompt');
+
+  test('the date of the day is written in the header, never in the quotable header lines', () => {
+    const messages = buildReadingMessages({ title: 'Plan de capacité 2026', ancestors: ['Exploitation'], updatedAt: '2026-02-01T10:00:00Z', today: '2026-11-23', text: 'x', apps: APPS });
+    const user = messages.find((m) => m.role === 'user').content;
+    assert.ok(user.includes('Date du jour : 2026-11-23'));
+    assert.ok(user.includes('Dernière modification : 2026-02-01'));
+    // les lignes ajoutées au texte contrôlé (citations) ne contiennent pas la date du jour
+    assert.ok(!pageHeaderLines({ title: 'Plan de capacité 2026', ancestors: ['Exploitation'] }).join('\n').includes('Date du jour'));
+    // sans date fournie : pas de ligne
+    const bare = buildReadingMessages({ title: 'T', text: 'x', apps: APPS });
+    assert.ok(!bare[1].content.includes('Date du jour'));
+    // le prompt dit de juger la période par rapport à cette date
+    assert.match(SYSTEM, /date du jour/);
+    assert.match(SYSTEM, /L'année en cours est actuelle/);
+  });
+
+  test('readPage passes the date of the day to every chunk', async () => {
+    const llm = fakeLlm([emptyReading(), emptyReading()]);
+    await readPage(llm, { title: 'Long', today: '2026-11-23', sections: [{ heading: 'A', text: 'a'.repeat(300) }, { heading: 'B', text: 'b'.repeat(300) }], apps: APPS }, { chunkChars: 400 });
+    assert.equal(llm.calls.length, 2);
+    for (const c of llm.calls) assert.ok(userText(c).includes('Date du jour : 2026-11-23'));
+  });
+
+  test('system prompt: architecture is installation, not a flow matrix ; env only when written ; link period', () => {
+    assert.match(SYSTEM, /matrice des flux/);
+    assert.match(SYSTEM, /n'est pas une page architecture/);
+    assert.match(SYSTEM, /Jamais déduit des noms ou des adresses des serveurs/);
+    assert.ok(SYSTEM.includes('"envEvidence"'));
+    assert.ok(SYSTEM.includes('"period": "current|past|target|null"'));
+    assert.match(SYSTEM, /marque chaque lien avec sa propre période/);
+    assert.ok(!/[\u2013\u2014]/.test(SYSTEM));
+  });
+
+  test('link period: allowed values, french aliases, unreadable or missing = null (page period)', () => {
+    const link = (period) => ({ from: 'A', to: 'srv1', type: 'runs_on', period, evidence: `A sur srv1 ${period}` });
+    const r = sanitizeReading({
+      page: { period: 'target' },
+      links: [link('current'), { ...link('cible'), to: 'srv2' }, { ...link('Ancienne'), to: 'srv3' }, { ...link('existant'), to: 'srv4' }, { ...link('bientôt'), to: 'srv5' }, { ...link(undefined), to: 'srv6' }, { ...link('null'), to: 'srv7' }],
+    });
+    assert.deepEqual(r.links.map((l) => [l.to, l.period]), [
+      ['srv1', 'current'],
+      ['srv2', 'target'],
+      ['srv3', 'past'],
+      ['srv4', 'current'],
+      ['srv5', null],
+      ['srv6', null],
+      ['srv7', null],
+    ]);
+  });
+
+  test('same link seen twice: the current occurrence wins with its quote', () => {
+    const r = sanitizeReading({
+      links: [
+        { from: 'A', to: 'srv1', type: 'db_on', period: 'past', evidence: 'en 2023 A rejoint srv1' },
+        { from: 'A', to: 'srv1', type: 'db_on', period: 'current', evidence: 'aujourd hui A est sur srv1' },
+      ],
+    });
+    assert.deepEqual(r.links.map((l) => [l.period, l.evidence]), [['current', 'aujourd hui A est sur srv1']]);
+    // entre morceaux aussi
+    const m = mergeReadings([
+      sanitizeReading({ links: [{ from: 'A', to: 'srv1', type: 'db_on', period: 'target', evidence: 'cible : A sur srv1' }] }),
+      sanitizeReading({ links: [{ from: 'A', to: 'srv1', type: 'db_on', period: 'current', evidence: 'existant : A sur srv1' }] }),
+    ]);
+    assert.deepEqual(m.links.map((l) => [l.period, l.evidence]), [['current', 'existant : A sur srv1']]);
+  });
+
+  test('page env keeps its quote; no env, no quote; merge keeps the env that has a quote', () => {
+    assert.deepEqual(sanitizeReading({ page: { env: 'PRD', envEvidence: 'Serveurs de production' } }).page.envEvidence, 'Serveurs de production');
+    assert.equal(sanitizeReading({ page: { env: null, envEvidence: 'Serveurs de production' } }).page.envEvidence, null);
+    assert.equal(sanitizeReading({ page: { env: 'PRD', envEvidence: 'null' } }).page.envEvidence, null);
+    const m = mergeReadings([sanitizeReading({ page: { env: 'PRD' } }), sanitizeReading({ page: { env: 'STG', envEvidence: 'Infra : recette STG' } })]);
+    assert.deepEqual([m.page.env, m.page.envEvidence], ['STG', 'Infra : recette STG']);
+  });
+});
