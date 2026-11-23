@@ -19,13 +19,13 @@ PRINCIPES
 4. Jamais d'adresse électronique ni de numéro de téléphone, ni dans les noms ni dans les citations.
 5. Si tu reçois un morceau d'une page longue, rends ce que contient ce morceau ; juge la nature et la période avec le titre et ce que tu lis.
 
-FORMAT (valeurs exactement comme ci-dessous, en anglais)
-{"page": {"kind": "...", "period": "...", "env": "PRD|STG|DEV|null", "topics": []},
+FORMAT
+{"page": {"kind": "architecture|operations|install|incident|release|meeting|project|other", "period": "current|past|target", "env": "PRD|STG|DEV|null", "topics": []},
  "applications": [{"name": "...", "written": "...", "role": "subject|cited", "evidence": "..."}],
- "entities": [{"name": "...", "type": "...", "env": "PRD|STG|DEV|null", "status": "active|decommissioned|planned", "evidence": "..."}],
- "links": [{"from": "...", "to": "...", "type": "...", "evidence": "..."}],
+ "entities": [{"name": "...", "type": "server|ip|database|url|queue|path|person|team", "env": "PRD|STG|DEV|null", "status": "active|decommissioned|planned", "evidence": "..."}],
+ "links": [{"from": "...", "to": "...", "type": "runs_on|uses_db|db_on|calls|reads_from|writes_to|depends_on", "evidence": "..."}],
  "owners": [{"name": "...", "kind": "person|team", "application": "...|null", "role": "owner|support|oncall|other", "evidence": "..."}]}
-Mets une liste vide quand il n'y a rien.
+Les valeurs proposées (kind, period, env, role, type, status, kind des owners) restent en anglais, telles qu'écrites ci-dessus : ne les traduis pas. Mets une liste vide quand il n'y a rien.
 
 PAGE
 kind : ce qu'est la page d'après son contenu, jamais d'après un seul mot du titre.

@@ -1,6 +1,6 @@
 'use strict';
 const assert = require('assert').strict;
-const { sanitizeReading } = require('../src/reading/schema');
+const { sanitizeReading, mergeReadings } = require('../src/reading/schema');
 const { buildReadingMessages } = require('../src/reading/prompt');
 const { readPage, READING_VERSION } = require('../src/reading/readPage');
 const { diagramsToText } = require('../src/parse/confluence/drawioText');
@@ -64,7 +64,7 @@ describe('lecture IA d\'une page', () => {
         { name: 'Alice Martin', kind: 'robot', application: null, role: 'owner', evidence: 'Alice Martin' },
       ],
     });
-    assert.deepEqual(r.page, { kind: 'other', period: 'current', env: 'PRD', topics: ['servers', 'contacts'] });
+    assert.deepEqual(r.page, { kind: 'other', period: null, env: 'PRD', topics: ['servers', 'contacts'] });
     assert.deepEqual(
       r.applications.map((a) => [a.name, a.written, a.role]),
       [
@@ -75,7 +75,7 @@ describe('lecture IA d\'une page', () => {
     assert.deepEqual(
       r.entities.map((e) => [e.name, e.type, e.env, e.status]),
       [
-        ['srv-app-01', 'server', null, 'active'],
+        ['srv-app-01', 'server', 'PRD', null],
         ['srv-db-01', 'server', 'STG', 'decommissioned'],
       ]
     );
@@ -112,6 +112,72 @@ describe('lecture IA d\'une page', () => {
     assert.equal(r.entities.length, 1);
     assert.deepEqual([r.entities[0].env, r.entities[0].status], ['PRD', 'decommissioned']);
     assert.equal(r.links.length, 1);
+  });
+
+  test('french enum values are mapped (ancienne → past, décommissionné → decommissioned, sujet → subject)', () => {
+    const r = sanitizeReading({
+      page: { kind: 'Réunion', period: 'Ancienne', env: 'recette', topics: [] },
+      applications: [
+        { name: 'Facturation', role: 'sujet', evidence: 'Facturation' },
+        { name: 'Portail Adhérents', role: 'Cité', evidence: 'PDA' },
+      ],
+      entities: [
+        { name: 'srv-a', type: 'server', env: 'production', status: 'décommissionné', evidence: 'srv-a' },
+        { name: 'srv-b', type: 'server', env: 'Développement', status: 'Prévu', evidence: 'srv-b' },
+        { name: 'srv-c', type: 'server', env: 'UAT', status: 'en service', evidence: 'srv-c' },
+        { name: 'srv-d', type: 'server', env: 'preprod', status: 'Arrêté', evidence: 'srv-d' },
+      ],
+      owners: [{ name: 'Alice Martin', kind: 'person', application: null, role: 'Responsable', evidence: 'Alice Martin' }],
+    });
+    assert.deepEqual(r.page, { kind: 'meeting', period: 'past', env: 'STG', topics: [] });
+    assert.deepEqual(r.applications.map((a) => a.role), ['subject', 'cited']);
+    assert.deepEqual(
+      r.entities.map((e) => [e.name, e.env, e.status]),
+      [
+        ['srv-a', 'PRD', 'decommissioned'],
+        ['srv-b', 'DEV', 'planned'],
+        ['srv-c', 'STG', 'active'],
+        ['srv-d', 'STG', 'decommissioned'],
+      ]
+    );
+    assert.equal(r.owners[0].role, 'owner');
+    assert.equal(sanitizeReading({ page: { period: 'cible' } }).page.period, 'target');
+    assert.equal(sanitizeReading({ page: { period: 'Actuelle' } }).page.period, 'current');
+    assert.equal(sanitizeReading({ page: { kind: 'Exploitation' } }).page.kind, 'operations');
+  });
+
+  test('unknown non-empty period and status become null', () => {
+    const r = sanitizeReading({
+      page: { kind: 'architecture', period: 'bientôt peut-être' },
+      entities: [
+        { name: 'srv-a', type: 'server', status: 'en sommeil', evidence: 'srv-a' },
+        { name: 'srv-b', type: 'server', status: 'active', evidence: 'srv-b' },
+        { name: 'srv-b', type: 'server', status: '???', evidence: 'srv-b encore' },
+        { name: 'srv-c', type: 'server', status: '???', evidence: 'srv-c' },
+        { name: 'srv-c', type: 'server', status: 'decommissioned', evidence: 'srv-c arrêté' },
+      ],
+    });
+    assert.equal(r.page.period, null);
+    // fusion prudente : arrêté ou prévu, puis non fiable, puis actif
+    assert.deepEqual(r.entities.map((e) => [e.name, e.status]), [['srv-a', null], ['srv-b', null], ['srv-c', 'decommissioned']]);
+    // période non fiable au premier morceau : une période ancienne ou cible plus loin est reprise
+    const merged = mergeReadings([r, sanitizeReading({ page: { period: 'current' } }), sanitizeReading({ page: { period: 'target' } })]);
+    assert.equal(merged.page.period, 'target');
+    assert.equal(mergeReadings([r, sanitizeReading({ page: { period: 'current' } })]).page.period, null);
+  });
+
+  test('missing period and status keep defaults', () => {
+    const r = sanitizeReading({
+      page: { kind: 'architecture', period: '' },
+      entities: [
+        { name: 'srv-a', type: 'server', evidence: 'srv-a' },
+        { name: 'srv-b', type: 'server', status: '  ', evidence: 'srv-b' },
+        { name: 'srv-c', type: 'server', status: 'null', evidence: 'srv-c' },
+      ],
+    });
+    assert.equal(r.page.period, 'current');
+    assert.equal(sanitizeReading({ page: {} }).page.period, 'current');
+    assert.deepEqual(r.entities.map((e) => e.status), ['active', 'active', 'active']);
   });
 
   test('items without evidence are dropped', () => {
@@ -216,6 +282,9 @@ describe('lecture IA d\'une page', () => {
     assert.ok(!bare[0].content.includes("Consignes de l'entreprise"));
     // aucun tiret long ni demi-cadratin dans les consignes système
     assert.ok(!/[\u2013\u2014]/.test(system));
+    // valeurs de liste à garder en anglais, montrées dans le squelette
+    assert.ok(system.includes('ne les traduis pas'));
+    assert.ok(system.includes('"period": "current|past|target"'));
   });
 
   test('short page makes one extract call', async () => {
