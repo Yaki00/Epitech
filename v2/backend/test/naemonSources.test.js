@@ -205,4 +205,16 @@ describe('poller', () => {
     assert.deepEqual(m.apps.find((a) => a.name === 'alto').naemonHostgroups, ['hg-alto-prd', 'hg-alto-stg']);
     assert.deepEqual(m.apps.find((a) => a.name === 'brief').naemonHostgroups, []);
   });
+
+  test('hash du périmètre identique à la v1 : naemonHostgroups n y entre pas', () => {
+    const { sha256 } = require('../src/lib/hash');
+    const dir = tmp();
+    const write = (apps) => {
+      fs.writeFileSync(path.join(dir, 'p.json'), JSON.stringify({ applications: apps }));
+      return loadPerimeter(path.join(dir, 'p.json')).hash;
+    };
+    const v1 = sha256(JSON.stringify([[{ name: 'alto', aliases: ['AL'], auid: null }], null])).slice(0, 12);
+    assert.equal(write([{ name: 'alto', aliases: ['AL'] }]), v1);
+    assert.equal(write([{ name: 'alto', aliases: ['AL'], naemonHostgroups: ['hg1'] }]), v1);
+  });
 });

@@ -90,7 +90,7 @@ const config = {
 
   // supervision Naemon : off (défaut), thruk (API REST), csv (export Thruk) ; mock en mode démo
   naemon: {
-    source: ['thruk', 'csv', 'mock'].includes(env('NAEMON_SOURCE', 'off')) ? env('NAEMON_SOURCE', 'off') : 'off',
+    source: ['thruk', 'csv', 'mock'].includes(env('NAEMON_SOURCE', 'off').trim().toLowerCase()) ? env('NAEMON_SOURCE', 'off').trim().toLowerCase() : 'off',
     thrukUrl: env('NAEMON_THRUK_URL', ''),
     token: env('NAEMON_TOKEN', ''),
     user: env('NAEMON_USER', ''),

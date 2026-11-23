@@ -77,7 +77,8 @@ function loadPerimeter(file) {
     ignoreOtherApplications: raw.ignoreOtherApplications !== false,
     architectureKeywords,
     // changer la liste ou les mots-clés relance l'analyse des pages concernées
-    hash: sha256(JSON.stringify([applications, architectureKeywords])).slice(0, 12),
+    // naemonHostgroups n'influence pas l'analyse des pages : hors du hash (même valeur qu'en v1, pas de réanalyse)
+    hash: sha256(JSON.stringify([applications.map(({ naemonHostgroups, ...rest }) => rest), architectureKeywords])).slice(0, 12),
   };
 }
 
