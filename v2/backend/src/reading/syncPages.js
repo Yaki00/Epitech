@@ -11,7 +11,7 @@
  * Sans IA : la page est lue et stockée, rien n'est déduit (`stats.notRead`). Lecture en échec : la
  * page garde sa lecture précédente (rien n'est purgé) et passe en erreur, reprise au passage suivant.
  * Après le passage, les nœuds créés par des lectures qui n'ont plus aucun lien actif sont marqués
- * retirés (jamais supprimés). Les rapports CSV sont tirés du graphe et des lignes document.
+ * retirés (jamais supprimés), sauf les personnes et équipes (anciens responsables montrés comme tels). Les rapports CSV sont tirés du graphe et des lignes document.
  */
 const { sha256 } = require('../lib/hash');
 const { writeCsvReport } = require('../lib/report');
@@ -252,11 +252,17 @@ async function runConfluenceSync({
   }
 }
 
-/** Nœuds créés par des lectures (hors inventaire) sans aucun lien actif : retirés ; de nouveau liés : réactivés. */
+/**
+ * Nœuds créés par des lectures (hors inventaire) sans aucun lien actif : retirés ; de nouveau liés : réactivés.
+ * Personnes et équipes exclues : citées dans une page ancienne, elles restent visibles comme anciens
+ * responsables (leur lien owned_by porte la période).
+ */
+const NEVER_RETIRED = new Set(['person', 'team']);
 function retireOrphans(repo, now) {
   const at = new Date(now).toISOString();
   let n = 0;
   for (const type of Object.keys(repo.countByType())) {
+    if (NEVER_RETIRED.has(type)) continue;
     for (const node of repo.listByType(type)) {
       if (!node.attrs.fromLlm || hasInventoryRow(node)) continue;
       const active = [...repo.edgesFrom(node.id), ...repo.edgesTo(node.id)].some((e) => !isInactiveEdge(e));

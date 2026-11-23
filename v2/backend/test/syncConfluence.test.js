@@ -166,6 +166,18 @@ describe('analyse Confluence par lecture IA', () => {
     assert.ok(!repo.getNode('server:srvnew01').attrs.retired);
   });
 
+  test('person cited only in an old page is not retired', async () => {
+    const bruno = { name: 'Bruno Petit', kind: 'person', application: 'OrderHub', role: 'owner', evidence: "Responsable à l'époque : Bruno Petit" };
+    fake.state.answer = (title) => (title === P2 ? { ...READINGS[P2], owners: [bruno] } : READINGS[title]);
+    const r = await run();
+    const owned = repo.edgesFrom('application:orderhub').find((e) => e.type === 'owned_by' && e.dst === 'person:bruno-petit');
+    assert.equal(owned.attrs.period, 'past'); // lien inactif : montré comme ancien par l'API
+    const person = repo.getNode('person:bruno-petit');
+    assert.equal(person.attrs.fromLlm, true);
+    assert.equal(person.attrs.retired, undefined);
+    assert.equal(r.stats.retired, 0);
+  });
+
   test('chunk failure: page in error, previous reading kept', async () => {
     await run();
     const before = repo.getDocument('confluence:7001');
