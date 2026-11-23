@@ -19,7 +19,8 @@ export default defineConfig({
     emptyOutDir: true,
     // Edge / Chrome récents du poste de travail
     target: 'es2022',
-    chunkSizeWarningLimit: 900,
+    // ELK (disposition de la carte, 1,4 Mo) n'est chargé que dans le worker de la cartographie
+    chunkSizeWarningLimit: 1600,
   },
   worker: { format: 'es' },
   test: {

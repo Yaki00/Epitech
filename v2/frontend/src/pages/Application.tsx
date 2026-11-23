@@ -4,7 +4,7 @@
  * Données : /api/applications/:id (relu toutes les minutes), états en direct (/api/status partagé),
  * /api/changes pour l'historique (chargé à l'ouverture de l'onglet).
  */
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router';
 import {
   Activity,
@@ -323,21 +323,23 @@ function EnvStatesCard({ app }: { app: ApplicationDetail }) {
 
 // ---------- Cartographie ----------
 
+// la carte (React Flow, ELK) n'est chargée qu'à l'ouverture de l'onglet
+const MapView = lazy(() => import('../map/MapView').then((m) => ({ default: m.MapView })));
+
 function MapTab({ app }: { app: ApplicationDetail }) {
   const { t } = useI18n();
   return (
-    <Card>
-      <EmptyState
-        icon={Network}
-        title={t('appDetail.map.title')}
-        text={t('appDetail.map.text')}
-        action={
-          <Button variant="primary" to={appMapHref(app.id)} icon={Network}>
-            {t('appDetail.map.open')}
+    <Suspense fallback={<SkeletonRows rows={6} />}>
+      <MapView
+      embedded
+      scope={`app:${app.id}`}
+      toolbarStart={
+        <Button to={appMapHref(app.id)} icon={Network} label={t('appDetail.map.text')}>
+            {t('map.openFull')}
           </Button>
         }
       />
-    </Card>
+    </Suspense>
   );
 }
 
