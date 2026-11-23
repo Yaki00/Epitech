@@ -25,6 +25,11 @@ const arg = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : unde
 
 async function main() {
   const c = config.confluence;
+  if (!c.fetch) {
+    // code 0 : ce n'est pas une panne, la récupération est volontairement assurée ailleurs (v1)
+    log.warn('CONFLUENCE_FETCH=false : la récupération Confluence est assurée par la v1 ; la v2 lit seulement son export (CONFLUENCE_EXPORT_DIR). Rien à faire.');
+    return;
+  }
   const api = createConfluenceApi({ baseUrl: c.baseUrl, token: c.token, user: c.user, password: c.password, timeoutMs: c.timeoutMs }, { logger: log });
 
   if (args.includes('--list-spaces')) {

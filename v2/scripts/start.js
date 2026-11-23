@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 /**
- * Lance Lyra. Si frontend/dist existe, le backend sert l'interface et l'API sur le même port (3001).
+ * Lance Lyra. Si frontend/dist existe, le backend sert l'interface et l'API sur le même port (3002).
  * Sinon, sur une machine Node >= 20, lance aussi Vite en développement (:3000). Ctrl+C arrête tout. Fonctionne sous Windows, macOS et Linux, sans dépendance.
  */
 const { spawn } = require('child_process');
@@ -28,7 +28,7 @@ if (!hasDist) {
 }
 
 if (!fs.existsSync(path.join(root, 'backend', 'node_modules'))) {
-  console.error('\n✖ backend/node_modules absent : lancez d\'abord "npm run setup" à la racine de v1.\n');
+  console.error('\n✖ backend/node_modules absent : lancez d\'abord "npm run setup" à la racine de v2.\n');
   process.exit(1);
 }
 if (!fs.existsSync(path.join(root, 'backend', '.env'))) {
@@ -57,7 +57,7 @@ const children = services.map((s) => {
   return child;
 });
 
-const port = process.env.PORT || 3001;
+const port = process.env.PORT || 3002;
 console.log(
   hasDist
     ? `\n  Lyra démarre…  interface et API : http://localhost:${port}\n  Ctrl+C pour arrêter.\n`

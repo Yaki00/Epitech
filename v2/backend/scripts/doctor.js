@@ -80,7 +80,8 @@ async function main() {
   }
 
   // 4. API Confluence (récupération des pages)
-  if (config.confluence.baseUrl) {
+  if (!config.confluence.fetch) info('CONFLUENCE_FETCH=false : récupération Confluence assurée par la v1, API non vérifiée ici');
+  else if (config.confluence.baseUrl) {
     await check('API Confluence', async () => {
       const { createConfluenceApi } = require('../src/fetch/confluenceApi');
       const c = config.confluence;

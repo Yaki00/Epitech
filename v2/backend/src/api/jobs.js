@@ -13,11 +13,15 @@ const MAX_LINES = 400;
 
 /** Tâches proposées dans l'interface : étapes = [script, ...arguments]. */
 function jobDefinitions(env = process.env) {
-  const confluenceFetch = env.CONFLUENCE_BASE_URL ? [['fetch-confluence.js']] : [];
+  // CONFLUENCE_FETCH=false : l'export est écrit par la v1, la v2 le lit seulement
+  const fetchOff = env.CONFLUENCE_FETCH !== undefined && env.CONFLUENCE_FETCH !== '' && !['1', 'true', 'yes'].includes(String(env.CONFLUENCE_FETCH).toLowerCase());
+  const confluenceFetch = env.CONFLUENCE_BASE_URL && !fetchOff ? [['fetch-confluence.js']] : [];
   return {
     confluence: {
       label: 'Confluence',
-      description: 'Récupère les pages modifiées, les analyse avec l\'IA, puis met à jour les résumés',
+      description: fetchOff
+        ? "Analyse l'export existant avec l'IA, puis met à jour les résumés (récupération assurée par la v1, CONFLUENCE_FETCH=false)"
+        : 'Récupère les pages modifiées, les analyse avec l\'IA, puis met à jour les résumés',
       steps: [...confluenceFetch, ['sync-confluence.js', '--llm'], ['summarize-apps.js']],
     },
     apm: { label: 'APM', description: "Télécharge l'export s'il a un lien, puis l'importe", steps: [['fetch-inventory.js', 'apm'], ['sync-inventory.js', 'apm']] },

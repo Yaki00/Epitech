@@ -8,6 +8,7 @@
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { migrateFromV1 } = require('./lib/migrate');
 
 const root = path.resolve(__dirname, '..');
 const major = Number(process.versions.node.split('.')[0]);
@@ -26,6 +27,15 @@ if (major >= 20) npmInstall('frontend');
 else {
   console.log(`\nℹ Node ${process.versions.node} : le frontend (Vite 6) n'est pas installé ici, il demande Node >= 20.`);
   console.log('  Compilez-le sur une machine Node >= 20 (npm run build) puis copiez frontend/dist dans ce dossier.');
+}
+
+// Reprise de la v1 : si ../v1/backend/.env existe et que backend/.env n'existe pas encore,
+// on reprend config, cache IA, store et CSV de la v1 (voir scripts/lib/migrate.js).
+// Sans v1 à côté : copie des exemples ci-dessous, comme avant.
+const v1Root = path.join(root, '..', 'v1');
+if (fs.existsSync(path.join(v1Root, 'backend', '.env'))) {
+  console.log('\n> Reprise de la v1 détectée');
+  migrateFromV1({ v1Root, v2Root: root, log: (m) => console.log(`✔ ${m}`) });
 }
 
 const copies = [

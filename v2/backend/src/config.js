@@ -65,6 +65,8 @@ const config = {
     // export local : un dossier par page (metadata.json + page.html), écrit par scripts/fetch-confluence.js
     exportDir: path.resolve(ROOT, env('CONFLUENCE_EXPORT_DIR', './data/raw/confluence')),
     // récupération (scripts/fetch-confluence.js) : API REST Confluence Server / Data Center
+    // false : la v2 lit l'export mais ne récupère jamais (récupération assurée par la v1)
+    fetch: bool('CONFLUENCE_FETCH', 'true'),
     baseUrl: env('CONFLUENCE_BASE_URL', ''),
     token: env('CONFLUENCE_TOKEN', ''),
     user: env('CONFLUENCE_USER', ''),
