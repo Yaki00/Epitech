@@ -25,9 +25,11 @@ function docScore(repo, appId) {
     if (n && n.type === 'server' && !isRetired(n)) servers.set(n.id, n);
   }
 
-  // pages liées (documented_in) non retirées, avec le contrôle d'architecture porté par le lien
+  // pages liées (documented_in) non retirées, sujet seulement, avec le contrôle d'architecture porté par le lien
   const pages = [];
   for (const e of out.filter((x) => x.type === 'documented_in')) {
+    const role = e.attrs && e.attrs.role;
+    if (role && role !== 'subject') continue; // page seulement citée : ne documente pas l'application (rôle absent : anciennes données)
     const doc = repo.getNode(e.dst);
     if (doc && !isRetired(doc)) pages.push({ doc, audit: (e.attrs && e.attrs.audit) || null });
   }

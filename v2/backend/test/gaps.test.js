@@ -50,7 +50,7 @@ describe('computeGaps', () => {
     addApp('alto');
     addSrv('srvalto01', 'alto');
     const g = computeGaps(repo, null);
-    assert.deepEqual(g, { notMonitored: [], unknownMonitored: [], citedNotInInventory: [] });
+    assert.deepEqual(g, { notMonitored: [], unknownMonitored: [], citedNotInInventory: [], toValidate: [] });
   });
 });
 

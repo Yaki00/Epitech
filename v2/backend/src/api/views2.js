@@ -68,8 +68,14 @@ function gapsView(d) {
     notMonitored: g.notMonitored.map((n) => serverLite(repo, n.id)),
     unknownMonitored: g.unknownMonitored,
     citedNotInInventory: g.citedNotInInventory,
+    toValidate: g.toValidate.map((l) => ({
+      server: serverLite(repo, l.server.id),
+      application: { id: l.application.id, name: l.application.name },
+      page: l.page ? { id: l.page.id, title: l.page.name, url: l.page.attrs.url || null } : null,
+      type: l.type,
+    })),
   };
-  out.counts = { notMonitored: out.notMonitored.length, unknownMonitored: out.unknownMonitored.length, citedNotInInventory: out.citedNotInInventory.length };
+  out.counts = { notMonitored: out.notMonitored.length, unknownMonitored: out.unknownMonitored.length, citedNotInInventory: out.citedNotInInventory.length, toValidate: out.toValidate.length };
   return { gaps: out, raw: g };
 }
 
@@ -216,6 +222,7 @@ function serverDetail(d, id) {
     attrs: n.attrs,
     env: serverEnv(n),
     retired: isRetired(n),
+    outOfInventory: Boolean(n.attrs.outOfInventory),
     state: serverState(ctx, id),
     ack: st ? st.ack : false,
     output: st ? st.output : '',
@@ -242,7 +249,7 @@ function simulate(d, nodeIds, { includeRetired = false, depth = 5, minConfidence
     for (const it of r.items) {
       if (origin.has(it.id)) continue;
       const prev = best.get(it.id);
-      if (!prev || it.depth < prev.depth) best.set(it.id, { id: it.id, name: it.name, type: it.type, depth: it.depth, via: it.via });
+      if (!prev || it.depth < prev.depth) best.set(it.id, { id: it.id, name: it.name, type: it.type, depth: it.depth, via: it.via, outOfInventory: Boolean((repo.getNode(it.id) || { attrs: {} }).attrs.outOfInventory) });
     }
   }
   const impacted = [...best.values()].sort((a, b) => a.depth - b.depth || byName(a, b));
@@ -258,6 +265,7 @@ function mapView(d, { scope = 'perimeter', envs = null, includeRetired = false }
   const wanted = new Set((envs || []).map(normalizeEnv).filter(Boolean));
   if (!wanted.size) ['PRD', 'STG'].forEach((e) => wanted.add(e));
   const keep = (x) => includeRetired || !isRetired(x);
+  const keepEdge = (e) => includeRetired || !isInactiveEdge(e); // liens anciens, cibles ou à valider : seulement avec includeRetired
 
   let focus;
   const extraApps = new Set();
@@ -267,8 +275,8 @@ function mapView(d, { scope = 'perimeter', envs = null, includeRetired = false }
     const app = repo.getNode(scope.slice(4).startsWith('application:') ? scope.slice(4) : `application:${scope.slice(4)}`);
     if (!app || app.type !== 'application') return null;
     focus = [app];
-    for (const e of repo.edgesFrom(app.id)) if (e.type === 'calls' && keep(e)) extraApps.add(e.dst);
-    for (const e of repo.edgesTo(app.id)) if (e.type === 'calls' && keep(e)) extraApps.add(e.src);
+    for (const e of repo.edgesFrom(app.id)) if (e.type === 'calls' && keepEdge(e)) extraApps.add(e.dst);
+    for (const e of repo.edgesTo(app.id)) if (e.type === 'calls' && keepEdge(e)) extraApps.add(e.src);
   }
 
   const nodes = new Map();
@@ -277,7 +285,7 @@ function mapView(d, { scope = 'perimeter', envs = null, includeRetired = false }
   for (const id of extraApps) add(repo.getNode(id));
   for (const a of focus) {
     for (const e of repo.edgesFrom(a.id)) {
-      if (!keep(e) || (e.type !== 'runs_on' && e.type !== 'uses_db')) continue;
+      if (!keepEdge(e) || (e.type !== 'runs_on' && e.type !== 'uses_db')) continue;
       const n = repo.getNode(e.dst);
       if (!n) continue;
       if (n.type === 'server') {
@@ -293,11 +301,16 @@ function mapView(d, { scope = 'perimeter', envs = null, includeRetired = false }
   for (const id of nodes.keys()) {
     if (nodes.get(id).type !== 'application') continue;
     for (const e of repo.edgesFrom(id)) {
-      if (!['runs_on', 'uses_db', 'calls'].includes(e.type) || !keep(e) || !nodes.has(e.dst)) continue;
+      if (!['runs_on', 'uses_db', 'calls'].includes(e.type) || !keepEdge(e) || !nodes.has(e.dst)) continue;
       const k = `${e.src}|${e.dst}|${e.type}`;
       const prev = edges.get(k);
-      if (prev) prev.retired = prev.retired && isRetired(e);
-      else edges.set(k, { id: String(e.id), source: e.src, target: e.dst, type: e.type, retired: isRetired(e) });
+      const inactive = isInactiveEdge(e);
+      if (prev) {
+        prev.retired = prev.retired && isRetired(e);
+        if (prev.inactive && !inactive) Object.assign(prev, { inactive: false, trust: (e.attrs && e.attrs.trust) || null, period: (e.attrs && e.attrs.period) || null });
+      } else {
+        edges.set(k, { id: String(e.id), source: e.src, target: e.dst, type: e.type, retired: isRetired(e), inactive, trust: (e.attrs && e.attrs.trust) || null, period: (e.attrs && e.attrs.period) || null });
+      }
       if (e.type === 'runs_on') {
         if (!hosts.has(e.dst)) hosts.set(e.dst, new Set());
         hosts.get(e.dst).add(e.src);
@@ -314,6 +327,7 @@ function mapView(d, { scope = 'perimeter', envs = null, includeRetired = false }
       state: n.type === 'server' ? serverState(ctx, n.id) : n.type === 'application' ? appStatus(ctx, n.id).state : null,
       criticality: n.type === 'application' ? appCriticality(n) : null,
       retired: isRetired(n),
+      outOfInventory: n.type === 'server' && Boolean(n.attrs.outOfInventory),
       appIds: n.type === 'server' ? [...(hosts.get(n.id) || [])].sort() : [],
     }))
     .sort((a, b) => a.label.localeCompare(b.label));

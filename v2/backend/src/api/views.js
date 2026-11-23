@@ -7,6 +7,7 @@
 const { serverEnv, appCriticality, ENVS } = require('../lib/environment');
 const { docScore } = require('../quality/docScore');
 const { isInactiveEdge } = require('../graph/impact');
+const { nodeKey } = require('../store/repo');
 
 const isRetired = (x) => Boolean(x && x.attrs && x.attrs.retired);
 
@@ -65,33 +66,90 @@ function listApplications(repo, ctx = null) {
   return repo.listByType('application').map((a) => applicationSummary(repo, a, ctx));
 }
 
-/** Liens sortants d'un type donné, avec le nœud cible détaillé (onglets Serveurs / Bases). */
+const mark = (e, k) => (e.attrs && e.attrs[k]) || null;
+
+/**
+ * Liens sortants d'un type donné, avec le nœud cible détaillé (onglets Serveurs / Bases).
+ * Les liens inactifs (anciens, cibles, à valider) sont listés avec leurs marques (`trust`, `period`) et
+ * `active: false` : l'interface les grise, ils ne comptent pas comme actifs.
+ */
 function linkedNodes(repo, id, edgeType, ctx = null) {
-  const best = new Map();
+  const byDst = new Map();
   for (const e of repo.edgesFrom(id).filter((x) => x.type === edgeType)) {
-    const prev = best.get(e.dst);
-    const live = Boolean(prev && prev.live) || !isRetired(e); // actif tant qu'un lien non retiré existe
-    if (prev && prev.confidence >= e.confidence) {
-      prev.sources.add(e.source);
-      prev.live = live;
-      continue;
-    }
-    best.set(e.dst, { confidence: e.confidence, live, sources: new Set([...(prev?.sources || []), e.source]) });
+    if (!byDst.has(e.dst)) byDst.set(e.dst, []);
+    byDst.get(e.dst).push(e);
   }
-  return [...best.entries()]
-    .map(([dst, info]) => {
+  const rank = (e) => (isInactiveEdge(e) ? (isRetired(e) ? 0 : 1) : 2); // actif > inactif > retiré
+  return [...byDst.entries()]
+    .map(([dst, edges]) => {
       const n = repo.getNode(dst);
-      return n && { id: n.id, name: n.name, type: n.type, attrs: n.attrs, retired: isRetired(n) || !info.live, ...(n.type === 'server' ? { env: serverEnv(n), state: serverState(ctx, n.id) } : {}), confidence: info.confidence, sources: [...info.sources] };
+      if (!n) return null;
+      const best = edges.slice().sort((a, b) => rank(b) - rank(a) || b.confidence - a.confidence)[0];
+      const live = edges.some((e) => !isRetired(e)); // actif tant qu'un lien non retiré existe
+      return {
+        id: n.id,
+        name: n.name,
+        type: n.type,
+        attrs: n.attrs,
+        retired: isRetired(n) || !live,
+        active: !isRetired(n) && edges.some((e) => !isInactiveEdge(e)),
+        trust: mark(best, 'trust'),
+        period: mark(best, 'period'),
+        ...(n.type === 'server' ? { env: serverEnv(n), state: serverState(ctx, n.id), outOfInventory: Boolean(n.attrs.outOfInventory) } : {}),
+        confidence: best.confidence,
+        sources: [...new Set(edges.map((e) => e.source))],
+      };
     })
     .filter(Boolean)
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** Pages qui ont fourni un lien de responsable ou d'équipe (docId posé par la lecture). */
+function docsOf(repo, ids) {
+  return [...new Set(ids.filter(Boolean))]
+    .map((d) => repo.getNode(d))
+    .filter(Boolean)
+    .map((d) => ({ id: d.id, title: d.name, url: d.attrs.url || null }));
+}
+
+/**
+ * Responsables et équipes d'une application : ceux lus dans la documentation (liens owned_by) puis ceux
+ * de l'APM (attrs owner / supportTeam). `source` : 'doc' ou 'apm' ; les actuels d'abord, les anciens ensuite.
+ */
+function ownersOfApp(repo, app) {
+  const found = new Map(); // nature + nom normalisé -> entrée
+  const keyOf = (kind, name) => `${kind}:${nodeKey(kind, name)}`;
+  for (const e of repo.edgesFrom(app.id).filter((x) => x.type === 'owned_by' && !isRetired(x))) {
+    const n = repo.getNode(e.dst);
+    if (!n || isRetired(n)) continue;
+    const role = mark(e, 'role') || 'other';
+    const period = mark(e, 'period') || 'current';
+    const k = `${keyOf(n.type, n.name)}|${role}`;
+    const prev = found.get(k);
+    if (prev) {
+      if (period === 'current') prev.period = 'current';
+      prev.docIds.push(mark(e, 'docId'));
+    } else {
+      found.set(k, { id: n.id, name: n.name, kind: n.type, role, period, source: 'doc', docIds: [mark(e, 'docId')] });
+    }
+  }
+  const docKeys = new Set([...found.values()].map((o) => keyOf(o.kind, o.name)));
+  for (const [attr, kind, role] of [['owner', 'person', 'owner'], ['supportTeam', 'team', 'support']]) {
+    const name = app.attrs[attr];
+    if (!name || docKeys.has(keyOf(kind, name))) continue; // déjà connu par la documentation
+    const node = repo.getNode(`${kind}:${nodeKey(kind, name)}`);
+    found.set(`apm:${attr}`, { id: node ? node.id : null, name: String(name), kind, role, period: 'current', source: 'apm', docIds: [] });
+  }
+  return [...found.values()]
+    .map(({ docIds, ...o }) => ({ ...o, docs: docsOf(repo, docIds) }))
+    .sort((a, b) => Number(a.period !== 'current') - Number(b.period !== 'current') || a.name.localeCompare(b.name));
 }
 
 /** Fiche complète d'une application. */
 function applicationDetail(repo, id, ctx = null) {
   const app = repo.getNode(id);
   if (!app || app.type !== 'application') return null;
-  // une page peut être rattachée par plusieurs sources (règles, tri IA) : une seule entrée, avec son contrôle d'architecture
+  // une page peut être rattachée par plusieurs sources : une seule entrée, avec son rôle (sujet ou citée) et son contrôle d'architecture
   const byDoc = new Map();
   for (const e of repo.edgesFrom(id).filter((x) => x.type === 'documented_in')) {
     const d = repo.getNode(e.dst);
@@ -102,6 +160,8 @@ function applicationDetail(repo, id, ctx = null) {
       name: d.name,
       url: d.attrs.url || null,
       architecture: d.attrs.pageKind === 'architecture',
+      role: prev?.role === 'subject' ? 'subject' : mark(e, 'role') || prev?.role || null,
+      period: mark(e, 'period') || prev?.period || null,
       audit: prev?.audit || e.attrs.audit || null,
     });
   }
@@ -118,6 +178,7 @@ function applicationDetail(repo, id, ctx = null) {
       .filter(Boolean)
       .map((n) => ({ id: n.id, name: n.name })),
     documents: docs,
+    owners: ownersOfApp(repo, app),
   };
 }
 
@@ -134,6 +195,7 @@ function searchServers(repo, q, limit = 30, ctx = null) {
       attrs: s.attrs,
       env: serverEnv(s),
       retired: isRetired(s),
+      outOfInventory: Boolean(s.attrs.outOfInventory),
       state: serverState(ctx, s.id),
       applications: [...new Set(repo.edgesTo(s.id).filter((e) => e.type === 'runs_on' && !isInactiveEdge(e)).map((e) => e.src))]
         .map((id) => repo.getNode(id))
@@ -142,20 +204,34 @@ function searchServers(repo, q, limit = 30, ctx = null) {
     }));
 }
 
-/** Page Équipe : applications regroupées par équipe support (ou responsable). */
+/**
+ * Page Équipe : applications regroupées par personne ou équipe (documentation et APM), puis un groupe
+ * `unassigned` pour les applications sans responsable. Le plus d'applications d'abord, `unassigned` en dernier.
+ */
 function listTeams(repo) {
-  const teams = new Map();
-  for (const a of listApplications(repo)) {
-    const key = a.supportTeam || a.owner || 'Non renseignée';
-    if (!teams.has(key)) teams.set(key, { name: key, owners: new Set(), applications: [] });
-    const t = teams.get(key);
-    if (a.owner) t.owners.add(a.owner);
-    t.applications.push({ id: a.id, name: a.name, criticality: a.criticality });
+  const groups = new Map();
+  const unassigned = [];
+  for (const app of repo.listByType('application').filter((a) => !isRetired(a))) {
+    const owners = ownersOfApp(repo, app);
+    const base = { id: app.id, name: app.name, criticality: appCriticality(app) };
+    if (!owners.length) {
+      unassigned.push({ ...base, role: null, period: null, source: null, docs: [] });
+      continue;
+    }
+    for (const o of owners) {
+      const key = `${o.kind}:${nodeKey(o.kind, o.name)}`;
+      if (!groups.has(key)) groups.set(key, { id: o.id, name: o.name, kind: o.kind, applications: [] });
+      const g = groups.get(key);
+      if (!g.id && o.id) g.id = o.id;
+      const entry = { ...base, role: o.role, period: o.period, source: o.source, docs: o.docs };
+      const at = g.applications.findIndex((x) => x.id === app.id);
+      if (at === -1) g.applications.push(entry);
+      else if (g.applications[at].period !== 'current' && o.period === 'current') g.applications[at] = entry; // l'actuel l'emporte
+    }
   }
-  return [...teams.values()]
-    // unassigned : l'interface affiche « Non renseignée » / « Not specified » selon sa langue
-    .map((t) => ({ ...t, owners: [...t.owners], unassigned: t.name === 'Non renseignée' }))
-    .sort((a, b) => a.unassigned - b.unassigned || b.applications.length - a.applications.length);
+  const out = [...groups.values()].sort((a, b) => b.applications.length - a.applications.length || a.name.localeCompare(b.name));
+  if (unassigned.length) out.push({ id: null, name: '', kind: 'unassigned', applications: unassigned });
+  return out;
 }
 
 /** Configuration utile au front (liens externes, sources branchées). */
@@ -170,4 +246,4 @@ function uiConfig(env = process.env, extra = null) {
   };
 }
 
-module.exports = { serverState, appStatus, isRetired, listApplications, applicationDetail, applicationSummary, searchServers, listTeams, uiConfig, linkedNodes };
+module.exports = { serverState, appStatus, isRetired, listApplications, applicationDetail, applicationSummary, searchServers, listTeams, uiConfig, linkedNodes, ownersOfApp };

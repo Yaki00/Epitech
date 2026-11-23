@@ -119,7 +119,7 @@ describe('API v2 (graphe démo)', () => {
     const ids = (r) => r.impacted.map((i) => i.id).sort();
     const expected = new Set([...ids(ra), ...ids(rb)].filter((x) => x !== a && x !== b));
     assert.deepEqual(ids(both), [...expected].sort());
-    assert.deepEqual(Object.keys(both.impacted[0]).sort(), ['depth', 'id', 'name', 'type', 'via']);
+    assert.deepEqual(Object.keys(both.impacted[0]).sort(), ['depth', 'id', 'name', 'outOfInventory', 'type', 'via']);
     assert.equal(both.impacted.length, Object.values(both.byType).reduce((n, l) => n + l.length, 0));
     // cohérent avec impactOf pour un seul nœud
     assert.deepEqual(ids(ra), impactOf(ctx.repo, a, {}).items.map((i) => i.id).sort());
@@ -136,8 +136,8 @@ describe('API v2 (graphe démo)', () => {
     assert.ok(servers.length > 0);
     assert.ok(servers.every((n) => n.env !== 'DEV'));
     assert.ok(m.nodes.some((n) => n.type === 'application') && m.nodes.some((n) => n.type === 'database'));
-    assert.deepEqual(Object.keys(m.nodes[0]).sort(), ['appIds', 'criticality', 'env', 'id', 'label', 'retired', 'state', 'type']);
-    assert.deepEqual(Object.keys(m.edges[0]).sort(), ['id', 'retired', 'source', 'target', 'type']);
+    assert.deepEqual(Object.keys(m.nodes[0]).sort(), ['appIds', 'criticality', 'env', 'id', 'label', 'outOfInventory', 'retired', 'state', 'type']);
+    assert.deepEqual(Object.keys(m.edges[0]).sort(), ['id', 'inactive', 'period', 'retired', 'source', 'target', 'trust', 'type']);
     const ids = new Set(m.nodes.map((n) => n.id));
     assert.ok(m.edges.every((e) => ids.has(e.source) && ids.has(e.target)));
     const withDev = (await get('/api/map?scope=perimeter&envs=PRD,STG,DEV').expect(200)).body;

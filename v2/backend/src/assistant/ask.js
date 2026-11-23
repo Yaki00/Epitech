@@ -4,21 +4,32 @@
  * qui interrogent le graphe (recherche, impact, dépendances), puis répond en
  * citant ce qu'il a trouvé.
  */
-const { impactOf, dependenciesOf } = require('../graph/impact');
+const { impactOf, dependenciesOf, isInactiveEdge } = require('../graph/impact');
+const { ownersOfApp } = require('../api/views');
 const { parseLlmJson } = require('../lib/json');
 
 const SYSTEM = `Tu es Lyra, assistant d'analyse d'infrastructure.
 Tu réponds en français, de façon concise.
 Utilise TOUJOURS les outils pour obtenir les faits (serveurs, applications, dépendances, impacts).
 N'invente aucun nom de serveur, d'application ou d'IP. Si l'information n'est pas dans les résultats des outils, dis-le.
-Indique la source et la confiance des liens quand elle est inférieure à 1 (ex : "déduit de Confluence").`;
+Indique la source et la confiance des liens quand elle est inférieure à 1 (ex : "déduit de Confluence").
+Un lien ou un responsable dont period vaut "past" est ANCIEN, "target" est une CIBLE (pas encore en place), trust "toValidate" est À VALIDER : dis-le toujours, et ne les compte pas comme actifs (inactiveLinks les liste à part).
+outOfInventory vrai : le serveur est cité par la documentation mais absent des inventaires.`;
 
 const TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'owners_of',
+      description: "Responsables et équipes d'une application (id d'application), ou applications d'une personne ou d'une équipe (id de personne ou d'équipe). Chaque résultat indique role et period (current, past, target).",
+      parameters: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'search_entities',
-      description: "Cherche des applications, serveurs, bases… par nom, FQDN ou IP. À appeler d'abord pour obtenir l'id exact.",
+      description: "Cherche des applications, serveurs, bases, personnes, équipes… par nom, FQDN ou IP. À appeler d'abord pour obtenir l'id exact.",
       parameters: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
     },
   },
@@ -43,22 +54,68 @@ const TOOLS = [
 /** Consigne système dans la langue de l'interface (fr par défaut, en sur demande). */
 const systemFor = (lang) => (lang === 'en' ? SYSTEM.replace('Tu réponds en français, de façon concise.', 'Answer in English, concisely. Keep server, application and IP names exactly as they are.') : SYSTEM);
 
-const compact = (r) =>
+const marks = (e) => ({ trust: (e.attrs && e.attrs.trust) || null, period: (e.attrs && e.attrs.period) || null });
+const outOf = (n) => Boolean(n && n.type === 'server' && n.attrs && n.attrs.outOfInventory);
+const lite = (n) => ({ id: n.id, name: n.name, type: n.type, ...(outOf(n) ? { outOfInventory: true } : {}) });
+
+/** Marques (confiance, période) du lien qui a mené à un élément du parcours. */
+function viaMarks(repo, item) {
+  if (!item.via) return {};
+  const edges = [...repo.edgesFrom(item.via.from), ...repo.edgesTo(item.via.from)].filter((e) => e.type === item.via.edgeType && (e.src === item.id || e.dst === item.id) && !isInactiveEdge(e));
+  return edges[0] ? marks(edges[0]) : {};
+}
+
+/** Liens inactifs (anciens, cibles, à valider) qui touchent l'entité : listés à part, jamais comptés. */
+function inactiveLinks(repo, id) {
+  const out = [];
+  for (const e of [...repo.edgesFrom(id), ...repo.edgesTo(id)]) {
+    if (!isInactiveEdge(e) || (e.attrs && e.attrs.retired) || ['mentions', 'documented_in', 'monitored_by', 'owned_by'].includes(e.type)) continue;
+    const from = repo.getNode(e.src);
+    const to = repo.getNode(e.dst);
+    if (from && to) out.push({ from: lite(from), to: lite(to), type: e.type, ...marks(e) });
+  }
+  return out;
+}
+
+const compact = (repo, r) =>
   r && {
-    start: { id: r.start.id, name: r.start.name, type: r.start.type },
+    start: lite(r.start),
     total: r.total,
-    items: r.items.slice(0, 60).map((i) => ({ id: i.id, name: i.name, type: i.type, depth: i.depth, via: i.via })),
+    items: r.items.slice(0, 60).map((i) => ({ id: i.id, name: i.name, type: i.type, depth: i.depth, via: i.via, ...(outOf(repo.getNode(i.id)) ? { outOfInventory: true } : {}), ...viaMarks(repo, i) })),
     truncated: r.items.length > 60,
+    inactiveLinks: inactiveLinks(repo, r.start.id).slice(0, 30),
   };
+
+/** Responsables d'une application, ou applications d'une personne / équipe. */
+function ownersTool(repo, id) {
+  const n = repo.getNode(String(id || ''));
+  if (!n) return { error: `id inconnu : ${id}` };
+  if (n.type === 'application') return { application: lite(n), owners: ownersOfApp(repo, n).map(({ id: oid, name, kind, role, period, source }) => ({ id: oid, name, kind, role, period, source })) };
+  if (n.type !== 'person' && n.type !== 'team') return { error: `${id} n'est ni une application, ni une personne, ni une équipe` };
+  const apps = new Map();
+  for (const e of repo.edgesTo(n.id).filter((x) => x.type === 'owned_by' && !(x.attrs && x.attrs.retired))) {
+    const a = repo.getNode(e.src);
+    if (a) apps.set(`${a.id}|${(e.attrs && e.attrs.role) || ''}`, { id: a.id, name: a.name, role: (e.attrs && e.attrs.role) || 'other', period: (e.attrs && e.attrs.period) || 'current', source: 'doc' });
+  }
+  const attr = n.type === 'person' ? 'owner' : 'supportTeam';
+  for (const a of repo.listByType('application')) {
+    if (a.attrs[attr] && String(a.attrs[attr]).toLowerCase() === n.name.toLowerCase() && ![...apps.values()].some((x) => x.id === a.id)) {
+      apps.set(`${a.id}|apm`, { id: a.id, name: a.name, role: n.type === 'person' ? 'owner' : 'support', period: 'current', source: 'apm' });
+    }
+  }
+  return { [n.type]: lite(n), applications: [...apps.values()].sort((a, b) => a.name.localeCompare(b.name)) };
+}
 
 function runTool(repo, name, args) {
   switch (name) {
     case 'search_entities':
-      return repo.search(String(args.query || ''), 15).map((n) => ({ id: n.id, name: n.name, type: n.type, attrs: n.attrs }));
+      return repo.search(String(args.query || ''), 15).map((n) => ({ id: n.id, name: n.name, type: n.type, attrs: n.attrs, ...(outOf(n) ? { outOfInventory: true } : {}) }));
+    case 'owners_of':
+      return ownersTool(repo, args.id);
     case 'impact_analysis':
-      return compact(impactOf(repo, args.id, { maxDepth: Math.min(args.max_depth || 4, 6) })) || { error: `id inconnu : ${args.id}` };
+      return compact(repo, impactOf(repo, args.id, { maxDepth: Math.min(args.max_depth || 4, 6) })) || { error: `id inconnu : ${args.id}` };
     case 'dependencies':
-      return compact(dependenciesOf(repo, args.id, { maxDepth: Math.min(args.max_depth || 3, 6) })) || { error: `id inconnu : ${args.id}` };
+      return compact(repo, dependenciesOf(repo, args.id, { maxDepth: Math.min(args.max_depth || 3, 6) })) || { error: `id inconnu : ${args.id}` };
     default:
       return { error: `outil inconnu : ${name}` };
   }

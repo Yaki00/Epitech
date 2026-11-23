@@ -55,11 +55,11 @@ describe('vues API', () => {
     assert.equal(r.length, 1);
     assert.deepEqual(r[0].applications.map((a) => a.name), ['ALTO']);
   });
-  test('équipes, "Non renseignée" en dernier', () => {
+  test('équipes : groupe sans responsable en dernier', () => {
     const t = views.listTeams(repo);
     assert.equal(t[0].name, 'Équipe Front');
-    assert.deepEqual(t[0].owners, ['J. Dupont']);
-    assert.equal(t.at(-1).name, 'Non renseignée');
+    assert.equal(t.some((x) => x.name === 'J. Dupont' && x.kind === 'person'), true);
+    assert.equal(t.at(-1).kind, 'unassigned');
   });
   test('config UI', () => {
     assert.deepEqual(views.uiConfig({ NAEMON_URL_TEMPLATE: 'http://n/{app}' }), { naemonUrlTemplate: 'http://n/{app}', sources: { servicenow: false, bitbucket: false } });
