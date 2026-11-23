@@ -39,8 +39,8 @@ const userText = (call) => call.messages.filter((m) => m.role === 'user').map((m
 const systemText = (call) => call.messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n');
 
 describe('lecture IA d\'une page', () => {
-  test('READING_VERSION is 3 (date du jour, période par lien, environnement cité, définition de architecture)', () => {
-    assert.equal(READING_VERSION, 3);
+  test('READING_VERSION is 4 (date du jour, période par lien, environnement du titre, définition de architecture)', () => {
+    assert.equal(READING_VERSION, 4);
   });
 
   test('sanitize keeps only allowed values', () => {
@@ -474,6 +474,16 @@ describe('banc 1 : date du jour, période par lien, environnement de page, natur
     assert.ok(user.includes('Dernière modification : 2026-02-01'));
     // les lignes ajoutées au texte contrôlé (citations) ne contiennent pas la date du jour
     assert.ok(!pageHeaderLines({ title: 'Plan de capacité 2026', ancestors: ['Exploitation'] }).join('\n').includes('Date du jour'));
+    // syncPages : date et année en heure locale du serveur
+    const { localDay } = require('../src/reading/syncPages');
+    const late = new Date(2026, 11, 31, 23, 30).getTime(); // 31/12 23 h 30 locale
+    assert.deepEqual(localDay(late), { today: '2026-12-31', year: 2026 });
+    assert.deepEqual(localDay(new Date(2027, 0, 1, 0, 30).getTime()), { today: '2027-01-01', year: 2027 });
+    // lecture relue au changement d'année : page ou lien ancien ou cible
+    const { readingDependsOnYear } = require('../src/reading/syncPages');
+    assert.equal(readingDependsOnYear({ page: { period: 'current' }, links: [{ period: null }, { period: 'current' }] }), false);
+    assert.equal(readingDependsOnYear({ page: { period: 'current' }, links: [{ period: 'target' }] }), true);
+    assert.equal(readingDependsOnYear({ page: { period: 'past' }, links: [] }), true);
     // sans date fournie : pas de ligne
     const bare = buildReadingMessages({ title: 'T', text: 'x', apps: APPS });
     assert.ok(!bare[1].content.includes('Date du jour'));
@@ -492,7 +502,8 @@ describe('banc 1 : date du jour, période par lien, environnement de page, natur
   test('system prompt: architecture is installation, not a flow matrix ; env only when written ; link period', () => {
     assert.match(SYSTEM, /matrice des flux/);
     assert.match(SYSTEM, /n'est pas une page architecture/);
-    assert.match(SYSTEM, /Jamais déduit des noms ou des adresses des serveurs/);
+    assert.match(SYSTEM, /seulement si le titre ou les pages parentes le disent/);
+    assert.match(SYSTEM, /Une section « Production », une phrase sur quelques serveurs/);
     assert.ok(SYSTEM.includes('"envEvidence"'));
     assert.ok(SYSTEM.includes('"period": "current|past|target|null"'));
     assert.match(SYSTEM, /marque chaque lien avec sa propre période/);

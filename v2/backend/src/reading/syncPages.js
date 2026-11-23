@@ -4,12 +4,16 @@
  *
  * Pour chaque page : lecture du format (sections, tableaux, schémas draw.io mis en texte), puis
  *  - lecture IA (readPage) si le contenu, la version de la lecture, les consignes ou le périmètre
- *    ont changé (empreinte `readingHash`), ou avec `force` ;
+ *    ont changé (empreinte `readingHash`), ou avec `force`, ou si elle a été lue une année précédente
+ *    et que sa période (ou celle d'un de ses liens) est ancienne ou cible ;
  *  - sinon, si seuls les inventaires ou Naemon ont changé (empreinte `verifyHash`), la lecture
  *    gardée dans la ligne document (`attrs.reading`) est vérifiée et écrite de nouveau, sans IA ;
  *  - sinon la page est sautée.
  * Sans IA : la page est lue et stockée, rien n'est déduit (`stats.notRead`). Lecture en échec : la
  * page garde sa lecture précédente (rien n'est purgé) et passe en erreur, reprise au passage suivant.
+ * En fin de passage, les pages vérifiées dont un lien est resté à valider sont vérifiées et écrites une
+ * seconde fois, sans IA : la règle « base d'une autre application » et la corroboration par une autre
+ * page lisent le graphe, qui est alors complet quel que soit l'ordre de lecture.
  * Après le passage, les nœuds créés par des lectures qui n'ont plus aucun lien actif sont marqués
  * retirés (jamais supprimés), sauf les personnes et équipes (anciens responsables montrés comme tels). Les rapports CSV sont tirés du graphe et des lignes document.
  */
@@ -27,7 +31,7 @@ const { verifyReading, DOC_SOURCES } = require('./verify');
 const { applyReading, PAGE_SOURCES, INACTIVE_STATUS } = require('./apply');
 
 const QUIET = { debug() {}, info() {}, warn() {}, error() {} };
-const READING_KEYS = ['reading', 'readingHash', 'readingContentHash', 'verifyHash', 'rejected', 'rulesCleared'];
+const READING_KEYS = ['reading', 'readingHash', 'readingContentHash', 'readingYear', 'verifyHash', 'rejected', 'rulesCleared'];
 const STEP_FR = { llm: 'lecture IA', verify: 'vérification', apply: 'écriture dans le graphe', parse: 'analyse' };
 const hasInventoryRow = (n) => Object.keys(n.attrs || {}).some((k) => k.endsWith('_row') && k !== 'confluence_row');
 
@@ -64,6 +68,22 @@ function pageExcerpt(page) {
     .join('\n\n')
     .replace(/\n{3,}/g, '\n\n')
     .slice(0, 4000);
+}
+
+/** Date du jour (AAAA-MM-JJ) et année, en heure locale du serveur. */
+function localDay(now) {
+  const d = new Date(now);
+  const pad = (n) => String(n).padStart(2, '0');
+  return { today: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`, year: d.getFullYear() };
+}
+
+/**
+ * Lecture qui dépend de l'année : page ou lien ancien ou cible. Lue une année précédente, elle est relue
+ * (« Calendrier 2027 » lu cible en 2026 devient actuel en 2027) ; les autres pages ne le sont pas.
+ */
+function readingDependsOnYear(reading) {
+  const timed = (p) => p === 'past' || p === 'target';
+  return Boolean(reading && ((reading.page && timed(reading.page.period)) || (reading.links || []).some((l) => timed(l.period))));
 }
 
 const keepReading = (attrs) => Object.fromEntries(READING_KEYS.filter((k) => attrs && attrs[k] !== undefined).map((k) => [k, attrs[k]]));
@@ -127,15 +147,36 @@ async function runConfluenceSync({
   const verifyHash = verifyHashOf(repo, naemon, now);
   const apps = perimeter ? perimeter.applications.map((a) => ({ name: a.name, aliases: a.aliases })) : [];
   const perimeterIds = new Set(matcher ? matcher.apps.map((a) => a.id) : []);
-  // date du jour donnée à l'IA pour juger la période des pages (« Plan 2026 » est actuel en 2026)
-  const today = new Date(now).toISOString().slice(0, 10);
+  // date du jour donnée à l'IA pour juger la période des pages (« Plan 2026 » est actuel en 2026), heure locale
+  const { today, year } = localDay(now);
+  /** Pages vérifiées pendant ce passage dont un lien est resté à valider : revues une fois en fin de passage. */
+  const recheck = new Map();
 
-  /** Vérifie une lecture, l'écrit dans le graphe et enregistre la ligne document. */
-  function applyAndSave(ctx, reading, readingAttrs) {
+  /** Ajoute (sign 1) ou retire (sign -1) aux compteurs ce qu'une page a produit. */
+  function count(res, sign) {
+    const { out, verified } = res;
+    for (const k of ['mentions', 'links', 'owners', 'toValidate', 'otherApp', 'rejected']) stats[k] += sign * (out[k] || 0);
+    stats.evidenceMismatch += sign * verified.rejected.filter((r) => r.reason === 'evidence_mismatch').length;
+    if (verified.kind === 'architecture') stats.architecturePages += sign;
+    if (matcher && verified.apps.some((a) => perimeterIds.has(a.appId))) stats.inScope += sign;
+  }
+
+  /** Vérifie une lecture, l'écrit dans le graphe et enregistre la ligne document. Rend { out, verified }. */
+  function verifyAndWrite(ctx, reading, readingAttrs) {
     const { page, p, docNodeId, docBase, rowAttrs } = ctx;
     let verified;
     try {
-      verified = verifyReading(reading, { pageText: ctx.pageText, diagramsText: ctx.diagramsText, repo, matcher, naemonHosts: naemon, pageUpdatedAt: p.updatedAt || null, now });
+      verified = verifyReading(reading, {
+        pageText: ctx.pageText,
+        headerText: ctx.headerText,
+        diagramsText: ctx.diagramsText,
+        docNodeId,
+        repo,
+        matcher,
+        naemonHosts: naemon,
+        pageUpdatedAt: p.updatedAt || null,
+        now,
+      });
     } catch (err) {
       err.step = 'verify';
       throw err;
@@ -147,14 +188,35 @@ async function runConfluenceSync({
       err.step = 'apply';
       throw err;
     }
-    for (const k of ['mentions', 'links', 'owners', 'toValidate', 'otherApp', 'rejected']) stats[k] += out[k] || 0;
-    stats.evidenceMismatch += verified.rejected.filter((r) => r.reason === 'evidence_mismatch').length;
-    if (verified.kind === 'architecture') stats.architecturePages++;
-    if (matcher && verified.apps.some((a) => perimeterIds.has(a.appId))) stats.inScope++;
     // texte gardé pour le résumé IA : seulement si la page porte sur une application
     const subject = verified.apps.some((a) => a.role === 'subject');
     repo.patchNodeAttrs(docNodeId, { excerpt: subject ? pageExcerpt(page) : undefined });
     repo.saveDocument({ ...docBase, status: 'enriched', attrs: { ...rowAttrs, ...readingAttrs, reading, verifyHash, rejected: verified.rejected } });
+    return { out, verified };
+  }
+
+  function applyAndSave(ctx, reading, readingAttrs) {
+    const res = verifyAndWrite(ctx, reading, readingAttrs);
+    count(res, 1);
+    // un lien à valider peut dépendre du graphe (base d'une autre application, serveur cité ailleurs) :
+    // la page est revue en fin de passage, quand toutes les pages du passage sont écrites
+    if (res.verified.links.some((l) => l.trust === 'toValidate')) recheck.set(ctx.p.id, { ctx, reading, readingAttrs, res });
+    else recheck.delete(ctx.p.id);
+  }
+
+  /** Un seul tour, sans IA : les liens uses_db et mentions lus par ces règles ne dépendent pas du graphe. */
+  function recheckPages() {
+    for (const { ctx, reading, readingAttrs, res } of recheck.values()) {
+      try {
+        const again = verifyAndWrite(ctx, reading, readingAttrs);
+        count(res, -1);
+        count(again, 1);
+      } catch (err) {
+        count(res, -1);
+        fail(ctx, { ...readingAttrs, reading }, err.step || 'apply', err);
+      }
+    }
+    recheck.clear();
   }
 
   /**
@@ -189,7 +251,7 @@ async function runConfluenceSync({
       return;
     }
     try {
-      applyAndSave(ctx, reading, { readingHash, readingContentHash: docBase.contentHash });
+      applyAndSave(ctx, reading, { readingHash, readingContentHash: docBase.contentHash, readingYear: year });
       stats.read++;
     } catch (err) {
       fail(ctx, prevAttrs, err.step || 'apply', err);
@@ -225,7 +287,9 @@ async function runConfluenceSync({
       const prev = repo.getDocument(docId);
       const pa = (prev && prev.attrs) || {};
       const contentSame = Boolean(prev && prev.content_hash === hash);
-      const readingCurrent = !force && Boolean(pa.reading) && pa.readingContentHash === hash && pa.readingHash === readingHash;
+      // lecture d'une année précédente qui dépend de l'année (page ou lien ancien ou cible) : relue
+      const yearChanged = Boolean(pa.readingYear) && pa.readingYear !== year && readingDependsOnYear(pa.reading);
+      const readingCurrent = !force && Boolean(pa.reading) && pa.readingContentHash === hash && pa.readingHash === readingHash && !yearChanged;
       const retry = prev && prev.status === 'error';
 
       if (readingCurrent && pa.verifyHash === verifyHash && contentSame && !retry) {
@@ -252,6 +316,8 @@ async function runConfluenceSync({
           docBase,
           rowAttrs,
           docNodeId: `document:${documentId(p.id)}`,
+          // en-tête seul : l'environnement d'une page n'est retenu que s'il y est écrit (titre, pages parentes)
+          headerText: pageHeaderLines({ title: page.title || p.title, ancestors: p.ancestors || [] }).join('\n'),
           // en-tête tel qu'envoyé à l'IA (« Titre : X », pages parentes), puis le texte : une citation de l'en-tête est retrouvée
           pageText: [...pageHeaderLines({ title: page.title || p.title, ancestors: p.ancestors || [] }), page.title || p.title, page.text || page.sections.map((s) => `${s.heading || ''}\n${s.text}`).join('\n')].join('\n'),
           diagramsText: diagramsToText(diagrams.results),
@@ -262,7 +328,7 @@ async function runConfluenceSync({
 
         if (readingCurrent) {
           // seuls les inventaires ou Naemon ont changé : vérification et écriture refaites sans IA
-          applyAndSave(ctx, pa.reading, { readingHash: pa.readingHash, readingContentHash: pa.readingContentHash });
+          applyAndSave(ctx, pa.reading, { readingHash: pa.readingHash, readingContentHash: pa.readingContentHash, readingYear: pa.readingYear });
           stats.reverified++;
         } else if (!llm) {
           if (!pa.reading && !pa.rulesCleared) clearOldRules(ctx);
@@ -280,6 +346,7 @@ async function runConfluenceSync({
       }
     }
     await Promise.all(inflight);
+    recheckPages();
 
     stats.retired = retireOrphans(repo, now);
     const reports = reportsDir ? writeReports(repo, matcher, reportsDir) : [];
@@ -331,7 +398,13 @@ function retireOrphans(repo, now) {
 
 // ---------- rapports ----------
 const ROLE_FR = { subject: 'sujet', cited: 'citée' };
-const REASON_FR = { no_evidence: 'citation absente de la page', evidence_mismatch: "citation qui ne nomme pas l'élément", unknown_application: 'application inconnue', out_of_scope: 'hors périmètre ou introuvable' };
+const REASON_FR = {
+  no_evidence: 'citation absente de la page',
+  evidence_mismatch: "citation qui ne nomme pas l'élément",
+  not_in_header: 'environnement absent du titre et des pages parentes',
+  unknown_application: 'application inconnue',
+  out_of_scope: 'hors périmètre ou introuvable',
+};
 const ENV_FR = { PRD: 'production (PRD)', STG: 'recette (STG)', DEV: 'développement (DEV)' };
 
 function writeReports(repo, matcher, dir) {
@@ -438,4 +511,4 @@ function writeRejectsReport(repo, dir) {
   return writeCsvReport(dir, 'lectures-rejets', ['page', 'élément', 'raison', 'url'], rows);
 }
 
-module.exports = { runConfluenceSync, readingHashOf, verifyHashOf, retireOrphans, pageExcerpt };
+module.exports = { runConfluenceSync, readingHashOf, verifyHashOf, retireOrphans, pageExcerpt, localDay, readingDependsOnYear };

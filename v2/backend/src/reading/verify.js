@@ -5,14 +5,15 @@
  * seule la lecture du graphe est faite. Voir docs/2026-11-23-v2-reperage-ia-conception.md.
  *
  * Verified = {
- *   kind, period, env, topics,          env : celui de la page, seulement si sa citation (envEvidence) est
- *                                       retrouvée et contient un mot qui désigne cet environnement
+ *   kind, period, env, topics,          env : celui de la page, seulement si sa citation (envEvidence) se
+ *                                       retrouve dans l'en-tête (titre, pages parentes : ctx.headerText) et
+ *                                       contient un mot qui désigne cet environnement
  *   apps: [{ appId, role, written, evidence }],
  *   servers: [{ nodeId|null, name, ip|null, env, status, inInventory, corroborated, evidence }],
  *   ips: [{ ip, status, evidence }],   IP citées sans serveur connu (aucun nœud créé)
  *   links: [{ src, dst, srcName, dstName, type, trust, period, evidence }],
  *   owners: [{ appId, name, kind, role, period (null : page de période illisible), evidence }],
- *   rejected: [{ what, reason: 'no_evidence'|'evidence_mismatch'|'unknown_application'|'out_of_scope' }],
+ *   rejected: [{ what, reason: 'no_evidence'|'evidence_mismatch'|'not_in_header'|'unknown_application'|'out_of_scope' }],
  * }
  * Une citation doit se retrouver dans la page (`no_evidence`) ET nommer l'élément : nom ou forme écrite,
  * nom court ou FQDN d'un serveur, une des deux extrémités d'un lien (`evidence_mismatch`).
@@ -20,12 +21,12 @@
  * added, toValidate) ; tout autre lien vers un serveur hors inventaire non corroboré, ou rattaché dans
  * l'inventaire à une autre application que celle du lien, est `toValidate`. Quand l'autre extrémité
  * n'est pas une application (base, file, URL...), ses applications sont celles qui l'utilisent (liens
- * uses_db, reads_from, writes_to de la page et du graphe actif), puis celles de la page.
+ * uses_db actuels de la page ; uses_db, reads_from, writes_to actifs du graphe), puis celles de la page.
  * Un serveur hors inventaire est corroboré par Naemon, par cette page si elle est actuelle et récente
- * (moins de 24 mois) et le dit actif, ou par une autre page actuelle et récente qui le cite comme actif
- * (liens mentions déjà écrits).
+ * (moins de 24 mois) et le dit actif, ou par une autre page (ni celle-ci, ni un document retiré)
+ * actuelle et récente qui le cite comme actif (liens mentions déjà écrits).
  * Période d'un lien : la sienne (lue par l'IA), sinon celle de la page ; serveur dit arrêté : past,
- * prévu : target.
+ * prévu : target. Un lien dit actuel dans une page ancienne est au mieux `toValidate` (sauf `confirmed`).
  * src/dst : identifiant du nœud s'il existe, sinon `type:clé` du nœud à créer.
  */
 const { hasEvidence, quoteNames, normalizeText } = require('./evidence');
@@ -71,7 +72,7 @@ function envsNamed(quote) {
 }
 
 function verifyReading(reading, ctx) {
-  const { repo, matcher, naemonHosts = new Set(), pageUpdatedAt = null, now = Date.now() } = ctx;
+  const { repo, matcher, naemonHosts = new Set(), pageUpdatedAt = null, now = Date.now(), docNodeId = null } = ctx;
   const docSources = ctx.docSources || DOC_SOURCES;
   const text = `${ctx.pageText || ''}\n${ctx.diagramsText || ''}`;
   const rejected = [];
@@ -96,12 +97,16 @@ function verifyReading(reading, ctx) {
   };
   const recentPage = pagePeriod === 'current' && pageUpdatedAt && recent(pageUpdatedAt);
 
-  // ---- environnement de la page : retenu seulement si la page l'écrit (jamais déduit des serveurs cités) ----
+  // ---- environnement de la page : retenu seulement si le titre ou les pages parentes l'écrivent ----
+  // (jamais déduit des serveurs cités, ni d'une section ou d'une phrase sur quelques serveurs)
   let pageEnv = page.env || null;
   if (pageEnv) {
     const what = `environnement de la page (${pageEnv})`;
     if (!ok(what, page.envEvidence)) pageEnv = null;
-    else if (!envsNamed(page.envEvidence).has(pageEnv)) {
+    else if (!hasEvidence(ctx.headerText || '', page.envEvidence)) {
+      rejected.push({ what, reason: 'not_in_header' });
+      pageEnv = null;
+    } else if (!envsNamed(page.envEvidence).has(pageEnv)) {
       rejected.push({ what, reason: 'evidence_mismatch' });
       pageEnv = null;
     }
@@ -164,9 +169,9 @@ function verifyReading(reading, ctx) {
     if (!node) return false;
     return repo.edgesTo(node.id).some((e) => {
       const a = e.attrs || {};
-      if (e.type !== 'mentions' || a.retired || a.status !== 'active' || a.period !== 'current') return false;
+      if (e.type !== 'mentions' || e.src === docNodeId || a.retired || a.status !== 'active' || a.period !== 'current') return false;
       const doc = repo.getNode(e.src);
-      return Boolean(doc && doc.attrs && recent(doc.attrs.updatedAt));
+      return Boolean(doc && !isRetired(doc) && doc.attrs && recent(doc.attrs.updatedAt));
     });
   }
   function isSupervised(name, node) {
@@ -267,10 +272,11 @@ function verifyReading(reading, ctx) {
   }
 
   // applications qui utilisent une extrémité qui n'est pas une application (base, file, URL...) :
-  // liens de cette page, puis liens actifs du graphe (inventaires ou autres pages)
+  // liens uses_db actuels de cette page, puis liens actifs du graphe (inventaires ou autres pages)
+  const periodOf = (l) => l.period || (pageReliable ? pagePeriod : null);
   const usersInPage = new Map();
   for (const { l, from, to } of found) {
-    if (!USE_TYPES.has(l.type) || from.kind !== 'application' || to.kind === 'application' || to.kind === 'server') continue;
+    if (l.type !== 'uses_db' || periodOf(l) !== 'current' || from.kind !== 'application' || to.kind === 'application' || to.kind === 'server') continue;
     if (!usersInPage.has(to.id)) usersInPage.set(to.id, new Set());
     usersInPage.get(to.id).add(from.id);
   }
@@ -312,6 +318,8 @@ function verifyReading(reading, ctx) {
     if (entry && entry.status === 'planned' && period === 'current') period = 'target';
     const unreadable = !pageReliable || (entry && entry.status === null);
     if (unreadable && trust !== 'confirmed' && trust !== 'otherApp') trust = 'toValidate';
+    // lien dit actuel dans une page ancienne : la page peut se tromper, seul l'inventaire le confirme
+    if (l.period === 'current' && pagePeriod === 'past' && trust === 'added') trust = 'toValidate';
     links.push({ src: from.id, dst: to.id, srcName: from.name || l.from, dstName: to.name || l.to, type: l.type, trust, period, evidence: l.evidence });
   }
 

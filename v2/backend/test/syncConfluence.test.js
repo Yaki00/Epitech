@@ -124,7 +124,8 @@ describe('analyse Confluence par lecture IA', () => {
     assert.match(spellings, /Ordrehub;OrderHub;1;/);
     assert.ok(!/\nOrderHub;/.test(spellings)); // le nom de référence n'est pas une orthographe à vérifier
     const archi = fs.readFileSync(path.join(reportsDir, 'architecture-pages.csv'), 'utf8');
-    assert.match(archi, /OrderHub - Architecture;[^;]*;[^;]*;production \(PRD\)/);
+    // la page ne dit pas son environnement dans son titre : pas d'environnement
+    assert.match(archi, /OrderHub - Architecture;[^;]*;[^;]*;;/);
   });
 
   test('second pass without change: no AI call', async () => {
@@ -203,6 +204,21 @@ describe('analyse Confluence par lecture IA', () => {
     assert.match(rejects, /OrderHub - Architecture;srvghost42;citation qui ne nomme pas l'élément/);
   });
 
+  test('new year: only pages whose reading is past or target (page or link) are read again', async () => {
+    await run();
+    fake.state.calls.length = 0;
+    const r = await run({ now: Date.parse('2027-01-05T12:00:00Z') });
+    assert.deepEqual(fake.state.calls.map((c) => c.title), [P2]);
+    assert.equal(r.stats.read, 1);
+    assert.equal(r.stats.reverified, 2);
+    assert.equal(repo.getDocument('confluence:7002').attrs.readingYear, 2027);
+    assert.equal(repo.getDocument('confluence:7001').attrs.readingYear, 2026);
+    // même année ensuite : plus rien à relire
+    fake.state.calls.length = 0;
+    await run({ now: Date.parse('2027-01-20T12:00:00Z') });
+    assert.equal(fake.state.calls.length, 0);
+  });
+
   test('the date of the day is sent to the model but is not a valid quote', async () => {
     const dated = { name: 'OrderHub', written: 'OrderHub', role: 'cited', evidence: 'Date du jour : 2026-11-23' };
     fake.state.answer = (title) => (title === P3 ? { ...READINGS[P3], applications: [dated] } : READINGS[title]);
@@ -212,12 +228,20 @@ describe('analyse Confluence par lecture IA', () => {
     assert.ok(!repo.edgesFrom('application:orderhub').some((e) => e.type === 'documented_in' && e.dst === DOC[P3]));
   });
 
-  test('page env is kept only with a quote that writes it', async () => {
-    fake.state.answer = (title) => (title === P1 ? { ...READINGS[P1], page: { ...READINGS[P1].page, envEvidence: 'srvnew01 | 10.20.40.12' } } : READINGS[title]);
+  test('page env is kept only when the title or the parent pages write it', async () => {
+    const withEnv = (envEvidence) => ({ ...READINGS[P1], page: { ...READINGS[P1].page, env: 'PRD', envEvidence } });
+    // section « Serveurs de production » de la page : refusée
+    fake.state.answer = (title) => (title === P1 ? withEnv('Serveurs de production') : READINGS[title]);
     await run();
-    const e = repo.edgesFrom('application:orderhub').find((x) => x.type === 'documented_in' && x.dst === DOC[P1]);
-    assert.equal(e.attrs.audit.environment, null);
-    assert.ok(repo.getDocument('confluence:7001').attrs.rejected.some((r) => r.what === 'environnement de la page (PRD)' && r.reason === 'evidence_mismatch'));
+    const audit = () => repo.edgesFrom('application:orderhub').find((x) => x.type === 'documented_in' && x.dst === DOC[P1]).attrs.audit;
+    assert.equal(audit().environment, null);
+    assert.ok(repo.getDocument('confluence:7001').attrs.rejected.some((r) => r.what === 'environnement de la page (PRD)' && r.reason === 'not_in_header'));
+    const rejects = fs.readFileSync(path.join(reportsDir, 'lectures-rejets.csv'), 'utf8');
+    assert.match(rejects, /environnement de la page \(PRD\);environnement absent du titre et des pages parentes/);
+    // le titre ne le dit pas non plus : seule une page dont le titre ou les parents le disent le garde (voir verify.test.js)
+    fake.state.answer = (title) => (title === P1 ? withEnv('OrderHub - Architecture') : READINGS[title]);
+    await run({ force: true });
+    assert.equal(audit().environment, null);
   });
 
   test('a quote of the header line sent to the model (« Titre : X ») is accepted', async () => {
@@ -333,5 +357,65 @@ describe('analyse Confluence par lecture IA', () => {
     assert.equal(JSON.parse(handler('/chat/completions', body).choices[0].message.content).page.kind, 'meeting');
     const unknown = { messages: [{ role: 'system', content: 's' }, { role: 'user', content: 'Titre : Inconnue' }] };
     assert.equal(JSON.parse(handler('/chat/completions', unknown).choices[0].message.content).page.kind, 'other');
+  });
+});
+
+describe('fin de passage : pages dont un lien est resté à valider revues sans IA', () => {
+  const page = (dir, folder, meta, html) => {
+    const d = path.join(dir, 'ESP', folder);
+    fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, 'metadata.json'), JSON.stringify({ spaceKey: 'ESP', updatedAt: '2026-06-01T10:00:00.000+02:00', version: 1, ancestors: [{ id: '1', title: 'Accueil' }], url: `https://wiki.example.local/${meta.pageId}`, ...meta }));
+    fs.writeFileSync(path.join(d, 'page.html'), html);
+  };
+  const A = 'OrderHub - Bases';
+  const B = 'Billing - Architecture';
+  const readings = {
+    // lue en premier : la base BILREF (de Billing) est hébergée sur srvbil01 (serveur de Billing)
+    [A]: {
+      page: { kind: 'architecture', period: 'current', env: null, topics: ['databases'] },
+      applications: [{ name: 'OrderHub', written: 'OrderHub', role: 'subject', evidence: 'OrderHub lit la base BILREF' }],
+      entities: [
+        { name: 'BILREF', type: 'database', status: 'active', evidence: 'La base BILREF est hébergée sur srvbil01' },
+        { name: 'srvbil01', type: 'server', status: 'active', evidence: 'La base BILREF est hébergée sur srvbil01' },
+      ],
+      links: [
+        { from: 'OrderHub', to: 'BILREF', type: 'reads_from', evidence: 'OrderHub lit la base BILREF' },
+        { from: 'BILREF', to: 'srvbil01', type: 'db_on', evidence: 'La base BILREF est hébergée sur srvbil01' },
+      ],
+      owners: [],
+    },
+    // lue ensuite : c'est elle qui dit que BILREF est la base de Billing
+    [B]: {
+      page: { kind: 'architecture', period: 'current', env: null, topics: ['databases'] },
+      applications: [{ name: 'Billing', written: 'Billing', role: 'subject', evidence: 'Billing utilise la base BILREF' }],
+      entities: [{ name: 'BILREF', type: 'database', status: 'active', evidence: 'Billing utilise la base BILREF' }],
+      links: [{ from: 'Billing', to: 'BILREF', type: 'uses_db', evidence: 'Billing utilise la base BILREF' }],
+      owners: [],
+    },
+  };
+
+  test('db_on to the server of the application that owns the database is added even when that page is read later', async () => {
+    const dir = tmp();
+    const exportDir = path.join(dir, 'export');
+    page(exportDir, '0001 - A', { pageId: '7101', title: A }, '<p>OrderHub lit la base BILREF.</p><p>La base BILREF est hébergée sur srvbil01.</p>');
+    page(exportDir, '0002 - B', { pageId: '7102', title: B }, '<p>Billing utilise la base BILREF.</p>');
+    fs.writeFileSync(path.join(dir, 'perimeter.json'), JSON.stringify({ applications: [{ name: 'OrderHub' }, { name: 'Billing' }] }));
+    const repo = createRepo(openStore(':memory:'));
+    const mapping = { entity: 'server', key: 'Host', relations: [{ column: 'App', entity: 'application', type: 'runs_on', direction: 'from' }] };
+    ingestInventory(repo, { source: 'apm', records: [{ App: 'OrderHub', Host: 'srvorh01' }, { App: 'Billing', Host: 'srvbil01' }], mapping });
+    const calls = [];
+    const llm = createLlmClient(
+      { mock: true, models: {}, concurrency: 1, maxRetries: 0, cacheDir: '' },
+      { logger: silent, mockHandler: (endpoint, body) => (calls.push(titleOf(body)), reply(JSON.stringify(readings[titleOf(body)]))) }
+    );
+    // une page à la fois, dans l'ordre de l'export : A est vérifiée avant que B ait écrit « Billing uses_db BILREF »
+    const r = await runConfluenceSync({ repo, exportDir, llm, perimeter: loadPerimeter(path.join(dir, 'perimeter.json')), naemonHosts: [], now: NOW, log: silent, maxInFlight: 1 });
+    assert.deepEqual(calls, [A, B]);
+    const dbOn = repo.edgesFrom('database:bilref').find((e) => e.type === 'db_on');
+    assert.equal(dbOn.attrs.trust, 'added');
+    assert.equal(r.stats.toValidate, 0);
+    assert.equal(r.stats.read, 2);
+    assert.equal(r.stats.links, 3);
+    assert.ok(impactOf(repo, 'server:srvbil01').items.some((i) => i.id === 'application:orderhub'));
   });
 });

@@ -8,7 +8,7 @@
  */
 
 /** Version de la lecture : à augmenter quand les consignes ou la forme de la réponse changent. */
-const READING_VERSION = 3;
+const READING_VERSION = 4;
 
 const SYSTEM = `Tu lis une page de documentation technique interne (Confluence) pour cartographier des applications et leur infrastructure. Réponds uniquement par un objet JSON, sans texte autour.
 
@@ -43,8 +43,8 @@ period : le moment que décrit la page, jugé par rapport à la date du jour don
 - past : historique, page marquée obsolète ou archivée, ancien document d'architecture d'une version remplacée, migration terminée, année ancienne présentée comme l'état d'alors.
 - target : architecture cible, projet, état prévu qui n'existe pas encore à la date du jour.
 Une année dans le titre ne suffit pas : past seulement si la page décrit un état qui n'existe plus, target seulement si elle décrit un état qui n'existe pas encore.
-env : environnement de toute la page (PRD production, STG recette ou préproduction, DEV développement), seulement si la page l'écrit (titre, titre de section, phrase). Jamais déduit des noms ou des adresses des serveurs qu'elle cite, ni de leur environnement (sauf convention écrite dans les consignes). Une page qui décrit plusieurs environnements : null.
-envEvidence : la citation où la page écrit cet environnement (le titre, un titre de section ou une phrase qui contient le mot) ; null si env est null. Sans citation, env vaut null.
+env : environnement de toute la page (PRD production, STG recette ou préproduction, DEV développement), seulement si le titre ou les pages parentes le disent. Une section « Production », une phrase sur quelques serveurs, les noms, les adresses ou l'environnement des serveurs cités ne suffisent pas : jamais déduit. Une page qui décrit plusieurs environnements : null.
+envEvidence : le titre (ou la ligne des pages parentes) recopié, qui contient le mot de l'environnement ; null si env est null. Sans cette citation, env vaut null.
 topics : ce que la page couvre vraiment, parmi servers, databases, flows, backup, monitoring, redundancy, contacts.
 
 APPLICATIONS (celles dont la page parle)

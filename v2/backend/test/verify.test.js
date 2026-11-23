@@ -298,48 +298,53 @@ describe('période propre d\'un lien', () => {
   });
 });
 
-describe('environnement de la page : seulement s\'il est écrit', () => {
-  const text = 'Topologie OrderHub\nsrvdoc09 | 10.0.0.9\nServeurs de production\nEnvironnement : recette';
+describe('environnement de la page : seulement s\'il est écrit dans le titre ou les pages parentes', () => {
+  const header = (title, parents = 'Accueil > Exploitation') => `Titre : ${title}\nPages parentes : ${parents}`;
+  const body = 'srvdoc09 | 10.0.0.9\nServeurs de production\nLes deux brokers de production\nEnvironnement de pré-production';
+  const ctx = (env, title, parents) => ctxOf(env, { headerText: header(title, parents), pageText: `${header(title, parents)}\n${title}\n${body}` });
   const withEnv = (env, envEvidence) => reading({ page: { kind: 'architecture', period: 'current', env, envEvidence, topics: [] }, entities: [server('srvdoc09', 'srvdoc09 | 10.0.0.9')] });
 
-  test('kept when the quote is in the page and names the environment', () => {
+  test('kept when the quote is the title (or the parent pages) and names the environment', () => {
     const env = setup();
-    const v = verifyReading(withEnv('PRD', 'Serveurs de production'), ctxOf(env, { pageText: text }));
+    assert.equal(verifyReading(withEnv('PRD', 'Serveurs de production OrderHub'), ctx(env, 'Serveurs de production OrderHub')).env, 'PRD');
+    const v = verifyReading(withEnv('PRD', 'Production'), ctx(env, 'OrderHub : serveurs', 'Accueil > Production'));
     assert.equal(v.env, 'PRD');
-    assert.deepEqual(v.rejected.filter((r) => r.what.startsWith('environnement')), []);
+    assert.deepEqual(v.rejected, []);
   });
 
-  test('dropped without a quote, with a quote absent from the page, or with a quote that does not name it', () => {
+  test('dropped without a quote, with a section title or a sentence of the body, or with a title that does not name it', () => {
     const env = setup();
     for (const [ev, reason] of [
       [null, 'no_evidence'],
       ['Serveurs de développement', 'no_evidence'],
-      ['srvdoc09 | 10.0.0.9', 'evidence_mismatch'], // déduit d'un nom de serveur : refusé
-      ['Topologie OrderHub', 'evidence_mismatch'],
+      ['Serveurs de production', 'not_in_header'], // titre de section : ne suffit pas
+      ['Les deux brokers de production', 'not_in_header'], // phrase sur quelques serveurs
+      ['srvdoc09 | 10.0.0.9', 'not_in_header'], // déduit d'un nom de serveur
+      ['Topologie OrderHub', 'evidence_mismatch'], // titre sans mot d'environnement
     ]) {
-      const v = verifyReading(withEnv('PRD', ev), ctxOf(env, { pageText: text }));
+      const v = verifyReading(withEnv('PRD', ev), ctx(env, 'Topologie OrderHub'));
       assert.equal(v.env, null, String(ev));
       assert.deepEqual(v.rejected, [{ what: 'environnement de la page (PRD)', reason }], String(ev));
     }
+    // sans en-tête fourni : jamais retenu
+    assert.equal(verifyReading(withEnv('PRD', 'Serveurs de production'), ctxOf(env, { pageText: body })).env, null);
   });
 
   test('a dropped page env is not given to the servers of the page ; « pré-production » is not production', () => {
     const env = setup();
-    const v = verifyReading(withEnv('PRD', 'srvdoc09 | 10.0.0.9'), ctxOf(env, { pageText: text }));
+    const v = verifyReading(withEnv('PRD', 'Serveurs de production'), ctx(env, 'Topologie OrderHub'));
     assert.equal(v.servers.find((s) => s.name === 'srvdoc09').env, null);
-    const pre = verifyReading(withEnv('PRD', 'Environnement de pré-production'), ctxOf(env, { pageText: `${text}\nEnvironnement de pré-production` }));
-    assert.equal(pre.env, null);
-    const stg = verifyReading(withEnv('STG', 'Environnement de pré-production'), ctxOf(env, { pageText: `${text}\nEnvironnement de pré-production` }));
-    assert.equal(stg.env, 'STG');
+    assert.equal(verifyReading(withEnv('PRD', 'OrderHub : pré-production'), ctx(env, 'OrderHub : pré-production')).env, null);
+    assert.equal(verifyReading(withEnv('STG', 'OrderHub : pré-production'), ctx(env, 'OrderHub : pré-production')).env, 'STG');
   });
 
   test('house words count only once declared in mappings.json (environnements block)', () => {
     const { configureEnvironments } = require('../src/lib/environment');
     const env = setup();
-    assert.equal(verifyReading(withEnv('STG', 'Environnement : recette'), ctxOf(env, { pageText: text })).env, null);
+    assert.equal(verifyReading(withEnv('STG', 'Infra OrderHub : recette'), ctx(env, 'Infra OrderHub : recette')).env, null);
     configureEnvironments({ STG: ['recette'] });
     try {
-      assert.equal(verifyReading(withEnv('STG', 'Environnement : recette'), ctxOf(env, { pageText: text })).env, 'STG');
+      assert.equal(verifyReading(withEnv('STG', 'Infra OrderHub : recette'), ctx(env, 'Infra OrderHub : recette')).env, 'STG');
     } finally {
       configureEnvironments(null);
     }
@@ -400,5 +405,67 @@ describe('serveur hors inventaire corroboré par une autre page', () => {
     const v = verifyReading(r, ctx);
     assert.equal(v.servers[0].corroborated, true);
     assert.equal(v.links[0].trust, 'added');
+  });
+});
+
+describe('relecture round 1 : page elle-même, utilisateurs actuels, lien actuel dans une page ancienne', () => {
+  const ora = (env) => env.repo.upsertNode({ type: 'server', key: 'srvora01', name: 'srvora01', source: 'llm', attrs: { fromLlm: true, outOfInventory: true } });
+  const doc = (env, key, attrs) => env.repo.upsertNode({ type: 'document', key, name: key, source: 'confluence', attrs: { updatedAt: RECENT, ...attrs } });
+  const mention = (env, src) => env.repo.addEdge({ src, dst: 'server:srvora01', type: 'mentions', source: 'confluence', sourceRef: src, attrs: { status: 'active', period: 'current' } });
+  const oraReading = () =>
+    reading({
+      entities: [server('srvora01', 'ORADB sur srvora01'), { name: 'ORADB', type: 'database', status: 'active', evidence: 'ORADB sur srvora01' }],
+      links: [{ from: 'ORADB', to: 'srvora01', type: 'db_on', evidence: 'ORADB sur srvora01' }],
+    });
+
+  test('the page itself and retired documents do not corroborate a server', () => {
+    const env = setup();
+    ora(env);
+    const own = doc(env, 'confluence-10');
+    mention(env, own);
+    mention(env, doc(env, 'confluence-11', { retired: true }));
+    const ctx = ctxOf(env, { pageText: 'ORADB sur srvora01', pageUpdatedAt: OLD, docNodeId: own });
+    assert.equal(verifyReading(oraReading(), ctx).links[0].trust, 'toValidate');
+    mention(env, doc(env, 'confluence-12'));
+    assert.equal(verifyReading(oraReading(), ctx).links[0].trust, 'added');
+  });
+
+  test('in the page, only current uses_db links make an application a user of the database', () => {
+    const env = setup();
+    const text = 'BILREF | srvbil01\nBilling Engine utilise BILREF\nBilling Engine lit BILREF';
+    const r = (links) =>
+      reading({
+        applications: [{ name: 'OrderHub', written: 'OrderHub', role: 'subject', evidence: 'OrderHub' }],
+        entities: [{ name: 'BILREF', type: 'database', status: 'active', evidence: 'BILREF | srvbil01' }],
+        links: [...links, { from: 'BILREF', to: 'srvbil01', type: 'db_on', evidence: 'BILREF | srvbil01' }],
+      });
+    const ctx = ctxOf(env, { pageText: `OrderHub\n${text}` });
+    const trustOf = (links) => verifyReading(r(links), ctx).links.find((l) => l.type === 'db_on').trust;
+    assert.equal(trustOf([{ from: 'Billing Engine', to: 'BILREF', type: 'uses_db', period: 'past', evidence: 'Billing Engine utilise BILREF' }]), 'toValidate');
+    assert.equal(trustOf([{ from: 'Billing Engine', to: 'BILREF', type: 'reads_from', evidence: 'Billing Engine lit BILREF' }]), 'toValidate');
+    assert.equal(trustOf([{ from: 'Billing Engine', to: 'BILREF', type: 'uses_db', evidence: 'Billing Engine utilise BILREF' }]), 'added');
+  });
+
+  test('a link marked current in a past page is at most toValidate, unless confirmed ; target pages are not affected', () => {
+    const env = setup();
+    const text = 'OrderHub tourne sur srvorh01\nBilling Engine appelle OrderHub\nOrderHub sur srvnew88';
+    const r = (period) =>
+      reading({
+        page: { kind: 'architecture', period, env: null, topics: [] },
+        entities: [server('srvnew88', 'OrderHub sur srvnew88')],
+        links: [
+          runsOn('srvorh01', 'OrderHub tourne sur srvorh01', { period: 'current' }),
+          { from: 'Billing Engine', to: 'OrderHub', type: 'calls', period: 'current', evidence: 'Billing Engine appelle OrderHub' },
+          runsOn('srvnew88', 'OrderHub sur srvnew88', { period: 'current' }),
+        ],
+      });
+    const past = verifyReading(r('past'), ctxOf(env, { pageText: text, naemonHosts: new Set(['srvnew88']) }));
+    assert.deepEqual(past.links.map((l) => [l.dstName, l.period, l.trust]), [
+      ['srvorh01', 'current', 'confirmed'],
+      ['OrderHub', 'current', 'toValidate'],
+      ['srvnew88', 'current', 'toValidate'],
+    ]);
+    const target = verifyReading(r('target'), ctxOf(env, { pageText: text, naemonHosts: new Set(['srvnew88']) }));
+    assert.deepEqual(target.links.map((l) => l.trust), ['confirmed', 'added', 'added']);
   });
 });
