@@ -24,6 +24,9 @@ const config = {
   host: env('HOST', '127.0.0.1'),
   // données du graphe (fichiers JSON) : supprimables, reconstruites par les synchros
   dataDir: path.resolve(ROOT, env('DATA_DIR', './data/store')),
+  // mode démo : jeu fictif généré au démarrage dans demoDir (jamais mélangé avec dataDir), aucun appel réseau
+  demo: bool('DEMO_MODE', 'false'),
+  demoDir: path.resolve(ROOT, './data/demo-store'),
   // frontend compilé (npm run build sur une machine Node >= 20), servi par le backend
   frontendDist: path.resolve(ROOT, env('FRONTEND_DIST', '../frontend/dist')),
 
