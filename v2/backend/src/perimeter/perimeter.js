@@ -12,6 +12,7 @@
 const fs = require('fs');
 const { sha256 } = require('../lib/hash');
 const { isInactiveEdge } = require('../graph/impact');
+const { DOC_SOURCES } = require('../reading/verify');
 
 /** "Order-Hub (PROD)" -> "order hub prod" : minuscules, sans accents, mots séparés par un espace. */
 function normalize(s) {
@@ -100,7 +101,9 @@ function createMatcher(perimeter, repo = null) {
       const norm = normalize(v.text);
       return { ...v, norm, compact: norm.replace(/ /g, ''), words: norm.split(' ').filter(Boolean) };
     });
-    const servers = new Set(repo ? repo.edgesFrom(id).filter((e) => e.type === 'runs_on' && !isInactiveEdge(e)).map((e) => e.dst) : []);
+    // serveurs de référence : liens des inventaires seulement (un serveur ajouté par une lecture de page n'est pas
+    // une référence, sinon le contrôle d'architecture changerait d'un passage à l'autre)
+    const servers = new Set(repo ? repo.edgesFrom(id).filter((e) => e.type === 'runs_on' && !DOC_SOURCES.has(e.source) && !isInactiveEdge(e)).map((e) => e.dst) : []);
     return { id, name: a.name, auid, auidNorm: auid ? compact(auid) : null, variants, sigle: acronym(a.name), servers, naemonHostgroups: a.naemonHostgroups || [] };
   });
   const maxWords = Math.max(...apps.flatMap((a) => a.variants.map((v) => v.words.length))) + 1;

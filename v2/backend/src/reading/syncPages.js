@@ -23,10 +23,11 @@ const { SECTION_LABELS_FR } = require('../perimeter/architecture');
 const { isInactiveEdge } = require('../graph/impact');
 const { readPage, READING_VERSION } = require('./readPage');
 const { verifyReading, DOC_SOURCES } = require('./verify');
-const { applyReading } = require('./apply');
+const { applyReading, PAGE_SOURCES } = require('./apply');
 
 const QUIET = { debug() {}, info() {}, warn() {}, error() {} };
-const READING_KEYS = ['reading', 'readingHash', 'readingContentHash', 'verifyHash', 'rejected'];
+const READING_KEYS = ['reading', 'readingHash', 'readingContentHash', 'verifyHash', 'rejected', 'rulesCleared'];
+const STEP_FR = { llm: 'lecture IA', verify: 'vérification', apply: 'écriture dans le graphe', parse: 'analyse' };
 const hasInventoryRow = (n) => Object.keys(n.attrs || {}).some((k) => k.endsWith('_row') && k !== 'confluence_row');
 
 /** Empreinte de ce qui change la réponse de l'IA : version de la lecture, consignes, périmètre. */
@@ -37,8 +38,8 @@ function readingHashOf({ consignes, matcher }) {
 /**
  * Empreinte de ce qui change la vérification sans changer la lecture : serveurs des inventaires
  * (nom, IP, FQDN), liens runs_on des inventaires, hôtes Naemon hors inventaire.
- * (L'empreinte `serversHash` du matcher compte aussi les liens ajoutés par les lectures : elle
- * changerait après chaque lecture, d'où ce calcul sur les seules sources d'inventaire.)
+ * Seules les sources d'inventaire comptent : un lien ajouté par une lecture changerait l'empreinte
+ * après chaque passage.
  */
 function verifyHashOf(repo, naemonHosts) {
   const servers = repo
@@ -126,8 +127,20 @@ async function runConfluenceSync({
   /** Vérifie une lecture, l'écrit dans le graphe et enregistre la ligne document. */
   function applyAndSave(ctx, reading, readingAttrs) {
     const { page, p, docNodeId, docBase, rowAttrs } = ctx;
-    const verified = verifyReading(reading, { pageText: ctx.pageText, diagramsText: ctx.diagramsText, repo, matcher, naemonHosts: naemon, pageUpdatedAt: p.updatedAt || null, now });
-    const out = applyReading(repo, verified, { pageId: p.id, docNodeId, page: { ...page, updatedAt: p.updatedAt || page.updatedAt }, matcher, now });
+    let verified;
+    try {
+      verified = verifyReading(reading, { pageText: ctx.pageText, diagramsText: ctx.diagramsText, repo, matcher, naemonHosts: naemon, pageUpdatedAt: p.updatedAt || null, now });
+    } catch (err) {
+      err.step = 'verify';
+      throw err;
+    }
+    let out;
+    try {
+      out = applyReading(repo, verified, { pageId: p.id, docNodeId, page: { ...page, updatedAt: p.updatedAt || page.updatedAt }, matcher, now });
+    } catch (err) {
+      err.step = 'apply';
+      throw err;
+    }
     for (const k of ['mentions', 'links', 'owners', 'toValidate', 'otherApp', 'rejected']) stats[k] += out[k] || 0;
     if (verified.kind === 'architecture') stats.architecturePages++;
     if (matcher && verified.apps.some((a) => perimeterIds.has(a.appId))) stats.inScope++;
@@ -137,28 +150,54 @@ async function runConfluenceSync({
     repo.saveDocument({ ...docBase, status: 'enriched', attrs: { ...rowAttrs, ...readingAttrs, reading, verifyHash, rejected: verified.rejected } });
   }
 
-  async function readAndApply(ctx, prevAttrs) {
-    const { page, p, docBase, rowAttrs } = ctx;
+  /**
+   * Page en erreur : erreur enregistrée avec son étape, ligne document qui garde la lecture précédente
+   * (reprise au passage suivant). Ne lève jamais : un échec ici ne doit pas arrêter le passage.
+   */
+  function fail(ctx, prevAttrs, step, err) {
+    const { p, docBase, rowAttrs } = ctx;
+    stats.errors++;
+    // une écriture en échec a pu purger une partie des liens de la page : on ne dit pas qu'ils sont gardés
+    const outcome = step === 'apply' ? 'liens de la page peut-être retirés en partie, réécrits au passage suivant' : 'lecture précédente gardée';
+    log.warn(`page ${p.id} (${p.title}) : ${STEP_FR[step] || step} en échec, ${outcome} : ${err.message}`);
     try {
-      const reading = await readPage(
+      repo.recordError(runId, { source: 'confluence', ref: p.id, step, message: err.message });
+      repo.saveDocument({ ...docBase, status: 'error', error: err.message, attrs: { ...(rowAttrs || {}), ...keepReading(prevAttrs) } });
+    } catch (err2) {
+      log.error(`page ${p.id} : erreur non enregistrée : ${err2.message}`);
+    }
+  }
+
+  async function readAndApply(ctx, prevAttrs) {
+    const { page, p, docBase } = ctx;
+    let reading;
+    try {
+      reading = await readPage(
         llm,
         { title: page.title || p.title, ancestors: p.ancestors || [], space: p.spaceKey, updatedAt: p.updatedAt, sections: page.sections, diagramsText: ctx.diagramsText, apps, consignes },
         { chunkChars, maxTokens }
       );
+    } catch (err) {
+      fail(ctx, prevAttrs, 'llm', err);
+      return;
+    }
+    try {
       applyAndSave(ctx, reading, { readingHash, readingContentHash: docBase.contentHash });
       stats.read++;
     } catch (err) {
-      stats.errors++;
-      repo.recordError(runId, { source: 'confluence', ref: p.id, step: 'llm', message: err.message });
-      // la page garde sa lecture précédente (graphe et ligne document) : reprise au passage suivant
-      repo.saveDocument({ ...docBase, status: 'error', error: err.message, attrs: { ...rowAttrs, ...keepReading(prevAttrs) } });
-      log.warn(`page ${p.id} (${p.title}) : lecture IA en échec, lecture précédente gardée : ${err.message}`);
+      fail(ctx, prevAttrs, err.step || 'apply', err);
     }
+  }
+
+  /** Sans IA, page jamais lue : ce que l'ancienne analyse (règles) avait écrit pour elle est retiré une fois. */
+  function clearOldRules(ctx) {
+    repo.removeEdgesBySourceRef(ctx.p.id, { sources: PAGE_SOURCES });
+    repo.patchNodeAttrs(ctx.docNodeId, { pageKind: undefined, architecture: undefined, excerpt: undefined });
   }
 
   const inflight = new Set();
   const track = (promise) => {
-    const q = promise.finally(() => inflight.delete(q));
+    const q = promise.catch((err) => log.error(`erreur inattendue : ${err.message}`)).finally(() => inflight.delete(q));
     inflight.add(q);
   };
 
@@ -188,7 +227,7 @@ async function runConfluenceSync({
       }
       if (!readingCurrent && !llm) {
         stats.notRead++;
-        if (contentSame && prev.status === 'parsed') {
+        if (contentSame && prev.status === 'parsed' && (pa.reading || pa.rulesCleared)) {
           stats.skipped++;
           continue;
         }
@@ -220,16 +259,14 @@ async function runConfluenceSync({
           applyAndSave(ctx, pa.reading, { readingHash: pa.readingHash, readingContentHash: pa.readingContentHash });
           stats.reverified++;
         } else if (!llm) {
-          repo.saveDocument({ ...docBase, status: 'parsed', attrs: { ...rowAttrs, ...keepReading(pa) } });
+          if (!pa.reading && !pa.rulesCleared) clearOldRules(ctx);
+          repo.saveDocument({ ...docBase, status: 'parsed', attrs: { ...rowAttrs, ...keepReading(pa), ...(pa.reading ? {} : { rulesCleared: true }) } });
         } else {
           if (inflight.size >= maxInFlight) await Promise.race(inflight);
           track(readAndApply(ctx, pa));
         }
       } catch (err) {
-        stats.errors++;
-        repo.recordError(runId, { source: 'confluence', ref: p.id || entry.ref, step: 'parse', message: err.message });
-        repo.saveDocument({ ...docBase, status: 'error', error: err.message, attrs: keepReading(pa) });
-        log.warn(`page ${p.id} (${p.title}) en erreur : ${err.message}`);
+        fail(ctx || { p, docBase }, pa, err.step || 'parse', err);
       }
       if (seen % flushEvery === 0) {
         repo.flush();

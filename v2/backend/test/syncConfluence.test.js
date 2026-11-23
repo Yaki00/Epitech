@@ -12,6 +12,7 @@ const { ingestInventory } = require('../src/ingest/inventory');
 const { impactOf } = require('../src/graph/impact');
 const { runConfluenceSync } = require('../src/reading/syncPages');
 const { createReadingMock } = require('../src/reading/mockReadings');
+const { readExportPages, exportHash } = require('../src/ingest/confluenceExport');
 
 const EXPORT = path.join(__dirname, 'fixtures', 'confluence-reading');
 const READINGS = JSON.parse(fs.readFileSync(path.join(EXPORT, 'mock-readings.json'), 'utf8'));
@@ -151,6 +152,24 @@ describe('analyse Confluence par lecture IA', () => {
     assert.equal(r.stats.reverified, 3);
   });
 
+  test('audit expected and missing are identical after a re-verify', async () => {
+    const audits = () =>
+      repo
+        .edgesFrom('application:orderhub')
+        .filter((e) => e.type === 'documented_in' && e.attrs.audit)
+        .map((e) => [e.dst, e.attrs.audit.expected, e.attrs.audit.missing, e.attrs.audit.confirmed, e.attrs.audit.unknown])
+        .sort();
+    await run();
+    const first = audits();
+    const r = await run({ naemonHosts: ['srvautre99'] });
+    assert.equal(r.stats.reverified, 3);
+    assert.deepEqual(audits(), first);
+    // la référence de l'audit reste l'inventaire : le serveur ajouté par la lecture n'y entre pas
+    const p1 = first.find((a) => a[0] === DOC[P1]);
+    assert.equal(p1[1], 1);
+    assert.deepEqual(p1[4], ['srvnew01']);
+  });
+
   test('consignes changed: pages read again; nodes no longer cited are retired', async () => {
     await run();
     fake.state.calls.length = 0;
@@ -213,6 +232,50 @@ describe('analyse Confluence par lecture IA', () => {
     assert.ok(repo.getNode(DOC[P1]));
     assert.equal(repo.allEdges().filter((e) => ['7001', '7002', '7003'].includes(e.sourceRef)).length, 0);
     assert.equal(repo.getDocument('confluence:7001').status, 'parsed');
+  });
+
+  test('without AI: outputs of the old rules are purged from pages never read', async () => {
+    // état laissé par l'ancienne analyse (règles) : page déjà traitée, contenu inchangé
+    const entry = [...readExportPages(EXPORT)].find((e) => e.p && e.p.id === '7001');
+    repo.upsertNode({ type: 'document', key: 'confluence-7001', name: P1, source: 'confluence', attrs: { pageKind: 'architecture', architecture: { score: 0.8 } } });
+    repo.upsertNode({ type: 'database', key: 'ORA_ORH', name: 'ORA_ORH', source: 'llm' });
+    repo.addEdge({ src: DOC[P1], dst: 'server:srvorh01', type: 'mentions', source: 'confluence', sourceRef: '7001' });
+    repo.addEdge({ src: 'application:orderhub', dst: DOC[P1], type: 'documented_in', source: 'confluence', sourceRef: '7001', confidence: 0.8 });
+    repo.addEdge({ src: 'application:orderhub', dst: 'database:ora_orh', type: 'uses_db', source: 'drawio', sourceRef: '7001' });
+    repo.addEdge({ src: 'application:orderhub', dst: 'database:ora_orh', type: 'uses_db', source: 'llm', sourceRef: '7001' });
+    repo.saveDocument({ id: 'confluence:7001', source: 'confluence', title: P1, contentHash: exportHash(entry), status: 'parsed', attrs: {} });
+
+    const r = await run({ llm: null });
+    assert.equal(repo.allEdges().filter((e) => e.sourceRef === '7001').length, 0);
+    assert.equal(repo.getNode(DOC[P1]).attrs.pageKind, undefined);
+    assert.equal(repo.getNode(DOC[P1]).attrs.architecture, undefined);
+    // les liens des inventaires ne sont jamais touchés
+    assert.ok(repo.edgesFrom('application:orderhub').some((e) => e.type === 'runs_on' && e.source === 'apm'));
+    assert.equal(r.stats.notRead, 3);
+    // passage suivant sans IA : rien à refaire
+    const again = await run({ llm: null });
+    assert.equal(again.stats.skipped, 3);
+  });
+
+  test('verify or apply failure: recorded with its step, no unhandled rejection', async () => {
+    const warns = [];
+    const log = { ...silent, warn: (m) => warns.push(m), error: (m) => warns.push(m) };
+    // vérification en échec (bogue simulé) : rien n'est écrit, lecture précédente gardée
+    const broken = { ...repo, resolve: () => { throw new Error('boom verify'); } };
+    let r = await run({ repo: broken, log });
+    let steps = repo.errorsOfRun(r.runId).map((e) => [e.ref, e.step]).sort();
+    assert.deepEqual(steps, [['7001', 'verify'], ['7002', 'verify']]);
+    assert.equal(repo.getDocument('confluence:7001').status, 'error');
+    assert.ok(warns.some((m) => /7001/.test(m) && /vérification/.test(m)));
+
+    // écriture en échec après la purge : le journal ne prétend pas que la lecture précédente est gardée
+    warns.length = 0;
+    const failing = { ...repo, patchNodeAttrs: (id, patch) => { if ('pageKindAi' in patch) throw new Error('boom apply'); return repo.patchNodeAttrs(id, patch); } };
+    r = await run({ repo: failing, log, consignes: { text: 'x', hash: 'c9' } });
+    steps = repo.errorsOfRun(r.runId).map((e) => e.step);
+    assert.deepEqual([...new Set(steps)], ['apply']);
+    assert.equal(r.status, 'partial');
+    assert.ok(warns.length && warns.every((m) => !/lecture précédente gardée/.test(m)));
   });
 
   test('reading mock answers from prepared readings by title', async () => {
