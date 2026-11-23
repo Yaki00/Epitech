@@ -8,7 +8,7 @@ const { createRepo } = require('../src/store/repo');
 const { loadPerimeter, createMatcher } = require('../src/perimeter/perimeter');
 const { fetchThruk } = require('../src/naemon/thruk');
 const { readNaemonCsv } = require('../src/naemon/csvSource');
-const { createPoller } = require('../src/naemon/poller');
+const { createPoller, readUnmatchedHosts } = require('../src/naemon/poller');
 const { createFetchRaw } = require('../src/naemon/source');
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'lyra-naemon-'));
@@ -216,5 +216,22 @@ describe('poller', () => {
     const v1 = sha256(JSON.stringify([[{ name: 'alto', aliases: ['AL'], auid: null }], null])).slice(0, 12);
     assert.equal(write([{ name: 'alto', aliases: ['AL'] }]), v1);
     assert.equal(write([{ name: 'alto', aliases: ['AL'], naemonHostgroups: ['hg1'] }]), v1);
+  });
+});
+
+describe('readUnmatchedHosts (hôtes Naemon hors inventaire donnés à la lecture des pages)', () => {
+  test('read from the file written by the poller ({ source, lastOk, status }), lower case', () => {
+    const file = path.join(tmp(), 'naemon-status.json');
+    fs.writeFileSync(file, JSON.stringify({ source: 'thruk', lastOk: '2026-11-23T10:00:00Z', status: { servers: {}, unmatchedHosts: ['SRVORA01', 'srvx02'] } }));
+    assert.deepEqual(readUnmatchedHosts(file), ['srvora01', 'srvx02']);
+  });
+
+  test('missing or unreadable file gives an empty list ; a bare status is still read', () => {
+    const dir = tmp();
+    assert.deepEqual(readUnmatchedHosts(path.join(dir, 'absent.json')), []);
+    fs.writeFileSync(path.join(dir, 'bad.json'), '{');
+    assert.deepEqual(readUnmatchedHosts(path.join(dir, 'bad.json')), []);
+    fs.writeFileSync(path.join(dir, 'bare.json'), JSON.stringify({ unmatchedHosts: ['srvy03'] }));
+    assert.deepEqual(readUnmatchedHosts(path.join(dir, 'bare.json')), ['srvy03']);
   });
 });

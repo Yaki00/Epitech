@@ -82,4 +82,18 @@ function createPoller({ cfg, repo, matcher = null, fetchRaw, file = null, onOk =
   return { start, stop, refresh, snapshot };
 }
 
-module.exports = { createPoller };
+/**
+ * Hôtes supervisés par Naemon mais absents des inventaires, lus dans le dernier état enregistré par la
+ * relève (fichier { source, lastOk, status }), en minuscules. Fichier absent ou illisible : liste vide.
+ */
+function readUnmatchedHosts(file) {
+  try {
+    const saved = readJson(file, null);
+    const st = saved && saved.status ? saved.status : saved;
+    return ((st && st.unmatchedHosts) || []).map((h) => String(h).toLowerCase());
+  } catch (_) {
+    return [];
+  }
+}
+
+module.exports = { createPoller, readUnmatchedHosts };

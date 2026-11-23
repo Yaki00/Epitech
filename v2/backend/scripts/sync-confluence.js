@@ -28,6 +28,7 @@ const { loadPerimeter } = require('../src/perimeter/perimeter');
 const { loadConsignes } = require('../src/reading/consignes');
 const { runConfluenceSync } = require('../src/reading/syncPages');
 const { createReadingMock } = require('../src/reading/mockReadings');
+const { readUnmatchedHosts } = require('../src/naemon/poller');
 const { configureEnvironmentsFromFile } = require('../src/lib/environment');
 const { createLlmClient } = require('../src/lib/llmClient');
 const { createLogger } = require('../src/lib/logger');
@@ -42,14 +43,7 @@ const opt = {
 if (args.includes('--no-triage')) log.warn("--no-triage est ignoré : il n'y a plus de tri séparé, chaque page est lue une fois par l'IA");
 
 /** Hôtes supervisés par Naemon mais absents des inventaires (corroborent un serveur hors inventaire). */
-function naemonHosts() {
-  try {
-    const st = JSON.parse(fs.readFileSync(path.join(config.dataDir, 'naemon-status.json'), 'utf8'));
-    return (st.unmatchedHosts || []).map((h) => String(h).toLowerCase());
-  } catch (_) {
-    return [];
-  }
-}
+const naemonHosts = () => readUnmatchedHosts(path.join(config.dataDir, 'naemon-status.json'));
 
 function createLlm() {
   if (!opt.llm) return null;
