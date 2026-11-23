@@ -85,6 +85,9 @@ const config = {
   // rapports lisibles dans Excel (pages par application, orthographes rencontrées)
   reportsDir: path.resolve(ROOT, env('REPORTS_DIR', './data/rapports')),
 
+  // nombre d'imports d'inventaire conservés dans changes.json
+  history: { keep: int('HISTORY_KEEP', 50) },
+
   // synchros lançables depuis la page Synchronisation de l'interface
   allowUiSync: bool('ALLOW_UI_SYNC', 'true'),
 

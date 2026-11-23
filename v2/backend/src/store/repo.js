@@ -25,6 +25,12 @@ function nodeKey(type, raw) {
     .replace(/\s+/g, '-');
 }
 
+function applyPatch(attrs, patch) {
+  const out = { ...attrs, ...patch };
+  for (const k of Object.keys(patch)) if (patch[k] === undefined) delete out[k];
+  return out;
+}
+
 function createRepo(store) {
   const D = () => store.data; // les données peuvent être rechargées : toujours passer par D()
 
@@ -93,6 +99,27 @@ function createRepo(store) {
     data.edges.set(k, row);
     store.indexEdge(k, row);
   }
+
+  /** Fusionne un patch dans les attributs d'un nœud ; une valeur undefined supprime l'attribut. */
+  function patchNodeAttrs(id, patch) {
+    const n = D().nodes.get(id);
+    if (!n) return false;
+    n.attrs = applyPatch(n.attrs, patch);
+    return true;
+  }
+
+  /** Idem pour un lien, désigné par son id numérique. */
+  function patchEdgeAttrs(edgeId, patch) {
+    for (const e of D().edges.values()) {
+      if (e.id === edgeId) {
+        e.attrs = applyPatch(e.attrs, patch);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  const allEdges = () => [...D().edges.values()].map(toEdge);
 
   const getNode = (id) => toNode(D().nodes.get(id));
   const edgesOf = (index, id) => [...(index.get(id) || [])].map((k) => toEdge(D().edges.get(k))).filter(Boolean);
@@ -183,6 +210,9 @@ function createRepo(store) {
     resolve,
     addEdge,
     getNode,
+    patchNodeAttrs,
+    patchEdgeAttrs,
+    allEdges,
     edgesFrom,
     edgesTo,
     search,

@@ -39,6 +39,7 @@ function resolveInputFile(root, pattern) {
 }
 
 const { columnIndex } = require('../lib/csv');
+const { nodeKey } = require('../store/repo');
 
 const splitMulti = (v) =>
   String(v || '')
@@ -90,6 +91,37 @@ function pickAttrs(row, attrs) {
 }
 
 /**
+ * Ce que le fichier fournit, sur TOUTES ses lignes (avant le filtre du périmètre) : une ligne hors périmètre
+ * garde son serveur en vie. Seul le filtre du mapping (lignes qui ne sont pas des entrées d'inventaire) s'applique.
+ * Identité d'un lien : src|dst|type|source.
+ */
+function computeSeen(records, mapping, source) {
+  const nodeIds = new Set();
+  const edgeIds = new Set();
+  const attrsById = {};
+  for (const row of records) {
+    if (mapping.filter && Object.entries(mapping.filter).some(([col, val]) => String(row[col] ?? '') !== String(val))) continue;
+    const key = row[mapping.key];
+    if (!key) continue;
+    const k = nodeKey(mapping.entity, key);
+    if (!k) continue;
+    const id = `${mapping.entity}:${k}`;
+    nodeIds.add(id);
+    attrsById[id] = pickAttrs(row, mapping.attrs);
+    for (const rel of mapping.relations) {
+      for (const value of rel.multi === false ? [row[rel.column]].filter(Boolean) : splitMulti(row[rel.column])) {
+        const ok = nodeKey(rel.entity, value);
+        if (!ok) continue;
+        const otherId = `${rel.entity}:${ok}`;
+        const [src, dst] = rel.direction === 'to' ? [id, otherId] : [otherId, id];
+        if (src !== dst) edgeIds.add(`${src}|${dst}|${rel.type}|${source}`);
+      }
+    }
+  }
+  return { nodeIds: [...nodeIds], edgeIds: [...edgeIds], attrsById };
+}
+
+/**
  * @param {object} repo
  * @param {object} p
  * @param {string} p.source   nom de la source (marketplace, apm…)
@@ -122,6 +154,9 @@ function ingestInventory(repo, { source, records, headers, mapping: rawMapping, 
     ...mapping.relations.flatMap((r) => [r.column, ...Object.values(r.attrs)]),
   ].filter((col) => col && records.length && !cols.includes(col));
   if (missing.length) throw new Error(`Colonnes absentes de l'export ${source} : ${[...new Set(missing)].join(', ')}. Vérifiez config/mappings.json.`);
+
+  const seen = computeSeen(records, mapping, source);
+  stats.seen = seen;
 
   repo.transaction(() => {
     records.forEach((original, i) => {

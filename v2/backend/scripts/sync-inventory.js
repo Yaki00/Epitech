@@ -16,6 +16,7 @@ const { ingestInventory, resolveInputFile, resolveMapping } = require('../src/in
 const { createLogger } = require('../src/lib/logger');
 const { loadPerimeter, createMatcher, ensurePerimeterNodes } = require('../src/perimeter/perimeter');
 const { writeCsvReport } = require('../src/lib/report');
+const { createHistory } = require('../src/history/history');
 
 const log = createLogger('sync-inventory');
 
@@ -38,6 +39,7 @@ function main() {
     log.info(`périmètre : ${perimeter.applications.length} applications (${perimeter.applications.map((a) => a.name).join(', ')})`);
   } else log.warn(`pas de périmètre (${config.perimeterFile} absent) : toutes les applications sont importées`);
   const nearRows = [];
+  const history = createHistory(config.dataDir, { keep: config.history.keep });
 
   try {
     for (const source of sources) {
@@ -59,6 +61,13 @@ function main() {
         const { resolved } = resolveMapping(mapping, headers);
         if (resolved.length) log.info(`${source} : colonnes par lettre`, Object.fromEntries(resolved.map((r) => [r.ref, r.header])));
         const stats = ingestInventory(repo, { source, records, headers, mapping, matcher, runId });
+        // un import n'est « complet » que sans erreur de ligne et avec au moins une ligne : sinon aucun retrait
+        const complete = stats.errors === 0 && records.length > 0;
+        const { seen } = stats;
+        delete stats.seen;
+        const change = history.recordImport({ source, seen, attrsById: seen.attrsById, complete });
+        if (change) log.info(`${source} : ${change.added.length} ajout(s), ${change.removed.length} retrait(s), ${change.changed.length} modification(s)`);
+        if (!complete) log.warn(`${source} : import incomplet (${stats.errors} erreur(s), ${records.length} ligne(s)), aucun retrait appliqué`);
         if (stats.nearMisses) {
           log.warn(`${source} : noms proches d'une application du périmètre mais NON importés (à ajouter en alias si c'est la même)`, stats.nearMisses);
           for (const n of stats.nearMisses) nearRows.push([source, n]);
@@ -72,6 +81,8 @@ function main() {
         log.error(`${source} en échec : ${err.message}`);
       }
     }
+    const retired = history.applyRetirements(repo);
+    if (retired.nodes || retired.edges) log.info(`retraits : ${retired.nodes} serveur(s), ${retired.edges} lien(s) n'apparaissent plus dans les inventaires`);
     if (perimeter) {
       const file = writeCsvReport(config.reportsDir, 'inventaire-noms-proches', ['source', 'nom dans l\'export -> application du périmètre (lignes)'], nearRows);
       if (nearRows.length) log.info(`rapport : ${file}`);

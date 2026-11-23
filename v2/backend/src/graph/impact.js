@@ -11,7 +11,7 @@
 // Les liens documentaires ne propagent pas une panne.
 const NON_PROPAGATING = new Set(['mentions', 'documented_in', 'monitored_by']);
 
-function traverse(repo, startId, { direction = 'upstream', maxDepth = 5, minConfidence = 0.5, edgeTypes = null } = {}) {
+function traverse(repo, startId, { direction = 'upstream', maxDepth = 5, minConfidence = 0.5, edgeTypes = null, includeRetired = false } = {}) {
   const start = repo.getNode(startId);
   if (!start) return null;
   const visited = new Map([[startId, { node: start, depth: 0, via: null }]]);
@@ -24,12 +24,14 @@ function traverse(repo, startId, { direction = 'upstream', maxDepth = 5, minConf
       const edges = direction === 'upstream' ? repo.edgesTo(id) : repo.edgesFrom(id);
       for (const e of edges) {
         if (e.confidence < minConfidence) continue;
+        if (!includeRetired && e.attrs && e.attrs.retired) continue;
         if (edgeTypes ? !edgeTypes.includes(e.type) : NON_PROPAGATING.has(e.type)) continue;
         const otherId = direction === 'upstream' ? e.src : e.dst;
         usedEdges.push(e);
         if (visited.has(otherId)) continue;
         const node = repo.getNode(otherId);
         if (!node) continue;
+        if (!includeRetired && node.attrs.retired) continue;
         visited.set(otherId, { node, depth, via: { edgeType: e.type, from: id, source: e.source, confidence: e.confidence } });
         next.push(otherId);
       }
