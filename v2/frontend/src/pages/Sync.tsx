@@ -12,7 +12,8 @@ import { useTitle } from '../lib/useTitle';
 import { useConfig } from '../lib/config';
 import { formatDateTime, relativeTime } from '../lib/format';
 import { sourceLabel } from '../lib/sources';
-import { confluenceFetchOff, jobHelpKey, jobsToShow, lastRunBySource, launchBlocked, runEnded, runStarted, runStats, runStatus, statKey, type RunStatus } from '../lib/sync';
+import { confluenceFetchOff, jobHelpKey, jobsToShow, lastRunBySource, launchBlocked, notReadPages, runEnded, runStarted, runStats, runStatus, statKey, type RunStatus } from '../lib/sync';
+import { invalidateTeamsCache } from '../lib/teamsCache';
 import { cn } from '../lib/cn';
 import { Badge, Button, Card, EmptyState, ErrorState, PageHeader, SkeletonRows, type BadgeTone } from '../components/ui';
 import { NaemonStatusCard } from '../components/NaemonStatus';
@@ -49,6 +50,7 @@ export default function SyncPage() {
           </Button>
         }
       />
+      <NotReadNotice runs={runs.data} />
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         <div className="flex min-w-0 flex-col gap-4 xl:col-span-2">
           <LauncherCard onFinished={runs.reload} />
@@ -60,6 +62,19 @@ export default function SyncPage() {
         </div>
       </div>
     </>
+  );
+}
+
+/** Avertissement : des pages du dernier passage Confluence n'ont pas été lues par l'IA (rien n'en est déduit). */
+function NotReadNotice({ runs }: { runs: SyncRun[] | null }) {
+  const { t } = useI18n();
+  const n = notReadPages(runs ?? []);
+  if (!n) return null;
+  return (
+    <p role="status" className="mb-4 flex items-start gap-2 rounded-lg border border-warn/40 bg-warn-soft px-4 py-3 text-[13px] text-ink">
+      <CircleAlert aria-hidden size={16} className="mt-px shrink-0 text-warn" />
+      {t('sync.notRead', { n })}
+    </p>
   );
 }
 
@@ -99,6 +114,7 @@ function useSyncJobs(onFinished: () => void) {
     if (running) wasRunning.current = true;
     else if (wasRunning.current) {
       wasRunning.current = false;
+      invalidateTeamsCache(); // responsables et équipes changés par la synchro : la palette Ctrl+K les relira
       finishedRef.current();
     }
     if (!running) return undefined;

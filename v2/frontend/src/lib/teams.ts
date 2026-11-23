@@ -30,8 +30,11 @@ export const ROLE_KEYS: Record<OwnerRole, Key> = {
 };
 export const roleKey = (role: OwnerRole | null | undefined): Key | null => (role ? (ROLE_KEYS[role] ?? ROLE_KEYS.other) : null);
 
-/** Entrée actuelle (période absente comptée comme actuelle). */
-export const isCurrent = (x: { period?: string | null }) => !x.period || x.period === 'current';
+/**
+ * Entrée actuelle : période `current`, ou absente (anciennes données). `null` = période illisible dans la
+ * page : à valider, jamais comptée comme actuelle.
+ */
+export const isCurrent = (x: { period?: string | null }) => x.period === undefined || x.period === 'current';
 
 /** Applications d'une carte : actuelles d'abord (rôle puis nom), anciennes et cibles ensuite. */
 export function sortTeamApps(apps: readonly TeamApp[]): TeamApp[] {
@@ -61,14 +64,17 @@ export interface TeamTally {
   past: number;
   /** applications lues dans une page qui décrit une cible */
   target: number;
+  /** applications lues dans une page de période illisible (à valider) */
+  unknown: number;
 }
 
 /** Compte des applications d'une carte par période. */
 export function teamTally(team: Pick<Team, 'applications'>): TeamTally {
-  const out: TeamTally = { current: 0, past: 0, target: 0 };
+  const out: TeamTally = { current: 0, past: 0, target: 0, unknown: 0 };
   for (const a of team.applications) {
     if (a.period === 'past') out.past += 1;
     else if (a.period === 'target') out.target += 1;
+    else if (a.period === null) out.unknown += 1;
     else out.current += 1;
   }
   return out;
@@ -76,12 +82,14 @@ export function teamTally(team: Pick<Team, 'applications'>): TeamTally {
 
 /**
  * Résumé du compte d'une carte (en-tête et palette) : nombre d'applications actuelles et anciennes, ou,
- * sans application actuelle, « ancien responsable » (seulement des anciennes) ou « responsable prévu » (cibles).
+ * sans application actuelle, « responsable à valider » (page de période illisible), « ancien responsable »
+ * (seulement des anciennes) ou « responsable prévu » (cibles).
  */
-export type TallySummary = { kind: 'current'; current: number; past: number } | { kind: 'formerOnly' } | { kind: 'targetOnly' };
+export type TallySummary = { kind: 'current'; current: number; past: number } | { kind: 'formerOnly' } | { kind: 'targetOnly' } | { kind: 'unknownOnly' };
 
 export function tallySummary(t: TeamTally): TallySummary {
   if (t.current > 0) return { kind: 'current', current: t.current, past: t.past };
+  if (t.unknown > 0) return { kind: 'unknownOnly' };
   if (t.past > 0) return { kind: 'formerOnly' };
   if (t.target > 0) return { kind: 'targetOnly' };
   return { kind: 'current', current: 0, past: 0 };

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AppOwner, Team, TeamApp } from './api';
-import { criticalityTone, filterTeams, initials, orderTeams, sortOwners, sortTeamApps, tallySummary, teamCounts, teamTally, teamsHref } from './teams';
+import { criticalityTone, filterTeams, initials, isCurrent, orderTeams, sortOwners, sortTeamApps, tallySummary, teamCounts, teamTally, teamsHref } from './teams';
 import { LINK_MARK_META, linkMark, pagePeriodKey } from './trust';
 
 const app = (name: string, extra: Partial<TeamApp> = {}): TeamApp => ({
@@ -35,7 +35,8 @@ describe('sortTeamApps', () => {
       app('Alpha', { role: 'oncall' }),
       app('Gamma', { role: 'owner', period: null }),
     ]);
-    expect(list.map((a) => a.name)).toEqual(['Beta', 'Gamma', 'Zeta', 'Alpha', 'Next', 'Old']);
+    // période inconnue (null) : à valider, rangée avec les non actuelles
+    expect(list.map((a) => a.name)).toEqual(['Beta', 'Zeta', 'Alpha', 'Gamma', 'Next', 'Old']);
   });
 });
 
@@ -140,18 +141,25 @@ describe('linkMark', () => {
 describe('teamTally et tallySummary', () => {
   it('ancien seulement : aucune application actuelle, « ancien responsable »', () => {
     const tally = teamTally({ applications: [app('Sirius', { period: 'past' })] });
-    expect(tally).toEqual({ current: 0, past: 1, target: 0 });
+    expect(tally).toEqual({ current: 0, past: 1, target: 0, unknown: 0 });
     expect(tallySummary(tally)).toEqual({ kind: 'formerOnly' });
   });
 
   it('mélange : actuelles comptées à part des anciennes', () => {
     const tally = teamTally({ applications: [app('A'), app('B', { period: null }), app('C', { period: 'past' }), app('D', { period: 'target' })] });
-    expect(tally).toEqual({ current: 2, past: 1, target: 1 });
-    expect(tallySummary(tally)).toEqual({ kind: 'current', current: 2, past: 1 });
+    expect(tally).toEqual({ current: 1, past: 1, target: 1, unknown: 1 });
+    expect(tallySummary(tally)).toEqual({ kind: 'current', current: 1, past: 1 });
   });
 
   it('cible seulement : « responsable prévu » ; carte vide : zéro actuelle', () => {
     expect(tallySummary(teamTally({ applications: [app('N', { period: 'target' })] }))).toEqual({ kind: 'targetOnly' });
     expect(tallySummary(teamTally({ applications: [] }))).toEqual({ kind: 'current', current: 0, past: 0 });
+  });
+
+  it('période illisible seulement : « responsable à valider », jamais actuel', () => {
+    expect(tallySummary(teamTally({ applications: [app('U', { period: null }), app('P', { period: 'past' })] }))).toEqual({ kind: 'unknownOnly' });
+    expect(isCurrent({ period: null })).toBe(false);
+    expect(isCurrent({})).toBe(true);
+    expect(isCurrent({ period: 'current' })).toBe(true);
   });
 });

@@ -27,7 +27,7 @@ import { useConfig, naemonLink } from '../lib/config';
 import { useLiveStatus } from '../lib/live';
 import { ENVS, envKey, isAlerting, serviceState, severity, worstState } from '../lib/status';
 import { epochSeconds, formatDateTime, relativeTime } from '../lib/format';
-import { auditInfo, changesTouching, nodeLabel, sqlDate } from '../lib/applications';
+import { auditInfo, changesTouching, flowCount, nodeLabel, sqlDate } from '../lib/applications';
 import { appHref, appMapHref, serverHref } from '../lib/links';
 import { sourceLabel } from '../lib/sources';
 import { cn } from '../lib/cn';
@@ -191,7 +191,7 @@ function AppTabs({ app, tab, setTab }: { app: ApplicationDetail; tab: TabId; set
     { id: 'map', label: t('appDetail.tab.map'), icon: Network },
     { id: 'servers', label: t('appDetail.tab.servers'), icon: ServerIcon, count: servers.length },
     { id: 'databases', label: t('appDetail.tab.databases'), icon: Database, count: active(app.databaseList).length },
-    { id: 'flows', label: t('appDetail.tab.flows'), icon: Waypoints, count: active(app.callsList).length + app.usedBy.length },
+    { id: 'flows', label: t('appDetail.tab.flows'), icon: Waypoints, count: flowCount(app) },
     { id: 'docs', label: t('appDetail.tab.docs'), icon: FileText, count: app.documents.length },
     { id: 'monitoring', label: t('appDetail.tab.monitoring'), icon: Activity, count: alerting || null },
     { id: 'history', label: t('appDetail.tab.history'), icon: HistoryIcon },
@@ -551,9 +551,10 @@ function FlowsTab({ app }: { app: ApplicationDetail }) {
   const { t } = useI18n();
   const { status: live } = useLiveStatus();
   const [showRetired, setShowRetired] = useState(false);
-  const retiredCount = app.callsList.filter((c) => c.retired).length;
+  // appels sortants et entrants : un lien inactif (ancien, cible, à valider) ou retiré est grisé et masqué par défaut
+  const retiredCount = app.callsList.filter((c) => c.retired).length + app.usedBy.filter((u) => u.retired).length;
   const calls = app.callsList.filter((c) => showRetired || !c.retired).sort((a, b) => a.name.localeCompare(b.name));
-  const usedBy = [...app.usedBy].sort((a, b) => a.name.localeCompare(b.name));
+  const usedBy = app.usedBy.filter((u) => showRetired || !u.retired).sort((a, b) => a.name.localeCompare(b.name));
   const appState = (id: string) => live?.apps[id]?.state ?? 'unknown';
   const row = (r: Ref, extra?: { retired?: boolean; criticality?: string | null; link?: LinkedNode }) => (
     <li key={r.id} className={cn('flex items-center gap-3 px-4 py-2', extra?.retired && 'text-ink-3')}>
@@ -583,7 +584,7 @@ function FlowsTab({ app }: { app: ApplicationDetail }) {
           )}
         </Card>
         <Card title={t('appDetail.flows.in')} padded={false}>
-          {usedBy.length === 0 ? <EmptyState compact icon={Waypoints} title={t('appDetail.flows.emptyIn')} /> : <ul className="divide-y divide-line">{usedBy.map((u) => row(u))}</ul>}
+          {usedBy.length === 0 ? <EmptyState compact icon={Waypoints} title={t('appDetail.flows.emptyIn')} /> : <ul className="divide-y divide-line">{usedBy.map((u) => row(u, { retired: u.retired, criticality: attr(u, 'criticality'), link: u }))}</ul>}
         </Card>
       </div>
     </div>

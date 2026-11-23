@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { SyncJobs, SyncRun } from './api';
-import { jobHelpKey, jobsToShow, lastRunBySource, launchBlocked, runEnded, runStats, runStatus, statKey } from './sync';
+import { STAT_KEYS, jobHelpKey, jobsToShow, lastRunBySource, launchBlocked, notReadPages, runEnded, runStats, runStatus, statKey } from './sync';
+import { DICTIONARIES } from './i18n';
 
 const run = (id: number, source: string, extra: Partial<SyncRun> = {}): SyncRun => ({
   id,
@@ -58,5 +59,31 @@ describe('sync', () => {
     expect(lastRunBySource([run(3, 'apm'), run(2, 'confluence'), run(1, 'apm')]).map((r) => r.id)).toEqual([3, 2]);
     expect(runEnded(run(1, 'apm'))).toBe('2026-11-22T11:30:44Z');
     expect(runEnded(run(1, 'apm', { finished_at: '2026-11-22 12:00:00' }))).toBe('2026-11-22T12:00:00Z');
+  });
+
+  it('chiffres de la lecture IA affichés, avec un libellé en français et en anglais', () => {
+    const stats = { read: 3, reverified: 1, notRead: 0, links: 7, owners: 2, toValidate: 1, otherApp: 1, rejected: 4, evidenceMismatch: 2, retired: 1, skipped: 5 };
+    expect(runStats(run(1, 'confluence+llm', { stats })).map(([k]) => k)).toEqual([
+      'skipped',
+      'read',
+      'reverified',
+      'notRead',
+      'links',
+      'owners',
+      'toValidate',
+      'otherApp',
+      'rejected',
+      'evidenceMismatch',
+      'retired',
+    ]);
+    for (const k of STAT_KEYS) {
+      for (const dict of Object.values(DICTIONARIES)) expect(typeof (dict as Record<string, unknown>)[`sync.stat.${k}`]).toBe('string');
+    }
+  });
+
+  it('pages non lues par l’IA : dernier passage Confluence seulement', () => {
+    expect(notReadPages([])).toBe(0);
+    expect(notReadPages([run(3, 'apm'), run(2, 'confluence', { stats: { notRead: 12 } }), run(1, 'confluence+llm', { stats: { notRead: 0 } })])).toBe(12);
+    expect(notReadPages([run(3, 'confluence+llm', { stats: { notRead: 0, read: 4 } }), run(2, 'confluence', { stats: { notRead: 12 } })])).toBe(0);
   });
 });

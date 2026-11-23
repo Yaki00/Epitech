@@ -178,7 +178,8 @@ export interface AppOwner {
   name: string;
   kind: 'person' | 'team';
   role: OwnerRole;
-  period: Period;
+  /** null : lu dans une page dont la période n'a pas pu être lue (à valider, jamais compté comme actuel) */
+  period: Period | null;
   source: OwnerSource;
   docs: DocRef[];
 }
@@ -188,7 +189,8 @@ export interface ApplicationDetail extends ApplicationSummary {
   serverList: LinkedServer[];
   databaseList: LinkedNode[];
   callsList: LinkedNode[];
-  usedBy: Ref[];
+  /** applications qui appellent celle-ci, avec les mêmes marques que callsList */
+  usedBy: LinkedNode[];
   documents: AppDocument[];
   /** actuels d'abord, puis anciens */
   owners?: AppOwner[];
@@ -205,6 +207,8 @@ export interface TeamApp {
   period: Period | null;
   source: OwnerSource | null;
   docs: DocRef[];
+  /** groupe `unassigned` : l'application n'a que d'anciens responsables */
+  formerOnly?: boolean;
 }
 
 export interface Team {

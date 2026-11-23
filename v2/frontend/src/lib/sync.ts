@@ -61,6 +61,16 @@ export const STAT_KEYS = [
   'llmDropped',
   'llmRenamed',
   'architecturePages',
+  'read',
+  'reverified',
+  'notRead',
+  'links',
+  'owners',
+  'toValidate',
+  'otherApp',
+  'rejected',
+  'evidenceMismatch',
+  'retired',
 ] as const;
 export type StatKey = (typeof STAT_KEYS)[number];
 
@@ -95,3 +105,13 @@ export function lastRunBySource(runs: readonly SyncRun[]): SyncRun[] {
 /** Dates des passages : format SQLite UTC vers ISO. */
 export const runStarted = (r: Pick<SyncRun, 'started_at'>): string | null => sqlDate(r.started_at);
 export const runEnded = (r: Pick<SyncRun, 'started_at' | 'finished_at'>): string | null => sqlDate(r.finished_at) ?? sqlDate(r.started_at);
+
+/**
+ * Pages non lues par l'IA au dernier passage Confluence (IA non configurée ou injoignable) : nombre à
+ * signaler sur la page Synchronisation, 0 s'il n'y en a pas ou si aucun passage Confluence n'existe.
+ */
+export function notReadPages(runs: readonly SyncRun[]): number {
+  const last = runs.find((r) => r.source.startsWith('confluence'));
+  const n = last?.stats?.notRead;
+  return typeof n === 'number' && n > 0 ? n : 0;
+}

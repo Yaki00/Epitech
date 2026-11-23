@@ -1,6 +1,6 @@
 /**
  * Palette de recherche (Ctrl+K / ⌘K) : pages, applications (filtrées localement), personnes et équipes
- * (/api/teams, chargé une fois par session, filtré localement) et serveurs (cherchés côté serveur : nom,
+ * (/api/teams, gardé 5 minutes et oublié à la fin d'une synchro, filtré localement) et serveurs (cherchés côté serveur : nom,
  * alias, adresse IP). Entrée ouvre la fiche ; une personne ou une équipe ouvre la page Équipes filtrée.
  */
 import { useEffect, useRef, useState } from 'react';
@@ -9,6 +9,7 @@ import { useNavigate } from 'react-router';
 import { AppWindow, LoaderCircle, Search, Server, User, Users } from 'lucide-react';
 import { api, type ApplicationSummary, type ServerSummary, type Team } from '../lib/api';
 import { tallySummary, teamTally, teamsHref, type TallySummary } from '../lib/teams';
+import { cachedTeams, loadTeams } from '../lib/teamsCache';
 import { useI18n } from '../lib/i18n';
 import { rankByText } from '../lib/search';
 import { NAV_ITEMS } from '../app/nav';
@@ -20,22 +21,7 @@ interface Props {
 }
 
 const APPS_TTL_MS = 5 * 60_000;
-/** Personnes et équipes : gardées pour toute la session (elles changent avec les synchros, pas d'une minute à l'autre). */
-let teamsCache: Team[] | null = null;
-let teamsLoading: Promise<Team[]> | null = null;
-const loadTeams = (): Promise<Team[]> => {
-  if (teamsCache) return Promise.resolve(teamsCache);
-  teamsLoading ??= api
-    .teams()
-    .then((list) => {
-      teamsCache = list.filter((x) => x.kind !== 'unassigned' && x.name);
-      return teamsCache;
-    })
-    .finally(() => {
-      teamsLoading = null;
-    });
-  return teamsLoading;
-};
+const fetchTeams = () => api.teams();
 
 const ipOf = (s: ServerSummary): string | null => (typeof s.attrs?.ip === 'string' && s.attrs.ip ? s.attrs.ip : null);
 
@@ -60,7 +46,7 @@ export function CommandPalette({ open, onOpenChange }: Props) {
   const [apps, setApps] = useState<ApplicationSummary[]>([]);
   const appsAt = useRef(0);
   const [servers, setServers] = useState<ServerSummary[]>([]);
-  const [people, setPeople] = useState<Team[]>(teamsCache ?? []);
+  const [people, setPeople] = useState<Team[]>(() => cachedTeams() ?? []);
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -81,11 +67,16 @@ export function CommandPalette({ open, onOpenChange }: Props) {
     return () => ctrl.abort();
   }, [open, t]);
 
-  // personnes et équipes : une fois par session (une erreur ne bloque pas le reste de la palette)
+  // personnes et équipes : gardées 5 minutes, rechargées après une synchro (une erreur ne bloque pas le reste de la palette)
   useEffect(() => {
-    if (!open || teamsCache) return undefined;
+    if (!open) return undefined;
+    const kept = cachedTeams();
+    if (kept) {
+      setPeople(kept);
+      return undefined;
+    }
     let alive = true;
-    loadTeams()
+    loadTeams(fetchTeams)
       .then((list) => {
         if (alive) setPeople(list);
       })
@@ -132,12 +123,12 @@ export function CommandPalette({ open, onOpenChange }: Props) {
     if (!open) setQuery('');
   }, [open]);
 
-  const tallyText = (s: TallySummary) =>
-    s.kind === 'formerOnly'
-      ? t('teams.tally.formerOnly')
-      : s.kind === 'targetOnly'
-        ? t('teams.tally.targetOnly')
-        : [t('teams.tally.current', { n: s.current }), s.past ? t('teams.tally.past', { n: s.past }) : ''].filter(Boolean).join(' ');
+  const tallyText = (s: TallySummary) => {
+    if (s.kind === 'formerOnly') return t('teams.tally.formerOnly');
+    if (s.kind === 'unknownOnly') return t('teams.tally.unknownOnly');
+    if (s.kind === 'targetOnly') return t('teams.tally.targetOnly');
+    return [t('teams.tally.current', { n: s.current }), s.past ? t('teams.tally.past', { n: s.past }) : ''].filter(Boolean).join(' ');
+  };
 
   const go = (to: string) => {
     onOpenChange(false);

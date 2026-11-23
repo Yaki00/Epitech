@@ -75,11 +75,15 @@ export function OwnerSourceBadge({ source }: { source: OwnerSource | null }) {
   );
 }
 
-/** « Ancien » ou « Cible » pour un responsable lu dans une page ancienne ou cible. */
-export function OwnerPeriodBadge({ period }: { period: AppOwner['period'] | TeamApp['period'] }) {
+/**
+ * « Ancien » ou « Cible » pour un responsable lu dans une page ancienne ou cible ; « À valider » pour une page
+ * dont la période n'a pas pu être lue (`null`). Rien pour un responsable actuel.
+ */
+export function OwnerPeriodBadge({ period }: { period: AppOwner['period'] | TeamApp['period'] | undefined }) {
   const { t } = useI18n();
   if (period === 'past') return <Badge title={t('teams.former.hint')}>{t('teams.former')}</Badge>;
   if (period === 'target') return <Badge title={t('teams.target.hint')}>{t('teams.target')}</Badge>;
+  if (period === null) return <Badge tone="warn" title={t('teams.unknownPeriod.hint')}>{t('teams.unknownPeriod')}</Badge>;
   return null;
 }
 

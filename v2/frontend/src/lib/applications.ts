@@ -189,3 +189,13 @@ export function auditInfo(audit: Record<string, unknown> | null | undefined): Au
   const ok = typeof audit.ok === 'boolean' ? audit.ok : problems.length === 0;
   return { ok, env: typeof audit.environment === 'string' ? audit.environment : null, problems };
 }
+
+// ---------- flux ----------
+
+/**
+ * Nombre de flux de l'onglet Flux : appels sortants et entrants actifs seulement (un appel ancien, cible,
+ * à valider ou retiré est grisé et masqué par défaut, il ne compte pas).
+ */
+export function flowCount(app: { callsList: readonly { retired: boolean }[]; usedBy: readonly { retired: boolean }[] }): number {
+  return app.callsList.filter((c) => !c.retired).length + app.usedBy.filter((u) => !u.retired).length;
+}

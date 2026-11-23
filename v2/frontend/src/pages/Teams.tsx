@@ -92,6 +92,8 @@ export default function TeamsPage() {
   );
 }
 
+const TALLY_TEXT = { formerOnly: 'teams.tally.formerOnly', targetOnly: 'teams.tally.targetOnly', unknownOnly: 'teams.tally.unknownOnly' } as const;
+
 function TeamCard({ team, highlight }: { team: Team; highlight: boolean }) {
   const { t } = useI18n();
   const summary = tallySummary(teamTally(team));
@@ -109,6 +111,7 @@ function TeamCard({ team, highlight }: { team: Team; highlight: boolean }) {
             <Badge>{t(team.kind === 'team' ? 'teams.kind.team' : 'teams.kind.person')}</Badge>
             {summary.kind === 'formerOnly' && <OwnerPeriodBadge period="past" />}
             {summary.kind === 'targetOnly' && <OwnerPeriodBadge period="target" />}
+            {summary.kind === 'unknownOnly' && <OwnerPeriodBadge period={null} />}
           </div>
         </div>
         {summary.kind === 'current' ? (
@@ -118,7 +121,7 @@ function TeamCard({ team, highlight }: { team: Team; highlight: boolean }) {
             {summary.past > 0 && <div className="text-2xs text-ink-3">{t('teams.tally.past', { n: summary.past })}</div>}
           </div>
         ) : (
-          <div className="max-w-28 shrink-0 text-right text-xs text-ink-3">{t(summary.kind === 'formerOnly' ? 'teams.tally.formerOnly' : 'teams.tally.targetOnly')}</div>
+          <div className="max-w-28 shrink-0 text-right text-xs text-ink-3">{t(TALLY_TEXT[summary.kind])}</div>
         )}
       </header>
       <ul className="divide-y divide-line">
@@ -174,10 +177,12 @@ function UnassignedCard({ team }: { team: Team }) {
           <li key={a.id}>
             <Link
               to={appHref(a.id)}
+              title={a.formerOnly ? t('teams.unassigned.formerOnly.hint') : undefined}
               className="inline-flex h-7 items-center gap-1.5 rounded-md border border-line px-2.5 text-[13px] text-ink transition-colors hover:border-line-strong hover:bg-surface-2"
             >
               <CriticalityDot value={a.criticality} />
               {a.name}
+              {a.formerOnly && <span className="text-2xs text-ink-3">{t('teams.unassigned.formerOnly')}</span>}
             </Link>
           </li>
         ))}

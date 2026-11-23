@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ApplicationSummary, Change } from './api';
 import {
   DEFAULT_APP_FILTERS,
+  flowCount,
   attrValue,
   auditInfo,
   sqlDate,
@@ -145,5 +146,13 @@ describe('divers', () => {
       ],
     });
     expect(auditInfo({ problems: [] }).ok).toBe(true);
+  });
+});
+
+describe('flowCount', () => {
+  it('compte seulement les appels actifs, sortants et entrants', () => {
+    const l = (retired: boolean) => ({ retired });
+    expect(flowCount({ callsList: [l(false), l(true)], usedBy: [l(false), l(true), l(true)] })).toBe(2);
+    expect(flowCount({ callsList: [], usedBy: [] })).toBe(0);
   });
 });
