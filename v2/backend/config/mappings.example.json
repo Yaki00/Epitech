@@ -65,5 +65,20 @@
         }
       }
     ]
+  },
+  "naemon": {
+    "_comment": "Utilisé seulement avec NAEMON_SOURCE=csv (jamais importé comme inventaire). Export Thruk d'hôtes (kind hosts) ou de services (kind services) ; une liste de deux blocs est acceptée. États texte (UP, DOWN, UNREACHABLE, OK, WARNING, CRITICAL, UNKNOWN) ou numériques. NAEMON_CSV_FILE remplace 'file'.",
+    "file": "./data/raw/naemon/hosts_*.csv",
+    "kind": "hosts",
+    "columns": {
+      "name": "A",
+      "address": "B",
+      "state": "C",
+      "output": "D",
+      "lastCheck": "E",
+      "groups": "F",
+      "ack": "G",
+      "downtime": "H"
+    }
   }
 }

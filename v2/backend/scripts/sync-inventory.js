@@ -27,7 +27,7 @@ function main() {
   }
   const mappings = JSON.parse(fs.readFileSync(config.inventory.mappingFile, 'utf8').replace(/^﻿/, ''));
   const wanted = process.argv.slice(2);
-  const sources = Object.keys(mappings).filter((k) => !k.startsWith('_') && (!wanted.length || wanted.includes(k)));
+  const sources = Object.keys(mappings).filter((k) => !k.startsWith('_') && k !== 'naemon' && (!wanted.length || wanted.includes(k)));
   const release = acquireLock(config.dataDir);
   const repo = createRepo(openStore(config.dataDir));
   let failed = false;

@@ -88,6 +88,19 @@ const config = {
   // nombre d'imports d'inventaire conservés dans changes.json
   history: { keep: int('HISTORY_KEEP', 50) },
 
+  // supervision Naemon : off (défaut), thruk (API REST), csv (export Thruk) ; mock en mode démo
+  naemon: {
+    source: ['thruk', 'csv', 'mock'].includes(env('NAEMON_SOURCE', 'off')) ? env('NAEMON_SOURCE', 'off') : 'off',
+    thrukUrl: env('NAEMON_THRUK_URL', ''),
+    token: env('NAEMON_TOKEN', ''),
+    user: env('NAEMON_USER', ''),
+    password: env('NAEMON_PASSWORD', ''),
+    csvFile: env('NAEMON_CSV_FILE', ''),
+    pollMinutes: Math.max(1, int('NAEMON_POLL_MINUTES', 5) || 5),
+    // lien du bouton « Monitoring Naemon » ({app} = nom de l'application)
+    urlTemplate: env('NAEMON_URL_TEMPLATE', ''),
+  },
+
   // synchros lançables depuis la page Synchronisation de l'interface
   allowUiSync: bool('ALLOW_UI_SYNC', 'true'),
 

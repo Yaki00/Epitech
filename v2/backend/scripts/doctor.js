@@ -93,6 +93,44 @@ async function main() {
     });
   } else info('CONFLUENCE_BASE_URL vide : récupération Confluence non configurée (export déjà présent ?)');
 
+  // 4b. Naemon (supervision) et mode démo
+  if (['1', 'true', 'yes'].includes(String(process.env.DEMO_MODE || '').toLowerCase())) warn('DEMO_MODE=true : les données affichées sont fictives (jeu de démonstration), pas celles de votre environnement');
+  await check('Naemon', async () => {
+    const n = config.naemon;
+    if (n.source === 'off') return info('NAEMON_SOURCE=off : supervision Naemon non branchée');
+    if (n.source === 'mock') return info('NAEMON_SOURCE=mock : états fictifs (mode démo)');
+    // graphe déjà construit : sert à compter les hôtes rapprochés d'un serveur connu
+    let repo = null;
+    if (fs.existsSync(path.join(config.dataDir, 'meta.json'))) {
+      const { openStore } = require('../src/store/store');
+      const { createRepo } = require('../src/store/repo');
+      repo = createRepo(openStore(config.dataDir));
+    } else warn('graphe vide : lancez npm run sync avant de rapprocher les hôtes Naemon');
+    const matched = (raw) => {
+      const hosts = raw.hosts || [];
+      if (!repo) return `${hosts.length} hôtes relevés`;
+      const n2 = hosts.filter((h) => [h.name, h.address].some((t) => t && repo.resolve(t).some((x) => x.type === 'server'))).length;
+      return `${hosts.length} hôtes relevés, ${n2} rapprochés d'un serveur du graphe`;
+    };
+    if (n.source === 'thruk') {
+      if (!n.thrukUrl) return ko('NAEMON_THRUK_URL vide dans backend/.env');
+      if (!n.token && !n.user) warn('NAEMON_TOKEN et NAEMON_USER vides : appel sans authentification');
+      if (process.env.NODE_EXTRA_CA_CERTS) info(`certificat d'entreprise : NODE_EXTRA_CA_CERTS=${process.env.NODE_EXTRA_CA_CERTS}`);
+      const { fetchThruk } = require('../src/naemon/thruk');
+      const t0 = Date.now();
+      const raw = await fetchThruk({ ...n, timeoutMs: 15000 });
+      ok(`Naemon (Thruk) joignable (${Date.now() - t0} ms) : ${matched(raw)}, ${raw.services.length} services`);
+      return;
+    }
+    // csv
+    let mapping = null;
+    if (fs.existsSync(config.inventory.mappingFile)) mapping = JSON.parse(fs.readFileSync(config.inventory.mappingFile, 'utf8').replace(/^\uFEFF/, '')).naemon || null;
+    if (!n.csvFile && !mapping) return ko('NAEMON_SOURCE=csv : ni NAEMON_CSV_FILE, ni bloc "naemon" dans config/mappings.json');
+    const { createFetchRaw } = require('../src/naemon/source');
+    const raw = await createFetchRaw(config, { mapping: mapping ? { naemon: mapping } : null })();
+    ok(`Naemon (CSV) : fichier trouvé et lu, ${matched(raw)}, ${raw.services.length} services`);
+  });
+
   // 5. export Confluence
   await check('export Confluence', async () => {
     const dir = config.confluence.exportDir;

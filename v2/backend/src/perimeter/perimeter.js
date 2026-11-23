@@ -55,7 +55,7 @@ const FUZZY_MIN = 5; // pas de recherche de faute sous 5 lettres : trop de faux 
 
 /**
  * Lit config/perimeter.json. Absent = pas de périmètre (tout est analysé, comportement d'origine).
- * @returns {null | {applications: Array<{name, aliases, auid}>, ignoreOtherApplications: boolean, architectureKeywords: string[]|null, hash: string}}
+ * @returns {null | {applications: Array<{name, aliases, auid, naemonHostgroups}>, ignoreOtherApplications: boolean, architectureKeywords: string[]|null, hash: string}}
  */
 function loadPerimeter(file) {
   if (!file || !fs.existsSync(file)) return null;
@@ -67,6 +67,8 @@ function loadPerimeter(file) {
       name: String(a.name).trim(),
       aliases: (a.aliases || []).map((x) => String(x).trim()).filter(Boolean),
       auid: a.auid ? String(a.auid).trim() : null,
+      // groupes d'hôtes Naemon propres à l'application (facultatif)
+      naemonHostgroups: Array.isArray(a.naemonHostgroups) ? a.naemonHostgroups.map((x) => String(x).trim()).filter(Boolean) : [],
     }));
   if (!applications.length) throw new Error(`${file} : aucune application dans "applications"`);
   const architectureKeywords = Array.isArray(raw.architectureKeywords) && raw.architectureKeywords.length ? raw.architectureKeywords.map(String) : null;
@@ -101,7 +103,7 @@ function createMatcher(perimeter, repo = null) {
       return { ...v, norm, compact: norm.replace(/ /g, ''), words: norm.split(' ').filter(Boolean) };
     });
     const servers = new Set(repo ? repo.edgesFrom(id).filter((e) => e.type === 'runs_on').map((e) => e.dst) : []);
-    return { id, name: a.name, auid, auidNorm: auid ? compact(auid) : null, variants, sigle: acronym(a.name), servers };
+    return { id, name: a.name, auid, auidNorm: auid ? compact(auid) : null, variants, sigle: acronym(a.name), servers, naemonHostgroups: a.naemonHostgroups || [] };
   });
   const maxWords = Math.max(...apps.flatMap((a) => a.variants.map((v) => v.words.length))) + 1;
   const auidCount = new Map();
