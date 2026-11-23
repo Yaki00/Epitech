@@ -94,6 +94,11 @@ describe('analyse Confluence par lecture IA', () => {
     const old = repo.edgesFrom('application:orderhub').find((e) => e.dst === 'server:srvold01');
     assert.equal(old.attrs.period, 'past');
     assert.ok(!impactOf(repo, 'server:srvold01').items.some((i) => i.id === 'application:orderhub'));
+    // serveur créé par la lecture et seulement cité comme arrêté : retiré (la citation ne le garde pas actif)
+    assert.equal(repo.getNode('server:srvold01').attrs.retired, true);
+    const mention = repo.edgesTo('server:srvold01').find((e) => e.type === 'mentions');
+    assert.deepEqual(mention.attrs, { status: 'decommissioned', period: 'past' });
+    assert.equal(r.stats.retired, 1);
 
     // réunion : rattachement « citée », aucun lien ni mention
     const fromP3 = repo.allEdges().filter((e) => e.sourceRef === '7003');
@@ -173,16 +178,41 @@ describe('analyse Confluence par lecture IA', () => {
   test('consignes changed: pages read again; nodes no longer cited are retired', async () => {
     await run();
     fake.state.calls.length = 0;
-    fake.state.answer = (title) => (title === P2 ? { ...READINGS[P2], entities: [], links: [] } : READINGS[title]);
+    const p1 = READINGS[P1];
+    const withoutNew = { ...p1, entities: p1.entities.filter((e) => e.name !== 'srvnew01'), links: p1.links.filter((l) => l.to !== 'srvnew01') };
+    fake.state.answer = (title) => (title === P1 ? withoutNew : READINGS[title]);
     const r = await run({ consignes: { text: 'autre consigne', hash: 'c2' } });
     assert.equal(fake.state.calls.length, 3);
     assert.equal(r.stats.read, 3);
-    const old = repo.getNode('server:srvold01');
-    assert.equal(old.attrs.retired, true);
-    assert.ok(old.attrs.retiredAt);
+    const gone = repo.getNode('server:srvnew01');
+    assert.equal(gone.attrs.retired, true);
+    assert.ok(gone.attrs.retiredAt);
     assert.equal(r.stats.retired, 1);
-    // nœud créé par une lecture et toujours cité : actif
-    assert.ok(!repo.getNode('server:srvnew01').attrs.retired);
+    // base créée par une lecture et toujours citée : active
+    assert.ok(!repo.getNode('database:ora_orh').attrs.retired);
+  });
+
+  test('quote that does not name the item: rejected, counted and reported', async () => {
+    const ghost = { name: 'srvghost42', type: 'server', env: 'PRD', ip: null, status: 'active', evidence: 'OrderHub tourne sur srvorh01' };
+    fake.state.answer = (title) => (title === P1 ? { ...READINGS[P1], entities: [...READINGS[P1].entities, ghost] } : READINGS[title]);
+    const r = await run();
+    assert.ok(!repo.getNode('server:srvghost42'));
+    assert.equal(r.stats.evidenceMismatch, 1);
+    assert.equal(r.stats.rejected, 2); // srvfake09 (citation absente) et srvghost42
+    const rejects = fs.readFileSync(path.join(reportsDir, 'lectures-rejets.csv'), 'utf8');
+    assert.match(rejects, /OrderHub - Architecture;srvghost42;citation qui ne nomme pas l'élément/);
+  });
+
+  test('a quote of the header line sent to the model (« Titre : X ») is accepted', async () => {
+    const subject = { name: 'OrderHub', written: 'OrderHub', role: 'subject', evidence: `Titre : ${P1}` };
+    fake.state.answer = (title) => (title === P1 ? { ...READINGS[P1], applications: [subject] } : READINGS[title]);
+    await run();
+    // l'en-tête envoyé est bien celui contrôlé
+    assert.ok(fake.state.calls.some((c) => c.user.includes(`Titre : ${P1}`)));
+    const e = repo.edgesFrom('application:orderhub').find((x) => x.type === 'documented_in' && x.dst === DOC[P1]);
+    assert.equal(e.attrs.role, 'subject');
+    assert.ok(e.attrs.audit);
+    assert.ok(!repo.getDocument('confluence:7001').attrs.rejected.some((r) => r.what === 'OrderHub'));
   });
 
   test('person cited only in an old page is not retired', async () => {
@@ -194,7 +224,7 @@ describe('analyse Confluence par lecture IA', () => {
     const person = repo.getNode('person:bruno-petit');
     assert.equal(person.attrs.fromLlm, true);
     assert.equal(person.attrs.retired, undefined);
-    assert.equal(r.stats.retired, 0);
+    assert.equal(r.stats.retired, 1); // seulement srvold01, cité comme arrêté
   });
 
   test('chunk failure: page in error, previous reading kept', async () => {
@@ -252,9 +282,11 @@ describe('analyse Confluence par lecture IA', () => {
     // les liens des inventaires ne sont jamais touchés
     assert.ok(repo.edgesFrom('application:orderhub').some((e) => e.type === 'runs_on' && e.source === 'apm'));
     assert.equal(r.stats.notRead, 3);
-    // passage suivant sans IA : rien à refaire
+    // passage suivant sans IA : rien à refaire, pages comptées « non lues » et jamais aussi « inchangées »
     const again = await run({ llm: null });
-    assert.equal(again.stats.skipped, 3);
+    assert.equal(again.stats.notRead, 3);
+    assert.equal(again.stats.skipped, 0);
+    assert.equal(again.stats.pages, 0);
   });
 
   test('verify or apply failure: recorded with its step, no unhandled rejection', async () => {

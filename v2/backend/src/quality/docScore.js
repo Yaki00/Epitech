@@ -1,8 +1,8 @@
 'use strict';
 /**
  * Score de documentation d'une application, sur 100, calculé à la volée (rien n'est stocké).
- *  - architecture (35) : au moins une page d'architecture liée à l'application
- *  - architectureClean (25) : aucune page d'architecture avec un écart (audit non ok) ; 0 sans page
+ *  - architecture (35) : au moins une page d'architecture actuelle (ni ancienne ni cible) liée à l'application
+ *  - architectureClean (25) : aucune page d'architecture actuelle avec un écart (audit non ok) ; 0 sans page
  *  - serversDocumented (30) : part des serveurs de l'application cités par une page liée
  *  - summary (10) : résumé disponible
  * Les nœuds et liens retirés (attrs.retired) sont ignorés.
@@ -33,7 +33,8 @@ function docScore(repo, appId) {
     const doc = repo.getNode(e.dst);
     if (doc && !isRetired(doc)) pages.push({ doc, audit: (e.attrs && e.attrs.audit) || null });
   }
-  const archi = pages.filter((p) => p.doc.attrs.pageKind === 'architecture');
+  // pages d'architecture actuelles seulement : une page ancienne ou cible ne documente pas l'existant
+  const archi = pages.filter((p) => p.doc.attrs.pageKind === 'architecture' && p.doc.attrs.period !== 'past' && p.doc.attrs.period !== 'target');
   const withGap = archi.filter((p) => p.audit && p.audit.ok === false);
 
   // serveurs cités : liens "mentions" des pages, ou noms confirmés par le contrôle d'une page

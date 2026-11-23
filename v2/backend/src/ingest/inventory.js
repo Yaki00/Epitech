@@ -210,6 +210,8 @@ function ingestInventory(repo, { source, records, headers, mapping: rawMapping, 
           const relAttrs = pickAttrs(row, rel.attrs);
           for (const value of rel.multi === false ? [row[rel.column]].filter(Boolean) : splitMulti(row[rel.column])) {
             const otherId = repo.upsertNode({ type: rel.entity, key: value, name: value, attrs: relAttrs, source });
+            // cible d'une relation d'inventaire : elle aussi n'est plus « hors inventaire » ni « lue seulement »
+            repo.patchNodeAttrs(otherId, { outOfInventory: undefined, fromLlm: undefined });
             // direction "from" : l'autre entité dépend de celle-ci (ex: application -> runs_on -> serveur)
             const [src, dst] = rel.direction === 'to' ? [id, otherId] : [otherId, id];
             repo.addEdge({ src, dst, type: rel.type, source, sourceRef: ref, confidence: 1 });

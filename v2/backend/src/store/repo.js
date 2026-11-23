@@ -108,7 +108,8 @@ function createRepo(store) {
     const data = D();
     const ref = String(sourceRef);
     let n = 0;
-    for (const [k, e] of [...data.edges]) {
+    // suppression pendant le parcours : sûre sur une Map (aucune copie de tous les liens à chaque page)
+    for (const [k, e] of data.edges) {
       if (e.source_ref !== ref || !sources.includes(e.source)) continue;
       data.edges.delete(k);
       for (const [index, id] of [[data.edgesBySrc, e.src], [data.edgesByDst, e.dst]]) {

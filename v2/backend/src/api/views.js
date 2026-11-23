@@ -69,15 +69,16 @@ function listApplications(repo, ctx = null) {
 const mark = (e, k) => (e.attrs && e.attrs[k]) || null;
 
 /**
- * Liens sortants d'un type donné, avec le nœud cible détaillé (onglets Serveurs / Bases).
+ * Liens sortants d'un type donné (ou entrants avec `incoming`), avec le nœud lié détaillé (onglets Serveurs, Bases, Flux).
  * Les liens inactifs (anciens, cibles, à valider) sont listés avec leurs marques (`trust`, `period`) et
  * `active: false` : l'interface les grise, ils ne comptent pas comme actifs.
  */
-function linkedNodes(repo, id, edgeType, ctx = null) {
-  const byDst = new Map();
-  for (const e of repo.edgesFrom(id).filter((x) => x.type === edgeType)) {
-    if (!byDst.has(e.dst)) byDst.set(e.dst, []);
-    byDst.get(e.dst).push(e);
+function linkedNodes(repo, id, edgeType, ctx = null, { incoming = false } = {}) {
+  const byDst = new Map(); // nœud lié -> ses liens (cible des liens sortants, ou source des liens entrants)
+  for (const e of (incoming ? repo.edgesTo(id) : repo.edgesFrom(id)).filter((x) => x.type === edgeType)) {
+    const other = incoming ? e.src : e.dst;
+    if (!byDst.has(other)) byDst.set(other, []);
+    byDst.get(other).push(e);
   }
   const rank = (e) => (isInactiveEdge(e) ? (isRetired(e) ? 0 : 1) : 2); // actif > inactif > retiré
   return [...byDst.entries()]
@@ -123,7 +124,8 @@ function ownersOfApp(repo, app) {
     const n = repo.getNode(e.dst);
     if (!n || isRetired(n)) continue;
     const role = mark(e, 'role') || 'other';
-    const period = mark(e, 'period') || 'current';
+    // période absente (anciennes données) : actuelle ; null (page de période illisible) : inconnue, jamais actuelle
+    const period = e.attrs && e.attrs.period === null ? null : mark(e, 'period') || 'current';
     const k = `${keyOf(n.type, n.name)}|${role}`;
     const prev = found.get(k);
     if (prev) {
@@ -174,10 +176,8 @@ function applicationDetail(repo, id, ctx = null) {
     serverList: linkedNodes(repo, id, 'runs_on', ctx),
     databaseList: linkedNodes(repo, id, 'uses_db'),
     callsList: linkedNodes(repo, id, 'calls'),
-    usedBy: [...new Set(repo.edgesTo(id).filter((e) => e.type === 'calls').map((e) => e.src))]
-      .map((src) => repo.getNode(src))
-      .filter(Boolean)
-      .map((n) => ({ id: n.id, name: n.name })),
+    // applications qui appellent celle-ci : mêmes marques que callsList (un appel inactif est grisé, non compté)
+    usedBy: linkedNodes(repo, id, 'calls', null, { incoming: true }),
     documents: docs,
     owners: ownersOfApp(repo, app),
   };
@@ -207,7 +207,8 @@ function searchServers(repo, q, limit = 30, ctx = null) {
 
 /**
  * Page Équipe : applications regroupées par personne ou équipe (documentation et APM), puis un groupe
- * `unassigned` pour les applications sans responsable. Le plus d'applications d'abord, `unassigned` en dernier.
+ * `unassigned` pour les applications sans responsable actuel (`formerOnly` : seulement d'anciens responsables).
+ * Le plus d'applications d'abord, `unassigned` en dernier.
  */
 function listTeams(repo) {
   const groups = new Map();
@@ -215,10 +216,11 @@ function listTeams(repo) {
   for (const app of repo.listByType('application').filter((a) => !isRetired(a))) {
     const owners = ownersOfApp(repo, app);
     const base = { id: app.id, name: app.name, criticality: appCriticality(app) };
-    if (!owners.length) {
-      unassigned.push({ ...base, role: null, period: null, source: null, docs: [] });
-      continue;
-    }
+    // sans responsable actuel (ni de période inconnue) : « Non renseignée » ; avec seulement d'anciens
+    // responsables, l'application reste aussi sur leur carte (montrée comme ancienne) et porte `formerOnly`
+    const current = owners.some((o) => o.period === 'current' || o.period === null);
+    if (!current) unassigned.push({ ...base, role: null, period: null, source: null, docs: [], ...(owners.some((o) => o.period === 'past') ? { formerOnly: true } : {}) });
+    if (!owners.length) continue;
     for (const o of owners) {
       const key = `${o.kind}:${nodeKey(o.kind, o.name)}`;
       if (!groups.has(key)) groups.set(key, { id: o.id, name: o.name, kind: o.kind, applications: [] });

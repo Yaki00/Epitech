@@ -12,6 +12,7 @@ const { auditArchitecturePage } = require('../perimeter/architecture');
 
 /** Sources de liens écrites par l'analyse d'une page (purgées à chaque relecture). */
 const PAGE_SOURCES = ['confluence', 'llm', 'drawio'];
+const INACTIVE_STATUS = new Set(['decommissioned', 'planned']);
 const CONFIDENCE = { documented: { subject: 0.9, cited: 0.6 }, mention: 0.9, added: 0.8, toValidate: 0.5, owner: 0.8 };
 
 function applyReading(repo, verified, { pageId, docNodeId, page = {}, matcher = null, now = Date.now() }) {
@@ -45,9 +46,15 @@ function applyReading(repo, verified, { pageId, docNodeId, page = {}, matcher = 
     serverIds.set(s, id);
   }
 
-  // 3. mentions du document
-  for (const id of new Set(serverIds.values())) {
-    repo.addEdge({ src: docNodeId, dst: id, type: 'mentions', source: 'confluence', sourceRef: pageId, confidence: CONFIDENCE.mention });
+  // 3. mentions du document, avec le statut du serveur et la période de la page : un serveur créé par
+  // une lecture et seulement cité comme ancien, arrêté ou prévu n'est pas gardé actif (voir retireOrphans)
+  const mentionStatus = new Map(); // id -> statut retenu (un statut actif ou inconnu l'emporte sur arrêté ou prévu)
+  for (const [s, id] of serverIds) {
+    const prev = mentionStatus.get(id);
+    if (prev === undefined || INACTIVE_STATUS.has(prev)) mentionStatus.set(id, s.status === undefined ? 'active' : s.status);
+  }
+  for (const [id, status] of mentionStatus) {
+    repo.addEdge({ src: docNodeId, dst: id, type: 'mentions', source: 'confluence', sourceRef: pageId, confidence: CONFIDENCE.mention, attrs: { status, period: verified.period === undefined ? 'current' : verified.period } });
     out.mentions++;
   }
 
@@ -55,7 +62,8 @@ function applyReading(repo, verified, { pageId, docNodeId, page = {}, matcher = 
   for (const a of verified.apps || []) {
     const attrs = { role: a.role, written: a.written, evidence: a.evidence };
     if (isArchi && a.role === 'subject' && matcher && matcher.apps.some((x) => x.id === a.appId)) {
-      attrs.audit = auditArchitecturePage(repo, matcher, page, a.appId, { now, cited: verified.servers, env: verified.env, topics: verified.topics });
+      const ips = (verified.ips || []).map((x) => ({ nodeId: null, name: x.ip, ip: null, inInventory: false, status: x.status }));
+      attrs.audit = auditArchitecturePage(repo, matcher, page, a.appId, { now, cited: [...(verified.servers || []), ...ips], env: verified.env, topics: verified.topics });
     }
     repo.addEdge({ src: a.appId, dst: docNodeId, type: 'documented_in', source: 'confluence', sourceRef: pageId, confidence: CONFIDENCE.documented[a.role] || CONFIDENCE.documented.cited, attrs });
   }
@@ -107,4 +115,4 @@ function applyReading(repo, verified, { pageId, docNodeId, page = {}, matcher = 
   return out;
 }
 
-module.exports = { applyReading, PAGE_SOURCES };
+module.exports = { applyReading, PAGE_SOURCES, INACTIVE_STATUS };

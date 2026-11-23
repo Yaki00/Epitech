@@ -22,8 +22,9 @@ const { createMatcher, ensurePerimeterNodes, normalize } = require('../perimeter
 const { SECTION_LABELS_FR } = require('../perimeter/architecture');
 const { isInactiveEdge } = require('../graph/impact');
 const { readPage, READING_VERSION } = require('./readPage');
+const { pageHeaderLines } = require('./prompt');
 const { verifyReading, DOC_SOURCES } = require('./verify');
-const { applyReading, PAGE_SOURCES } = require('./apply');
+const { applyReading, PAGE_SOURCES, INACTIVE_STATUS } = require('./apply');
 
 const QUIET = { debug() {}, info() {}, warn() {}, error() {} };
 const READING_KEYS = ['reading', 'readingHash', 'readingContentHash', 'verifyHash', 'rejected', 'rulesCleared'];
@@ -39,9 +40,10 @@ function readingHashOf({ consignes, matcher }) {
  * Empreinte de ce qui change la vérification sans changer la lecture : serveurs des inventaires
  * (nom, IP, FQDN), liens runs_on des inventaires, hôtes Naemon hors inventaire.
  * Seules les sources d'inventaire comptent : un lien ajouté par une lecture changerait l'empreinte
- * après chaque passage.
+ * après chaque passage. Le mois en cours (AAAA-MM) y entre aussi : la corroboration par une page
+ * modifiée depuis moins de 24 mois est réévaluée chaque mois.
  */
-function verifyHashOf(repo, naemonHosts) {
+function verifyHashOf(repo, naemonHosts, now = Date.now()) {
   const servers = repo
     .listByType('server')
     .filter((n) => !n.attrs.retired && !n.attrs.outOfInventory && hasInventoryRow(n))
@@ -51,7 +53,8 @@ function verifyHashOf(repo, naemonHosts) {
     .filter((e) => e.type === 'runs_on' && !DOC_SOURCES.has(e.source) && !e.attrs.retired)
     .map((e) => `${e.src}>${e.dst}`)
     .sort();
-  return sha256(JSON.stringify([servers, links, [...naemonHosts].sort()])).slice(0, 16);
+  const month = new Date(now).toISOString().slice(0, 7);
+  return sha256(JSON.stringify([servers, links, [...naemonHosts].sort(), month])).slice(0, 16);
 }
 
 /** Texte d'une page pour le résumé IA : titres et paragraphes, 4000 caractères au plus. */
@@ -112,6 +115,7 @@ async function runConfluenceSync({
     toValidate: 0,
     otherApp: 0,
     rejected: 0,
+    evidenceMismatch: 0,
     architecturePages: 0,
     diagramsMissing: 0,
     obsoleteFragments: 0,
@@ -120,7 +124,7 @@ async function runConfluenceSync({
   if (matcher) stats.inScope = 0;
   const naemon = new Set((naemonHosts || []).map((h) => String(h).toLowerCase()));
   const readingHash = readingHashOf({ consignes, matcher });
-  const verifyHash = verifyHashOf(repo, naemon);
+  const verifyHash = verifyHashOf(repo, naemon, now);
   const apps = perimeter ? perimeter.applications.map((a) => ({ name: a.name, aliases: a.aliases })) : [];
   const perimeterIds = new Set(matcher ? matcher.apps.map((a) => a.id) : []);
 
@@ -142,6 +146,7 @@ async function runConfluenceSync({
       throw err;
     }
     for (const k of ['mentions', 'links', 'owners', 'toValidate', 'otherApp', 'rejected']) stats[k] += out[k] || 0;
+    stats.evidenceMismatch += verified.rejected.filter((r) => r.reason === 'evidence_mismatch').length;
     if (verified.kind === 'architecture') stats.architecturePages++;
     if (matcher && verified.apps.some((a) => perimeterIds.has(a.appId))) stats.inScope++;
     // texte gardé pour le résumé IA : seulement si la page porte sur une application
@@ -226,11 +231,9 @@ async function runConfluenceSync({
         continue;
       }
       if (!readingCurrent && !llm) {
+        // page sans lecture à jour et sans IA : comptée « non lue » (jamais aussi « inchangée »)
         stats.notRead++;
-        if (contentSame && prev.status === 'parsed' && (pa.reading || pa.rulesCleared)) {
-          stats.skipped++;
-          continue;
-        }
+        if (contentSame && prev.status === 'parsed' && (pa.reading || pa.rulesCleared)) continue;
       }
 
       const docBase = { id: docId, source: 'confluence', title: p.title, url: p.url, version: p.version, updatedAt: p.updatedAt, contentHash: hash };
@@ -247,7 +250,8 @@ async function runConfluenceSync({
           docBase,
           rowAttrs,
           docNodeId: `document:${documentId(p.id)}`,
-          pageText: [page.title || p.title, page.text || page.sections.map((s) => `${s.heading || ''}\n${s.text}`).join('\n')].join('\n'),
+          // en-tête tel qu'envoyé à l'IA (« Titre : X », pages parentes), puis le texte : une citation de l'en-tête est retrouvée
+          pageText: [...pageHeaderLines({ title: page.title || p.title, ancestors: p.ancestors || [] }), page.title || p.title, page.text || page.sections.map((s) => `${s.heading || ''}\n${s.text}`).join('\n')].join('\n'),
           diagramsText: diagramsToText(diagrams.results),
         };
         stats.pages++;
@@ -291,10 +295,19 @@ async function runConfluenceSync({
 
 /**
  * Nœuds créés par des lectures (hors inventaire) sans aucun lien actif : retirés ; de nouveau liés : réactivés.
+ * Un serveur seulement cité comme ancien, arrêté ou prévu (page ancienne ou cible, statut lu) est retiré.
  * Personnes et équipes exclues : citées dans une page ancienne, elles restent visibles comme anciens
  * responsables (leur lien owned_by porte la période).
  */
 const NEVER_RETIRED = new Set(['person', 'team']);
+/**
+ * Une citation (lien mentions) garde un nœud actif seulement si la page est actuelle (ou de période
+ * illisible) et que le serveur n'y est pas dit arrêté ou prévu : une page ancienne ne fait pas vivre un serveur.
+ */
+function mentionAlive(e) {
+  const a = e.attrs || {};
+  return !a.retired && !INACTIVE_STATUS.has(a.status) && a.period !== 'past' && a.period !== 'target';
+}
 function retireOrphans(repo, now) {
   const at = new Date(now).toISOString();
   let n = 0;
@@ -302,7 +315,7 @@ function retireOrphans(repo, now) {
     if (NEVER_RETIRED.has(type)) continue;
     for (const node of repo.listByType(type)) {
       if (!node.attrs.fromLlm || hasInventoryRow(node)) continue;
-      const active = [...repo.edgesFrom(node.id), ...repo.edgesTo(node.id)].some((e) => !isInactiveEdge(e));
+      const active = [...repo.edgesFrom(node.id), ...repo.edgesTo(node.id)].some((e) => (e.type === 'mentions' ? mentionAlive(e) : !isInactiveEdge(e)));
       if (!active && !node.attrs.retired) {
         repo.patchNodeAttrs(node.id, { retired: true, retiredAt: at });
         n++;
@@ -316,7 +329,7 @@ function retireOrphans(repo, now) {
 
 // ---------- rapports ----------
 const ROLE_FR = { subject: 'sujet', cited: 'citée' };
-const REASON_FR = { no_evidence: 'citation absente de la page', unknown_application: 'application inconnue', out_of_scope: 'hors périmètre ou introuvable' };
+const REASON_FR = { no_evidence: 'citation absente de la page', evidence_mismatch: "citation qui ne nomme pas l'élément", unknown_application: 'application inconnue', out_of_scope: 'hors périmètre ou introuvable' };
 const ENV_FR = { PRD: 'production (PRD)', STG: 'recette (STG)', DEV: 'développement (DEV)' };
 
 function writeReports(repo, matcher, dir) {

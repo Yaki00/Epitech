@@ -47,7 +47,7 @@ describe('vues API', () => {
     assert.equal(s1.confidence, 1);
     assert.deepEqual(s1.sources.sort(), ['llm', 'marketplace']);
     assert.equal(d.databaseList[0].name, 'ORA_ALTO');
-    assert.deepEqual(d.usedBy, [{ id: 'application:brief', name: 'BRIEF' }]);
+    assert.deepEqual(d.usedBy.map((u) => [u.id, u.name, u.active, u.retired]), [['application:brief', 'BRIEF', true, false]]);
     assert.equal(views.applicationDetail(repo, 'server:srvalto01'), null);
   });
   test('recherche serveur par IP renvoie les applications hébergées', () => {

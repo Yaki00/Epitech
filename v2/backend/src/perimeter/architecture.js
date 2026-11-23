@@ -6,6 +6,7 @@
  * rubriques qu'elle couvre viennent de la lecture IA vérifiée (src/reading/). Ce module compare
  * seulement ce qu'elle dit à ce que disent les inventaires, SANS IA :
  *  - serveurs confirmés, manquants dans la page, rattachés à une autre application, inconnus des inventaires
+ *    (`unknown`) ; ceux que la page dit arrêtés ou prévus sont à part (`formerCited`), sans écart
  *  - IP données par la page différentes de celles de l'inventaire
  *  - rubriques attendues présentes ou absentes (bases, flux, sauvegarde, supervision, redondance…)
  *  - ancienneté de la page
@@ -87,11 +88,16 @@ function auditArchitecturePage(repo, matcher, page, appId, { now = Date.now(), c
     ipMismatch.push({ server: node.name, page: [c.ip], inventory: known });
   }
   // serveurs ou IP cités que les inventaires ne connaissent pas (une IP déjà signalée comme différente n'est pas comptée deux fois)
+  // un serveur que la page dit arrêté ou prévu n'est pas un écart : il va dans `formerCited`
   const unknownNames = new Set();
+  const formerNames = new Set();
   for (const c of citedServers) {
     if (c.inInventory || wrongIps.has(c.name)) continue;
-    unknownNames.add(isIPv4(c.name) ? c.name : canonicalHost(c.name) || c.name);
+    const label = isIPv4(c.name) ? c.name : canonicalHost(c.name) || c.name;
+    if (c.status === 'decommissioned' || c.status === 'planned') formerNames.add(label);
+    else unknownNames.add(label);
   }
+  for (const n of unknownNames) formerNames.delete(n);
 
   const sections = Object.fromEntries(SECTION_KEYS.map((k) => [k, (topics || []).includes(k)]));
   sections.diagram = (page.diagrams || []).length > 0;
@@ -118,6 +124,7 @@ function auditArchitecturePage(repo, matcher, page, appId, { now = Date.now(), c
     missing,
     otherApp,
     unknown: [...unknownNames],
+    formerCited: [...formerNames],
     ipMismatch,
     sections,
     absentSections: absent,

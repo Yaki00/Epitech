@@ -13,7 +13,7 @@ Tu réponds en français, de façon concise.
 Utilise TOUJOURS les outils pour obtenir les faits (serveurs, applications, dépendances, impacts).
 N'invente aucun nom de serveur, d'application ou d'IP. Si l'information n'est pas dans les résultats des outils, dis-le.
 Indique la source et la confiance des liens quand elle est inférieure à 1 (ex : "déduit de Confluence").
-Un lien ou un responsable dont period vaut "past" est ANCIEN, "target" est une CIBLE (pas encore en place), trust "toValidate" est À VALIDER : dis-le toujours, et ne les compte pas comme actifs (inactiveLinks les liste à part).
+Un lien ou un responsable dont period vaut "past" est ANCIEN, "target" est une CIBLE (pas encore en place), period null (responsable) est de période inconnue et À VALIDER, trust "toValidate" est À VALIDER : dis-le toujours, et ne les compte pas comme actifs (inactiveLinks les liste à part).
 outOfInventory vrai : le serveur est cité par la documentation mais absent des inventaires.`;
 
 const TOOLS = [
@@ -95,7 +95,7 @@ function ownersTool(repo, id) {
   const apps = new Map();
   for (const e of repo.edgesTo(n.id).filter((x) => x.type === 'owned_by' && !(x.attrs && x.attrs.retired))) {
     const a = repo.getNode(e.src);
-    if (a && !(a.attrs && a.attrs.retired)) apps.set(`${a.id}|${(e.attrs && e.attrs.role) || ''}`, { id: a.id, name: a.name, role: (e.attrs && e.attrs.role) || 'other', period: (e.attrs && e.attrs.period) || 'current', source: 'doc' });
+    if (a && !(a.attrs && a.attrs.retired)) apps.set(`${a.id}|${(e.attrs && e.attrs.role) || ''}`, { id: a.id, name: a.name, role: (e.attrs && e.attrs.role) || 'other', period: e.attrs && e.attrs.period === null ? null : (e.attrs && e.attrs.period) || 'current', source: 'doc' });
   }
   const attr = n.type === 'person' ? 'owner' : 'supportTeam';
   for (const a of repo.listByType('application').filter((x) => !(x.attrs && x.attrs.retired))) {
