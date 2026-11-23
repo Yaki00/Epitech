@@ -12,6 +12,10 @@ const VARIANTS: Record<ButtonVariant, string> = {
   ghost: 'bg-transparent text-ink-2 border-transparent hover:bg-surface-3 hover:text-ink',
   danger: 'bg-surface text-down border-down/40 hover:bg-down-soft',
 };
+const ICON_SIZES: Record<ButtonSize, string> = {
+  sm: 'size-7',
+  md: 'size-8.5',
+};
 const SIZES: Record<ButtonSize, string> = {
   sm: 'h-7 px-2.5 text-xs gap-1.5',
   md: 'h-8.5 px-3 text-[13px] gap-2',
@@ -42,8 +46,8 @@ export function Button({ variant = 'secondary', size = 'md', icon: Icon, iconOnl
     'inline-flex shrink-0 items-center justify-center rounded-md border font-medium whitespace-nowrap transition-colors',
     'disabled:pointer-events-none disabled:opacity-50',
     VARIANTS[variant],
-    SIZES[size],
-    iconOnly && (size === 'sm' ? 'w-7 px-0' : 'w-8.5 px-0'),
+    // icône seule : carré sans marge intérieure (sinon px-2.5 écrase l'icône dans un bouton de 28 px)
+    iconOnly ? ICON_SIZES[size] : SIZES[size],
     className,
   );
   const content = (

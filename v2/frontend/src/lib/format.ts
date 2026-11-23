@@ -32,6 +32,18 @@ export function relativeTime(value: DateInput, lang: Lang, now: number = Date.no
   return translate(lang, 'time.day', { n: Math.floor(h / 24) });
 }
 
+/** Échéance à venir : « dans 4 min », « dans 2 h » ; passée de plus d'une minute : « en attente » ; absente : « Jamais ». */
+export function untilTime(value: DateInput, lang: Lang, now: number = Date.now()): string {
+  const d = toDate(value);
+  if (!d) return translate(lang, 'time.never');
+  const diff = Math.round((d.getTime() - now) / 1000);
+  if (diff < -60) return translate(lang, 'time.due');
+  if (diff < 60) return translate(lang, 'time.inFuture');
+  const min = Math.round(diff / 60);
+  if (min < 60) return translate(lang, 'time.inMin', { n: min });
+  return translate(lang, 'time.inHour', { n: Math.round(min / 60) });
+}
+
 /** Date et heure courtes : « 18/11/2026 14:05 ». */
 export function formatDateTime(value: DateInput, lang: Lang): string {
   const d = toDate(value);

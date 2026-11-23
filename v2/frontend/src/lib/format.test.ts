@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { epochSeconds, formatDate, relativeTime, toDate } from './format';
+import { epochSeconds, formatDate, relativeTime, toDate, untilTime } from './format';
 import { rankByText } from './search';
 
 const NOW = Date.parse('2026-11-23T12:00:00Z');
@@ -13,6 +13,15 @@ describe('format', () => {
     expect(relativeTime(ago(3 * 3600), 'en', NOW)).toBe('3 h ago');
     expect(relativeTime(ago(3 * 86400), 'fr', NOW)).toBe('il y a 3 j');
     expect(relativeTime('pas une date', 'en', NOW)).toBe('Never');
+  });
+
+  it('échéance à venir', () => {
+    const inS = (s: number) => new Date(NOW + s * 1000).toISOString();
+    expect(untilTime(null, 'fr', NOW)).toBe('Jamais');
+    expect(untilTime(inS(30), 'fr', NOW)).toBe('dans un instant');
+    expect(untilTime(inS(4 * 60), 'fr', NOW)).toBe('dans 4 min');
+    expect(untilTime(inS(2 * 3600), 'en', NOW)).toBe('in 2 h');
+    expect(untilTime(inS(-5 * 60), 'fr', NOW)).toBe('en attente');
   });
 
   it('epoch en secondes de Naemon', () => {

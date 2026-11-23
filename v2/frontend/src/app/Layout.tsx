@@ -1,6 +1,6 @@
 /**
  * Cadre de toutes les pages : barre latérale (navigation, état de la supervision), en-tête
- * (recherche Ctrl+K, langue, thème), bandeau « Données de démonstration » en mode démo.
+ * (recherche Ctrl+K, langue, thème), bandeau « Données de démonstration » en mode démo, bulle de l'assistant.
  */
 import { Suspense, useCallback, useEffect, useState } from 'react';
 import { NavLink, Outlet, ScrollRestoration, useLocation } from 'react-router';
@@ -12,6 +12,7 @@ import { useLiveStatus } from '../lib/live';
 import { relativeTime } from '../lib/format';
 import { cn } from '../lib/cn';
 import { CommandPalette, useCommandPaletteShortcut } from '../components/CommandPalette';
+import { Chat } from '../components/Chat';
 import { Kbd, SkeletonRows } from '../components/ui';
 import { NAV_ITEMS } from './nav';
 
@@ -39,13 +40,18 @@ export default function Layout() {
       <div className="flex min-h-dvh min-w-0 flex-col">
         <DemoBanner />
         <Header onSearch={() => setPaletteOpen(true)} onMenu={() => setMenuOpen(true)} />
-        <main id="contenu" className="mx-auto w-full max-w-[1480px] min-w-0 flex-1 px-4 py-5 md:px-6 lg:px-8 lg:py-6">
+        {/* marge basse pour que la bulle de l'assistant ne cache pas la fin des pages (sauf la carte, à hauteur d'écran) */}
+        <main
+          id="contenu"
+          className={cn('mx-auto w-full max-w-[1480px] min-w-0 flex-1 px-4 pt-5 md:px-6 lg:px-8 lg:pt-6', location.pathname === '/map' ? 'pb-5 lg:pb-6' : 'pb-20')}
+        >
           <Suspense fallback={<SkeletonRows rows={8} />}>
             <Outlet />
           </Suspense>
         </main>
       </div>
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
+      <Chat />
       <ScrollRestoration />
     </div>
   );
