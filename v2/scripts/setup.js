@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 /**
- * Installation : dépendances du backend (et du frontend si Node >= 20), puis fichiers de config
+ * Installation : dépendances du backend (et du frontend si Node >= 22.12), puis fichiers de config
  * manquants créés à partir des exemples (n'écrase jamais l'existant).
  * Fonctionne sous Windows et Linux, sans dépendance.
  */
@@ -23,10 +23,10 @@ function npmInstall(dir) {
 }
 
 npmInstall('backend');
-if (major >= 20) npmInstall('frontend');
+if (major >= 22) npmInstall('frontend');
 else {
-  console.log(`\nℹ Node ${process.versions.node} : le frontend (Vite 6) n'est pas installé ici, il demande Node >= 20.`);
-  console.log('  Compilez-le sur une machine Node >= 20 (npm run build) puis copiez frontend/dist dans ce dossier.');
+  console.log(`\nℹ Node ${process.versions.node} : le frontend (Vite 8) n'est pas installé ici, il demande Node >= 22.12.`);
+  console.log('  Compilez-le sur une machine Node >= 22.12 (npm run build) puis copiez frontend/dist dans ce dossier.');
 }
 
 // Reprise de la v1 : si ../v1/backend/.env existe et que backend/.env n'existe pas encore,

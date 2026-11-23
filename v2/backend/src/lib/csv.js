@@ -1,7 +1,7 @@
 'use strict';
 /**
  * Parseur CSV sans dépendance : guillemets, retours ligne dans les champs,
- * BOM UTF-8, détection auto du séparateur (; , tab) — les exports Excel FR
+ * BOM UTF-8, détection auto du séparateur (; , tab) : les exports Excel FR
  * utilisent souvent ";".
  */
 function detectDelimiter(firstLine) {

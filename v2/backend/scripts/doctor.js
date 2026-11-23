@@ -183,7 +183,7 @@ async function main() {
   const dist = path.join(config.frontendDist, 'index.html');
   fs.existsSync(dist)
     ? ok(`frontend compilé : ${config.frontendDist}`)
-    : warn(`frontend non compilé (${config.frontendDist}) : npm run build sur une machine Node >= 20, puis copier frontend/dist`);
+    : warn(`frontend non compilé (${config.frontendDist}) : npm run build sur une machine Node >= 22.12, puis copier frontend/dist`);
 
   // 7. passerelle IA
   if (noLlm) info('passerelle IA non testée (--no-llm)');

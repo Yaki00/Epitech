@@ -2,7 +2,7 @@
 'use strict';
 /**
  * Lance Lyra. Si frontend/dist existe, le backend sert l'interface et l'API sur le même port (3002).
- * Sinon, sur une machine Node >= 20, lance aussi Vite en développement (:3000). Ctrl+C arrête tout. Fonctionne sous Windows, macOS et Linux, sans dépendance.
+ * Sinon, sur une machine Node >= 22.12, lance aussi Vite en développement (:3000). Ctrl+C arrête tout. Fonctionne sous Windows, macOS et Linux, sans dépendance.
  */
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -13,15 +13,15 @@ const major = Number(process.versions.node.split('.')[0]);
 const hasDist = fs.existsSync(path.join(root, 'frontend', 'dist', 'index.html'));
 
 // Avec un frontend compilé, le backend sert tout (interface + API) sur un seul port.
-// Sans frontend compilé, on lance Vite en développement… seulement si Node >= 20 (Vite 6).
+// Sans frontend compilé, on lance Vite en développement… seulement si Node >= 22.12 (Vite 8).
 const services = [{ name: 'backend ', dir: 'backend', args: ['start'], color: '\x1b[36m' }];
 if (!hasDist) {
-  if (major >= 20 && fs.existsSync(path.join(root, 'frontend', 'node_modules'))) {
+  if (major >= 22 && fs.existsSync(path.join(root, 'frontend', 'node_modules'))) {
     services.push({ name: 'frontend', dir: 'frontend', args: ['run', 'dev'], color: '\x1b[35m' });
   } else {
     console.warn(
-      `⚠ Interface non disponible : frontend/dist absent${major < 20 ? ` et Node ${process.versions.node} ne peut pas lancer Vite 6 (Node >= 20)` : ' et frontend non installé'}.\n` +
-        '  Compilez le frontend sur une machine Node >= 20 (npm run build), copiez frontend/dist ici, puis relancez.\n' +
+      `⚠ Interface non disponible : frontend/dist absent${major < 22 ? ` et Node ${process.versions.node} ne peut pas lancer Vite 8 (Node >= 22.12)` : ' et frontend non installé'}.\n` +
+        '  Compilez le frontend sur une machine Node >= 22.12 (npm run build), copiez frontend/dist ici, puis relancez.\n' +
         "  L'API démarre quand même.\n"
     );
   }
