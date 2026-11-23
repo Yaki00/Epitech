@@ -49,18 +49,14 @@ import {
   type TabItem,
 } from '../components/ui';
 import { CheckToggle } from '../components/filters';
+import { EnvFilter } from '../components/EnvFilter';
+import { envVisible, useEnvFilter } from '../lib/envFilter';
 import { AppPath } from '../components/AppPath';
 import { ChangeDetail, ChangeHeader } from '../components/ChangeEntry';
 
 const TAB_IDS = ['overview', 'map', 'servers', 'databases', 'flows', 'docs', 'monitoring', 'history'] as const;
 type TabId = (typeof TAB_IDS)[number];
 const isTab = (v: string | null): v is TabId => v !== null && (TAB_IDS as readonly string[]).includes(v);
-
-/**
- * Environnements affichés : PRD, STG et « Non précisé » toujours ; DEV seulement sur demande.
- * (Règle commune avec la liste des serveurs et la carte.)
- */
-const envVisible = (env: Env | null, showDev: boolean): boolean => env !== 'DEV' || showDev;
 
 export default function ApplicationPage() {
   const { id = '' } = useParams();
@@ -74,8 +70,6 @@ export default function ApplicationPage() {
     else p.set('tab', next);
     setParams(p, { replace: true });
   };
-  // DEV masqué par défaut, réglage commun aux onglets Serveurs et Supervision
-  const [showDev, setShowDev] = useState(false);
   const { data: app, error, loading, refreshing, reload } = useApi((signal) => api.application(id, { signal }), [id], { refreshMs: REFRESH_MS });
   useTitle(app?.name ?? t('page.application.title'));
 
@@ -128,11 +122,11 @@ export default function ApplicationPage() {
       <div role="tabpanel" id={`app-panel-${tab}`} aria-labelledby={`app-tab-${tab}`} className="mt-4">
         {tab === 'overview' && <OverviewTab app={app} />}
         {tab === 'map' && <MapTab app={app} />}
-        {tab === 'servers' && <ServersTab app={app} showDev={showDev} setShowDev={setShowDev} />}
+        {tab === 'servers' && <ServersTab app={app} />}
         {tab === 'databases' && <DatabasesTab app={app} />}
         {tab === 'flows' && <FlowsTab app={app} />}
         {tab === 'docs' && <DocsTab app={app} />}
-        {tab === 'monitoring' && <MonitoringTab app={app} showDev={showDev} setShowDev={setShowDev} />}
+        {tab === 'monitoring' && <MonitoringTab app={app} />}
         {tab === 'history' && <HistoryTab app={app} />}
       </div>
     </>
@@ -353,17 +347,19 @@ function Toolbar({ children }: { children: ReactNode }) {
   return <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-line px-3 py-1.5">{children}</div>;
 }
 
-function ServersTab({ app, showDev, setShowDev }: { app: ApplicationDetail; showDev: boolean; setShowDev: (v: boolean) => void }) {
+function ServersTab({ app }: { app: ApplicationDetail }) {
   const { t } = useI18n();
   const stateOf = useServerState();
+  const [envFilter] = useEnvFilter();
   const [showRetired, setShowRetired] = useState(false);
   const all = app.serverList;
-  const devCount = all.filter((s) => s.env === 'DEV' && (showRetired || !s.retired)).length;
-  const retiredCount = all.filter((s) => s.retired && envVisible(s.env, showDev)).length;
+  const retiredCount = all.filter((s) => s.retired && envVisible(envFilter, s.env)).length;
   const rows = useMemo(
-    () => all.filter((s) => envVisible(s.env, showDev) && (showRetired || !s.retired)).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })),
-    [all, showDev, showRetired],
+    () => all.filter((s) => envVisible(envFilter, s.env) && (showRetired || !s.retired)).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })),
+    [all, envFilter, showRetired],
   );
+  const envCounts = { PRD: 0, STG: 0, DEV: 0, none: 0 };
+  for (const s of all) if (showRetired || !s.retired) envCounts[s.env ?? 'none'] += 1;
   const columns: Column<LinkedServer>[] = [
     {
       key: 'name',
@@ -405,9 +401,7 @@ function ServersTab({ app, showDev, setShowDev }: { app: ApplicationDetail; show
   return (
     <Card padded={false}>
       <Toolbar>
-        <CheckToggle checked={showDev} onChange={setShowDev}>
-          {t('appDetail.showDev', { n: devCount })}
-        </CheckToggle>
+        <EnvFilter counts={envCounts} />
         {retiredCount > 0 && (
           <CheckToggle checked={showRetired} onChange={setShowRetired}>
             {t('common.showRetired', { n: retiredCount })}
@@ -634,7 +628,7 @@ function DocsTab({ app }: { app: ApplicationDetail }) {
 
 // ---------- Supervision ----------
 
-function MonitoringTab({ app, showDev, setShowDev }: { app: ApplicationDetail; showDev: boolean; setShowDev: (v: boolean) => void }) {
+function MonitoringTab({ app }: { app: ApplicationDetail }) {
   const { t, lang } = useI18n();
   const { config } = useConfig();
   const { status: live } = useLiveStatus();
@@ -646,9 +640,11 @@ function MonitoringTab({ app, showDev, setShowDev }: { app: ApplicationDetail; s
     );
   }
   const active = app.serverList.filter((s) => !s.retired);
-  const devCount = active.filter((s) => s.env === 'DEV').length;
+  const [envFilter] = useEnvFilter();
+  const envCounts = { PRD: 0, STG: 0, DEV: 0, none: 0 };
+  for (const s of active) envCounts[s.env ?? 'none'] += 1;
   const servers = active
-    .filter((s) => envVisible(s.env, showDev))
+    .filter((s) => envVisible(envFilter, s.env))
     .map((s) => ({ server: s, live: live?.servers[s.id] ?? null }))
     .map((x) => ({ ...x, state: x.live?.state ?? x.server.state }))
     .sort((a, b) => severity(b.state) - severity(a.state) || a.server.name.localeCompare(b.server.name, undefined, { numeric: true }));
@@ -656,9 +652,7 @@ function MonitoringTab({ app, showDev, setShowDev }: { app: ApplicationDetail; s
   return (
     <Card padded={false}>
       <Toolbar>
-        <CheckToggle checked={showDev} onChange={setShowDev}>
-          {t('appDetail.showDev', { n: devCount })}
-        </CheckToggle>
+        <EnvFilter counts={envCounts} />
       </Toolbar>
       {servers.length === 0 ? (
         <EmptyState compact icon={ServerIcon} title={t('appDetail.mon.empty')} text={t('appDetail.servers.emptyText')} />
