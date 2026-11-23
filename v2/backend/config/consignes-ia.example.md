@@ -16,8 +16,9 @@ par exemple `srvparap01`. Les noms qui finissent par `-old` sont des machines ar
 ## Environnements
 
 Dites quels mots désignent la production, la préproduction et le développement chez vous.
-Les valeurs possibles sont PRD, STG et DEV. Les mêmes mots peuvent être déclarés pour les
-inventaires dans le bloc `environnements` de `mappings.json`.
+Les valeurs possibles sont PRD, STG et DEV. Déclarez aussi ces mots dans le bloc `environnements`
+de `mappings.json` : il sert aux inventaires et au contrôle de l'environnement d'une page (une page
+« recette » n'est rattachée à STG que si « recette » y est déclaré).
 
 Exemple fictif : « recette » et « UAT » désignent STG. « Intégration » désigne DEV.
 « Exploitation » désigne PRD.

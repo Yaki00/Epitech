@@ -164,6 +164,8 @@ le bloc facultatif `environnements` de `backend/config/mappings.json` :
 ```
 
 Les mêmes mots se disent à l'IA dans la rubrique « Environnements » des consignes (l'IA ne rend que `PRD`, `STG`, `DEV` ou rien).
+Ce bloc sert aussi au contrôle de l'environnement d'une page : il n'est retenu que si la citation rendue par l'IA contient un mot qui le
+désigne (`PRD`, `production`, `préproduction`... ou un mot du bloc). Un mot maison absent du bloc (« recette ») fait écarter l'environnement.
 
 ### Réglages du modèle
 

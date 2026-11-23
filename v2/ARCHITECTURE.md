@@ -114,10 +114,10 @@ reconnaissance d'application. Tout ce qui dépend des conventions va dans les co
 ### Formes
 
 ```
-Reading  = { page: { kind, period, env, topics[] },
+Reading  = { page: { kind, period, env, envEvidence, topics[] },
              applications: [{ name, written, role: subject|cited, evidence }],
              entities:     [{ name, type, env, status: active|decommissioned|planned, ip?, evidence }],
-             links:        [{ from, to, type, evidence }],
+             links:        [{ from, to, type, period|null, evidence }],
              owners:       [{ name, kind: person|team, application, role: owner|support|oncall|other, evidence }] }
 
 Verified = { kind, period, env, topics,
@@ -125,8 +125,14 @@ Verified = { kind, period, env, topics,
              servers: [{ nodeId|null, name, ip, env, status, inInventory, corroborated, evidence }],
              links:   [{ src, dst, type, trust, period, evidence }],
              owners:  [{ appId, name, kind, role, period, evidence }],
-             rejected: [{ what, reason: no_evidence|unknown_application|out_of_scope }] }
+             rejected: [{ what, reason: no_evidence|evidence_mismatch|unknown_application|out_of_scope }] }
 ```
+
+L'en-tête envoyé à l'IA porte la date du jour (`Date du jour : AAAA-MM-JJ`) pour juger la période (« Plan 2026 » est actuel en 2026) ;
+elle n'entre pas dans le texte où les citations sont cherchées. Chaque lien peut porter sa propre période (page qui mêle l'existant et
+une cible, historique qui va jusqu'à aujourd'hui) ; sans période propre, il prend celle de la page. L'environnement de la page n'est
+retenu que si sa citation (`envEvidence`) se retrouve dans la page et contient un mot qui le désigne (`PRD`, `production`, synonymes du
+bloc `environnements` de `mappings.json`) : jamais déduit des serveurs cités. Sinon il est rejeté (`rejected`) et vaut `null`.
 
 Types de lien : `runs_on`, `uses_db`, `db_on`, `calls`, `reads_from`, `writes_to`, `depends_on` (sens « src dépend de dst »).
 Nature de la page : `architecture`, `exploitation`, `installation`, `incident`, `version`, `reunion`, `projet`, `autre`. Période :
@@ -142,13 +148,16 @@ application ». `trust` d'un lien vaut `confirmed`, `added`, `toValidate` ou `ot
 |---|---|
 | S dans l'inventaire, rattaché à A | `confirmed` : non écrit, déjà dans l'inventaire |
 | S dans l'inventaire, rattaché à une autre application | `otherApp` : non écrit, compté dans le contrôle de la page |
-| S hors inventaire, supervisé par Naemon ou page actuelle modifiée depuis moins de 730 jours disant S actif | `added` : écrit, serveur marqué `outOfInventory`, compte dans l'impact |
+| S hors inventaire, supervisé par Naemon ou page actuelle modifiée depuis moins de 730 jours disant S actif (cette page, ou une autre déjà lue : liens `mentions`) | `added` : écrit, serveur marqué `outOfInventory`, compte dans l'impact |
 | S hors inventaire sans corroboration (ou période illisible) | `toValidate` : écrit, inactif, listé dans `/api/gaps` |
 | page ancienne ou cible, S décommissionné ou prévu | écrit avec `period` `past` ou `target`, inactif |
 
 Un lien est **inactif** s'il est retiré, ancien, cible ou à valider (`isInactiveEdge`). Les liens inactifs sont ignorés par l'impact, les
 compteurs, l'état Naemon, le score de documentation et la carte (sauf `includeRetired=true`), mais restent listés avec leur marque. Les liens
-entre applications, vers les bases et base vers serveur n'ont pas d'inventaire : ils viennent des pages actuelles.
+entre applications, vers les bases et base vers serveur n'ont pas d'inventaire : ils viennent des pages actuelles. Un autre lien vers un
+serveur de l'inventaire (`db_on`, `depends_on`...) est `toValidate` si le serveur appartient à d'autres applications que celles du lien :
+pour une base, une file ou une URL, ce sont les applications qui l'utilisent (`uses_db`, `reads_from`, `writes_to` de la page ou du
+graphe actif), puis celles de la page (la base d'une application B hébergée sur un serveur de B, citée dans la page de A, reste juste).
 
 ### Décision par page et reprise
 
@@ -162,7 +171,8 @@ les pages. Sans IA, les pages sont stockées et rien n'est déduit.
 
 - `config/consignes-ia.md` (non versionné) : texte libre, 8 000 caractères au plus, lu par `reading/consignes.js` (absent ou vide = vide) et
   placé à la fin du message système. Modèle : `consignes-ia.example.md`. Le texte entre dans l'empreinte de la lecture.
-- `environnements` (bloc facultatif de `mappings.json`) : synonymes d'environnement pour l'import des inventaires (`configureEnvironmentsFromFile`).
+- `environnements` (bloc facultatif de `mappings.json`) : synonymes d'environnement pour l'import des inventaires (`configureEnvironmentsFromFile`)
+  et pour le contrôle de la citation de l'environnement d'une page.
 - Équipes : nœuds `person` et `team`, liens `owned_by` (application vers personne ou équipe) avec `role`, `period` et la citation, plus les
   colonnes `owner` et `supportTeam` de l'APM si elles sont décrites. Ni adresse électronique ni téléphone ne sont stockés.
 - Rapports CSV : `perimetre-pages`, `perimetre-orthographes`, `lectures-rejets`, `architecture-*`.
