@@ -43,6 +43,7 @@ const copies = [
   ['backend/.env.example', 'backend/.env'],
   ['backend/config/mappings.example.json', 'backend/config/mappings.json'],
   ['backend/config/perimeter.example.json', 'backend/config/perimeter.json'],
+  ['backend/config/consignes-ia.example.md', 'backend/config/consignes-ia.md'],
 ];
 for (const [from, to] of copies) {
   const dst = path.join(root, to);

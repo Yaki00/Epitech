@@ -11,4 +11,5 @@ backend/config/mappings.json
 _backup/
 _to_delete/
 backend/config/perimeter.json
+backend/config/consignes-ia.md
 logs/

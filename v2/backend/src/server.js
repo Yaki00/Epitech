@@ -10,8 +10,11 @@ const { createHistory } = require('./history/history');
 const { startNaemonPoller } = require('./naemon/setup');
 const path = require('path');
 const fs = require('fs');
+const { configureEnvironmentsFromFile } = require('./lib/environment');
 
 const log = createLogger('server');
+
+configureEnvironmentsFromFile(config.inventory.mappingFile);
 
 let repo;
 let llm;

@@ -1,5 +1,10 @@
 {
   "_comment": "Copier en mappings.json et adapter. Une colonne se désigne par son nom d'en-tête exact ou par sa lettre Excel (A, B… CK). 'file' accepte * (le fichier le plus récent est pris, d'après la date dans le nom). 'direction: from' = la valeur de la colonne dépend de la ligne (ex: l'application tourne sur ce serveur). Les 'attrs' d'une relation sont posés sur l'entité liée. downloadEnv (ex. MARKETPLACE) : si <downloadEnv>_URL est rempli dans .env, le fichier est téléchargé une fois par jour par scripts/fetch-inventory.js (downloadTo = fichier écrit quand 'file' contient *).",
+  "environnements": {
+    "_comment": "Facultatif : mots de vos exports qui désignent un environnement, en plus de prod, staging, dev et leurs variantes (sans casse ni accents). Jamais importé comme inventaire.",
+    "STG": ["recette", "uat"],
+    "DEV": ["integration"]
+  },
   "marketplace": {
     "file": "./data/raw/marketplace/servers.csv",
     "downloadEnv": "MARKETPLACE",

@@ -79,6 +79,29 @@ async function main() {
     ko(`config/perimeter.json illisible : ${err.message}`);
   }
 
+  // 3b. consignes de lecture et synonymes d'environnement
+  try {
+    const { loadConsignes, MAX_CHARS } = require('../src/reading/consignes');
+    const c = loadConsignes(config.consignesFile);
+    if (!c.chars) info('consignes de lecture : aucune (config/consignes-ia.md absent ou vide, facultatif ; modèle : consignes-ia.example.md)');
+    else if (c.truncated) warn(`consignes de lecture : fichier trop long, seuls les ${MAX_CHARS} premiers caractères sont donnés à l'IA (raccourcir config/consignes-ia.md)`);
+    else ok(`consignes de lecture : ${c.chars} caractères (limite ${MAX_CHARS})`);
+  } catch (err) {
+    ko(`consignes de lecture illisibles : ${err.message}`);
+  }
+  try {
+    if (fs.existsSync(config.inventory.mappingFile)) {
+      const m = JSON.parse(fs.readFileSync(config.inventory.mappingFile, 'utf8').replace(/^\uFEFF/, ''));
+      const syn = m.environnements;
+      if (syn && typeof syn === 'object') {
+        const txt = ['PRD', 'STG', 'DEV'].filter((e) => Array.isArray(syn[e]) && syn[e].length).map((e) => `${e} = ${syn[e].join(', ')}`);
+        txt.length ? ok(`synonymes d'environnement lus : ${txt.join(' ; ')}`) : info('bloc "environnements" de mappings.json sans synonyme');
+      } else info("synonymes d'environnement : bloc \"environnements\" absent de mappings.json (facultatif)");
+    }
+  } catch (_) {
+    // mappings.json illisible : déjà signalé plus haut
+  }
+
   // 4. API Confluence (récupération des pages)
   if (!config.confluence.fetch) info('CONFLUENCE_FETCH=false : récupération Confluence assurée par la v1, API non vérifiée ici');
   else if (config.confluence.baseUrl) {

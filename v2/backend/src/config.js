@@ -91,6 +91,8 @@ const config = {
 
   // applications suivies (liste fermée) : absent = tout est analysé
   perimeterFile: path.resolve(ROOT, env('PERIMETER_FILE', './config/perimeter.json')),
+  // consignes de lecture pour l'IA (texte libre, facultatif)
+  consignesFile: path.resolve(ROOT, env('CONSIGNES_FILE', './config/consignes-ia.md')),
   // rapports lisibles dans Excel (pages par application, orthographes rencontrées)
   reportsDir: path.resolve(ROOT, env('REPORTS_DIR', './data/rapports')),
 

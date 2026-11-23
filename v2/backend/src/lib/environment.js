@@ -7,17 +7,45 @@
 
 const ENVS = ['PRD', 'STG', 'DEV'];
 
-/** Valeur libre de l'APM vers PRD, STG, DEV ou null. */
-function normalizeEnv(value) {
-  const v = String(value == null ? '' : value)
+// Synonymes réglables (bloc « environnements » de mappings.json) : { PRD: ['production'], ... } déjà clés
+let extra = {};
+
+function fold(value) {
+  return String(value == null ? '' : value)
     .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
+    .replace(/[\u0300-\u036f]/g, '')
     .trim()
     .toLowerCase()
     .replace(/[\s_-]+/g, '');
+}
+
+/** Synonymes d'environnement en plus des valeurs actuelles ; null remet les valeurs par défaut. */
+function configureEnvironments(synonyms) {
+  extra = {};
+  if (!synonyms || typeof synonyms !== 'object') return;
+  for (const env of ENVS) {
+    const list = synonyms[env];
+    if (Array.isArray(list)) extra[env] = list.map(fold).filter(Boolean);
+  }
+}
+
+/** Lit le bloc facultatif « environnements » d'un fichier mappings.json (absent ou illisible : défauts). */
+function configureEnvironmentsFromFile(file) {
+  try {
+    const m = JSON.parse(require('fs').readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
+    configureEnvironments(m && m.environnements);
+  } catch (_) {
+    configureEnvironments(null);
+  }
+}
+
+/** Valeur libre de l'APM vers PRD, STG, DEV ou null. */
+function normalizeEnv(value) {
+  const v = fold(value);
   if (['prd', 'prod', 'production'].includes(v)) return 'PRD';
   if (['stg', 'stage', 'staging', 'preprod', 'preproduction'].includes(v)) return 'STG';
   if (['dev', 'development', 'developpement'].includes(v)) return 'DEV';
+  for (const env of ENVS) if (v && (extra[env] || []).includes(v)) return env;
   return null;
 }
 
@@ -33,4 +61,4 @@ function appCriticality(node) {
   return a.criticality || a.confidentiality || null;
 }
 
-module.exports = { ENVS, normalizeEnv, serverEnv, appCriticality };
+module.exports = { ENVS, normalizeEnv, configureEnvironments, configureEnvironmentsFromFile, serverEnv, appCriticality };
