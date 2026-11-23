@@ -38,10 +38,12 @@ Si `../v1/backend/.env` existe et que `v2/backend/.env` n'existe pas encore, `np
 1. **Config** : `perimeter.json` et `mappings.json` sont copiés de la v1 (sans écraser un fichier déjà présent).
 2. **Cache IA** : le dossier `LLM_CACHE_DIR` de la v1 est copié (les pages déjà analysées ne repartent pas à l'IA).
 3. **Store** : le dossier `DATA_DIR` de la v1 est copié (le graphe est disponible tout de suite).
-4. **Inventaires** : `data/raw/apm` et `data/raw/marketplace` sont copiés.
+4. **Inventaires** : `data/raw/apm` et `data/raw/marketplace` sont copiés une seule fois, à la reprise. Un nouvel export APM ou marketplace déposé
+   ensuite dans `v1/backend/data/raw/` n'est pas vu par la v2 : le déposer dans `v2/backend/data/raw/apm` (ou `marketplace`), ou faire pointer
+   `mappings.json` de la v2 vers le dossier de la v1.
 5. **`.env`** : celui de la v1 est copié, puis un bloc « Lyra v2 » est ajouté avec `PORT=3002`, `DEMO_MODE=false`,
    `CONFLUENCE_FETCH=false` et `CONFLUENCE_EXPORT_DIR` pointant vers l'export de la v1. Les lignes actives de la v1 pour ces
-   clés sont mises en commentaire dans la copie (la première occurrence d'une clé l'emporte).
+   clés sont mises en commentaire dans la copie (dotenv garde la dernière occurrence d'une clé, donc le bloc v2, placé à la fin, l'emporte).
 6. Les chemins absolus de la v1 (`DATA_DIR`, `LLM_CACHE_DIR`) sont ramenés aux dossiers de la v2.
 
 Relancer `npm run setup` n'écrase rien et n'ajoute pas deux fois le bloc v2. La v1 reste seule à récupérer Confluence :

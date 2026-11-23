@@ -67,7 +67,8 @@ Toutes les commandes se lancent depuis `v1/`, sauf indication contraire.
    - `MCP_*`, `NAEMON_URL_TEMPLATE` : laisser vides si non fournis.
 4. **`backend/config/perimeter.json`** : les applications suivies, **fournies par l'utilisateur**
    (noms tels qu'écrits dans la colonne A de l'export APM). Ne jamais laisser les exemples OrderHub / Billing Engine.
-5. **Export APM** : le fichier CSV fourni par l'utilisateur va dans `backend/data/raw/apm/`.
+5. **Export APM** : le fichier CSV fourni par l'utilisateur va dans `backend/data/raw/apm/`. Après une reprise de la v1, `data/raw/apm` et `marketplace`
+   ne sont copiés qu'une fois : tout nouvel export doit être déposé dans `v2/backend/data/raw/apm` (ou `marketplace`), pas dans la v1.
    Vérifier que **la ligne 1 contient les en-têtes** (sinon le signaler, ne pas modifier le fichier).
 6. **Contrôle** : `npm run doctor`. Objectif : `--- aucune erreur ---`. Les `WARN` sont à lister dans le rapport.
 7. **Tests** : `npm test`. Tous les tests doivent passer (148 ou plus). Aucun ne nécessite le réseau.
@@ -141,7 +142,7 @@ Fichiers que tu peux modifier : `v2/backend/.env`, `v2/backend/config/perimeter.
 |---|---|
 | `npm run setup` | installe le backend, crée `backend/.env` et les configs ; **reprend la v1** si `../v1/backend/.env` existe |
 | `npm run doctor` | vérifie Node, IA, Confluence, Naemon, fichiers ; objectif : `--- aucune erreur ---` |
-| `npm test` | tests du backend : **241 tests** doivent passer, sans réseau |
+| `npm test` | tests du backend : tous les tests doivent passer (verts), sans réseau |
 | `npm start` | http://localhost:3002 (interface incluse, car `frontend/dist` est dans le dépôt) |
 | `npm run sync:all` | Confluence, CSV, analyse IA (seulement après l'essai sur 20 pages validé) |
 
@@ -157,7 +158,7 @@ L'interface est déjà compilée dans `v2/frontend/dist` ; si elle manque, seule
    - **Sans v1** : `backend/.env` est créé avec **`DEMO_MODE=true`** (données fictives). Pour les vraies données, remplir `.env` comme pour la v1
      (voir plus haut) puis mettre `DEMO_MODE=false`.
 3. Vérifier dans `v2/backend/.env` : `DEMO_MODE`, `PORT=3002`, `CONFLUENCE_EXPORT_DIR` (export de la v1 si `CONFLUENCE_FETCH=false`), `DATA_DIR`.
-4. `npm run doctor`, puis `npm test` (241 verts).
+4. `npm run doctor`, puis `npm test` (tous les tests verts).
 5. `npm start` et ouvrir http://localhost:3002. La v1 (3001) et la v2 (3002) peuvent tourner ensemble.
 
 ## Ce qu'on règle dans `.env` pour la v2

@@ -33,9 +33,10 @@ else {
 // on reprend config, cache IA, store et CSV de la v1 (voir scripts/lib/migrate.js).
 // Sans v1 à côté : copie des exemples ci-dessous, comme avant.
 const v1Root = path.join(root, '..', 'v1');
+let migrated = false;
 if (fs.existsSync(path.join(v1Root, 'backend', '.env'))) {
   console.log('\n> Reprise de la v1 détectée');
-  migrateFromV1({ v1Root, v2Root: root, log: (m) => console.log(`✔ ${m}`) });
+  migrated = Boolean(migrateFromV1({ v1Root, v2Root: root, log: (m) => console.log(`✔ ${m}`) }).migrated);
 }
 
 const copies = [
@@ -51,11 +52,20 @@ for (const [from, to] of copies) {
     console.log(`✔ ${to} créé depuis ${path.basename(from)}`);
   }
 }
-console.log('\nÀ faire maintenant :');
-console.log('  1. backend/.env : tout est commenté ; au minimum LLM_*, CONFLUENCE_BASE_URL, CONFLUENCE_TOKEN, CONFLUENCE_SPACES');
-console.log('     (clés des espaces : node backend/scripts/fetch-confluence.js --list-spaces)');
-console.log('  2. backend/config/perimeter.json : les applications suivies (noms de la colonne A de l\'APM)');
-console.log('  3. backend/config/mappings.json : fichiers CSV (APM, marketplace) et colonnes');
-console.log('  4. npm run doctor   (vérifie tout, rapport à copier-coller)');
-console.log('  5. npm run sync:all (récupère Confluence, importe les CSV, analyse ; voir README)');
-console.log('  6. npm start\n');
+if (migrated) {
+  console.log('\nReprise de la v1 terminée. À faire maintenant :');
+  console.log('  1. npm run doctor   (vérifie tout, rapport à copier-coller)');
+  console.log('  2. npm test         (tous les tests doivent être verts)');
+  console.log('  3. npm start        (http://localhost:3002 ; la v1 reste sur 3001)');
+  console.log('  4. npm run sync:all -- --no-fetch   (importe les CSV et analyse, sans récupérer Confluence : la v1 la fait, CONFLUENCE_FETCH=false)');
+  console.log('     Nouvel export APM ou marketplace : le déposer dans backend/data/raw/apm ou marketplace de la v2 (copiés une seule fois)\n');
+} else {
+  console.log('\nPremière installation (sans v1). À faire maintenant :');
+  console.log('  1. npm start        : par défaut backend/.env est en DEMO_MODE=true, des données fictives s\'affichent (http://localhost:3002)');
+  console.log('  2. Pour vos vraies données : DEMO_MODE=false dans backend/.env, puis renseigner LLM_*, CONFLUENCE_BASE_URL, CONFLUENCE_TOKEN, CONFLUENCE_SPACES');
+  console.log('     (clés des espaces : node backend/scripts/fetch-confluence.js --list-spaces)');
+  console.log('  3. backend/config/perimeter.json : les applications suivies (noms de la colonne A de l\'APM)');
+  console.log('  4. backend/config/mappings.json : fichiers CSV (APM, marketplace) et colonnes');
+  console.log('  5. npm run doctor   (vérifie tout, rapport à copier-coller)');
+  console.log('  6. npm run sync:all (récupère Confluence, importe les CSV, analyse ; voir README)\n');
+}

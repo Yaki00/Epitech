@@ -2,7 +2,7 @@
   "name": "lyra-v2",
   "private": true,
   "version": "1.0.0",
-  "description": "Lyra - lance le backend (API + interface compilée) ; sur une machine Node >= 20, aussi le frontend en développement",
+  "description": "Lyra - lance le backend (API + interface compilée) ; sur une machine Node >= 22.12, aussi le frontend en développement",
   "scripts": {
     "setup": "node scripts/setup.js",
     "start": "node scripts/start.js",

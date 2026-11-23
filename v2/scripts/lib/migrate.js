@@ -9,12 +9,12 @@ const path = require('path');
 
 const BLOCK_MARKER = '# --- Lyra v2 ---';
 
-/** Lecture minimale d'un .env (premier KEY=valeur actif de chaque clé, comme dotenv). */
+/** Lecture minimale d'un .env (dernier KEY=valeur actif de chaque clé : c'est ce que garde dotenv, donc ce que la v1 utilise). */
 function parseEnv(text) {
   const out = {};
   for (const line of text.split(/\r?\n/)) {
     const m = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_.-]*)\s*=\s*(.*?)\s*$/);
-    if (!m || m[1] in out) continue;
+    if (!m) continue;
     let v = m[2];
     const q = v[0];
     if ((q === '"' || q === "'" || q === '`') && v.indexOf(q, 1) > 0) v = v.slice(1, v.indexOf(q, 1));
@@ -39,7 +39,11 @@ function copyTree(src, dst) {
   }
   fs.mkdirSync(dst, { recursive: true });
   let n = 0;
-  for (const name of fs.readdirSync(src)) n += copyTree(path.join(src, name), path.join(dst, name));
+  for (const name of fs.readdirSync(src)) {
+    // verrou de synchro et fichiers temporaires d'une v1 en cours d'écriture : jamais repris
+    if (name === '.sync.lock' || name.endsWith('.tmp')) continue;
+    n += copyTree(path.join(src, name), path.join(dst, name));
+  }
   return n;
 }
 
@@ -58,7 +62,7 @@ const V2_VARIABLES = `# Variables propres à la v2 (voir backend/.env.example po
 
 /**
  * @param {{v1Root:string, v2Root:string, log?:(m:string)=>void}} p  racines des deux versions
- * @returns {{actions:string[]}}  ce qui a été fait (déjà passé à `log`)
+ * @returns {{actions:string[], migrated?:boolean}}  ce qui a été fait ; migrated : vrai seulement si un .env v2 a été créé depuis la v1 (déjà passé à `log`)
  */
 function migrateFromV1({ v1Root, v2Root, log = () => {} }) {
   const actions = [];
@@ -105,8 +109,8 @@ function migrateFromV1({ v1Root, v2Root, log = () => {} }) {
     say(`data/raw/${sub} : ${n} fichier(s) copié(s)`);
   }
 
-  // 2, 3, 7. .env : valeurs v2 en tête de bloc ; dotenv garde la PREMIÈRE occurrence d'une clé,
-  // donc les lignes actives de la v1 pour ces clés sont mises en commentaire dans la copie.
+  // 2, 3, 7. .env : bloc v2 ajouté à la fin ; dotenv garde la DERNIÈRE occurrence d'une clé, donc le bloc l'emporte.
+  // Les lignes actives de la v1 pour ces clés sont quand même mises en commentaire dans la copie (lecture sans ambiguïté).
   const exportDir = fromV1('CONFLUENCE_EXPORT_DIR', './data/raw/confluence');
   const values = { PORT: '3002', CONFLUENCE_EXPORT_DIR: exportDir, CONFLUENCE_FETCH: 'false', DEMO_MODE: 'false', ...overrides };
   const lines = v1Text.split(/\r?\n/).map((l) => {
@@ -129,7 +133,7 @@ function migrateFromV1({ v1Root, v2Root, log = () => {} }) {
   say('backend/.env créé depuis celui de la v1 (+ bloc Lyra v2)');
   say(`PORT=3002, DEMO_MODE=false, CONFLUENCE_FETCH=false, export Confluence lu dans ${exportDir}`);
 
-  return { actions };
+  return { actions, migrated: true };
 }
 
 module.exports = { migrateFromV1, BLOCK_MARKER, parseEnv };

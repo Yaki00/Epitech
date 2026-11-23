@@ -106,7 +106,7 @@ Filtre par défaut de l'interface : `PRD` et `STG` ; `DEV` d'un clic ; le choix 
 
 `scripts/lib/migrate.js`, appelé par `setup.js` si `../v1/backend/.env` existe et `backend/.env` n'existe pas. N'écrase jamais
 un fichier, ne modifie jamais la v1, écrit `.env` en dernier (sa présence signifie « reprise complète »). Le bloc ajouté à
-`.env` est placé après les lignes de la v1 dont les clés concernées sont mises en commentaire (dotenv garde la première occurrence).
+`.env` est placé après les lignes de la v1 dont les clés concernées sont mises en commentaire (dotenv garde la dernière occurrence, donc le bloc v2 l'emporte ; les lignes de la v1 sont commentées par clarté).
 `CONFLUENCE_FETCH=false` : `fetch-confluence.js` s'arrête proprement (code 0) et `doctor` n'interroge pas Confluence.
 
 ## Frontend
