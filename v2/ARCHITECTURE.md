@@ -125,14 +125,16 @@ Verified = { kind, period, env, topics,
              servers: [{ nodeId|null, name, ip, env, status, inInventory, corroborated, evidence }],
              links:   [{ src, dst, type, trust, period, evidence }],
              owners:  [{ appId, name, kind, role, period, evidence }],
-             rejected: [{ what, reason: no_evidence|evidence_mismatch|unknown_application|out_of_scope }] }
+             rejected: [{ what, reason: no_evidence|evidence_mismatch|not_in_header|unknown_application|out_of_scope }] }
 ```
 
-L'en-tête envoyé à l'IA porte la date du jour (`Date du jour : AAAA-MM-JJ`) pour juger la période (« Plan 2026 » est actuel en 2026) ;
-elle n'entre pas dans le texte où les citations sont cherchées. Chaque lien peut porter sa propre période (page qui mêle l'existant et
-une cible, historique qui va jusqu'à aujourd'hui) ; sans période propre, il prend celle de la page. L'environnement de la page n'est
-retenu que si sa citation (`envEvidence`) se retrouve dans la page et contient un mot qui le désigne (`PRD`, `production`, synonymes du
-bloc `environnements` de `mappings.json`) : jamais déduit des serveurs cités. Sinon il est rejeté (`rejected`) et vaut `null`.
+L'en-tête envoyé à l'IA porte la date du jour (`Date du jour : AAAA-MM-JJ`, heure locale du serveur) pour juger la période (« Plan
+2026 » est actuel en 2026) ; elle n'entre pas dans le texte où les citations sont cherchées. Chaque lien peut porter sa propre période
+(page qui mêle l'existant et une cible, historique qui va jusqu'à aujourd'hui) ; sans période propre, il prend celle de la page. Un lien
+dit actuel dans une page ancienne est au mieux `toValidate` (sauf `confirmed` par l'inventaire). L'environnement de la page n'est
+retenu que si sa citation (`envEvidence`) se retrouve dans l'en-tête (titre, pages parentes) et contient un mot qui le désigne (`PRD`,
+`production`, synonymes du bloc `environnements` de `mappings.json`) : jamais déduit d'une section, d'une phrase ou des serveurs
+cités. Sinon il est rejeté (`rejected`, raison `not_in_header` ou `evidence_mismatch`) et vaut `null`.
 
 Types de lien : `runs_on`, `uses_db`, `db_on`, `calls`, `reads_from`, `writes_to`, `depends_on` (sens « src dépend de dst »).
 Nature de la page : `architecture`, `exploitation`, `installation`, `incident`, `version`, `reunion`, `projet`, `autre`. Période :
@@ -148,7 +150,7 @@ application ». `trust` d'un lien vaut `confirmed`, `added`, `toValidate` ou `ot
 |---|---|
 | S dans l'inventaire, rattaché à A | `confirmed` : non écrit, déjà dans l'inventaire |
 | S dans l'inventaire, rattaché à une autre application | `otherApp` : non écrit, compté dans le contrôle de la page |
-| S hors inventaire, supervisé par Naemon ou page actuelle modifiée depuis moins de 730 jours disant S actif (cette page, ou une autre déjà lue : liens `mentions`) | `added` : écrit, serveur marqué `outOfInventory`, compte dans l'impact |
+| S hors inventaire, supervisé par Naemon ou page actuelle modifiée depuis moins de 730 jours disant S actif (cette page, ou une autre page non retirée déjà écrite : liens `mentions`) | `added` : écrit, serveur marqué `outOfInventory`, compte dans l'impact |
 | S hors inventaire sans corroboration (ou période illisible) | `toValidate` : écrit, inactif, listé dans `/api/gaps` |
 | page ancienne ou cible, S décommissionné ou prévu | écrit avec `period` `past` ou `target`, inactif |
 
@@ -156,15 +158,18 @@ Un lien est **inactif** s'il est retiré, ancien, cible ou à valider (`isInacti
 compteurs, l'état Naemon, le score de documentation et la carte (sauf `includeRetired=true`), mais restent listés avec leur marque. Les liens
 entre applications, vers les bases et base vers serveur n'ont pas d'inventaire : ils viennent des pages actuelles. Un autre lien vers un
 serveur de l'inventaire (`db_on`, `depends_on`...) est `toValidate` si le serveur appartient à d'autres applications que celles du lien :
-pour une base, une file ou une URL, ce sont les applications qui l'utilisent (`uses_db`, `reads_from`, `writes_to` de la page ou du
-graphe actif), puis celles de la page (la base d'une application B hébergée sur un serveur de B, citée dans la page de A, reste juste).
+pour une base, une file ou une URL, ce sont les applications qui l'utilisent (`uses_db` actuels de la page ; `uses_db`, `reads_from`,
+`writes_to` actifs du graphe), puis celles de la page (la base d'une application B hébergée sur un serveur de B, citée dans la page de A, reste juste).
 
 ### Décision par page et reprise
 
 `readingHash = sha256(READING_VERSION | empreinte des consignes | empreinte du périmètre)`. Une page est relue par l'IA si elle n'a pas de
 lecture gardée, si son contenu ou `readingHash` ont changé, ou avec `--force`. Si seule l'inventaire a changé (`verifyHash`), la vérification
 et l'écriture sont refaites à partir de la lecture gardée (`attrs.reading`), sans IA. Sinon la page est sautée. Une page en erreur garde sa
-lecture, son empreinte et ses rejets précédents et est reprise au passage suivant. La première analyse après la mise à jour relit donc toutes
+lecture, son empreinte et ses rejets précédents et est reprise au passage suivant. L'année de lecture est gardée (`readingYear`) :
+l'année suivante, seules les pages dont la lecture a une période ancienne ou cible (page ou lien) sont relues. En fin de passage, les
+pages vérifiées pendant le passage dont un lien est resté `toValidate` sont vérifiées et écrites une seconde fois, sans IA : la règle
+« base d'une autre application » et la corroboration par une autre page ne dépendent alors plus de l'ordre de lecture. La première analyse après la mise à jour relit donc toutes
 les pages. Sans IA, les pages sont stockées et rien n'est déduit.
 
 ### Consignes, environnements, équipes
