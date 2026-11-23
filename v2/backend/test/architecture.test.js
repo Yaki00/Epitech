@@ -54,10 +54,17 @@ describe("contrôle d'une page d'architecture", () => {
     };
     srv('ohbprd01', '10.1.0.1', 'PROD', 'orderhub');
     srv('ohbprd02', '10.1.0.2', 'PROD', 'orderhub');
-    srv('ohbrec01', '10.2.0.1', 'RECETTE', 'orderhub');
+    srv('ohbrec01', '10.2.0.1', 'STG', 'orderhub');
     srv('altoprd01', '10.3.0.1', 'PROD', 'alto');
     m = createMatcher(PERIMETER, repo);
   });
+
+  // serveurs cités comme le rendrait la vérification d'une lecture : nom, nœud rapproché, présence à l'inventaire
+  const citedOf = (...names) =>
+    names.map((name) => {
+      const node = repo.resolve(name).find((n) => n.type === 'server');
+      return { nodeId: node ? node.id : null, name: node ? node.name : name, env: null, status: 'active', inInventory: Boolean(node), corroborated: false, evidence: name };
+    });
 
   const page = (title, rows, text = '') => {
     const tableText = rows.map((r) => `${r.Serveur} ${r.IP}`).join('\n');
@@ -78,8 +85,9 @@ describe("contrôle d'une page d'architecture", () => {
       { Serveur: 'vieuxsrv07', IP: '10.9.9.9' },
     ]);
     p.tables[0].rows.push({ Serveur: 'ohbprd02', IP: '10.1.0.99' });
-    const a = auditArchitecturePage(repo, m, p, 'application:orderhub', { now: Date.parse('2026-11-18') });
-    assert.equal(a.environment, 'prod');
+    const cited = citedOf('OHBPRD01', 'altoprd01', 'vieuxsrv07', '10.9.9.9', 'ohbprd02');
+    const a = auditArchitecturePage(repo, m, p, 'application:orderhub', { now: Date.parse('2026-11-18'), cited, env: 'PRD', topics: ['servers'] });
+    assert.equal(a.environment, 'PRD');
     assert.equal(a.expected, 2); // le serveur de recette n'est pas attendu dans une page de production
     assert.deepEqual(a.confirmed.sort(), ['ohbprd01', 'ohbprd02']);
     assert.deepEqual(a.missing, []);
@@ -96,7 +104,7 @@ describe("contrôle d'une page d'architecture", () => {
 
   test('page générale : tous les environnements attendus, rubriques absentes listées', () => {
     const p = page('OrderHub - Architecture', [{ Serveur: 'ohbprd01', IP: '10.1.0.1' }], 'Sauvegarde quotidienne. Supervision Naemon. Flux MQ vers la facturation.');
-    const a = auditArchitecturePage(repo, m, p, 'application:orderhub', { now: Date.parse('2020-02-01') });
+    const a = auditArchitecturePage(repo, m, p, 'application:orderhub', { now: Date.parse('2020-02-01'), cited: citedOf('ohbprd01'), env: null, topics: ['servers', 'backup', 'monitoring', 'flows'] });
     assert.equal(a.expected, 3);
     assert.deepEqual(a.missing.sort(), ['ohbprd02', 'ohbrec01']);
     assert.equal(a.completeness, 0.33);
@@ -111,8 +119,45 @@ describe("contrôle d'une page d'architecture", () => {
       { Serveur: 'ohbprd01', IP: '10.1.0.1' },
       { Serveur: 'ohbprd02', IP: '10.1.0.2' },
     ]);
-    const a = auditArchitecturePage(repo, m, p, 'application:orderhub', { now: Date.parse('2020-02-01') });
+    const a = auditArchitecturePage(repo, m, p, 'application:orderhub', { now: Date.parse('2020-02-01'), cited: citedOf('ohbprd01', 'ohbprd02'), env: 'PRD', topics: [] });
     assert.equal(a.verdict, 'cohérente avec les inventaires');
     assert.equal(a.ok, true);
+  });
+
+  test('audit uses cited servers and env from reading', () => {
+    // le texte de la page ne cite rien d'utile : seule la lecture compte
+    const p = page('Page sans mot utile', []);
+    p.sections = [{ heading: 'x', text: 'ohbprd01 ohbprd02 ohbrec01' }];
+    const none = auditArchitecturePage(repo, m, p, 'application:orderhub', { now: Date.parse('2020-02-01'), cited: [], env: null, topics: [] });
+    assert.equal(none.confirmed.length, 0);
+    assert.equal(none.expected, 3);
+    const rec = auditArchitecturePage(repo, m, p, 'application:orderhub', { now: Date.parse('2020-02-01'), cited: citedOf('ohbrec01'), env: 'STG', topics: [] });
+    assert.equal(rec.environment, 'STG');
+    assert.equal(rec.expected, 1); // seul le serveur de recette est attendu dans une page STG
+    assert.equal(rec.completeness, 1);
+    assert.deepEqual(rec.confirmed, ['ohbrec01']);
+    const prd = auditArchitecturePage(repo, m, p, 'application:orderhub', { now: Date.parse('2020-02-01'), cited: citedOf('ohbprd01'), env: 'PRD', topics: [] });
+    assert.equal(prd.environment, 'PRD');
+    assert.equal(prd.expected, 2);
+    assert.deepEqual(prd.missing, ['ohbprd02']);
+    // un serveur hors inventaire cité est inconnu ; l'IP d'un autre serveur du périmètre est signalée
+    const odd = auditArchitecturePage(repo, m, p, 'application:orderhub', { now: Date.parse('2020-02-01'), cited: [...citedOf('altoprd01'), { nodeId: 'server:nouveau', name: 'nouveau', inInventory: false, status: 'active', evidence: 'nouveau' }], env: null, topics: [] });
+    assert.deepEqual(odd.otherApp, [{ server: 'altoprd01', applications: ['Alto'] }]);
+    assert.deepEqual(odd.unknown, ['nouveau']);
+  });
+
+  test('completeness comes from topics', () => {
+    const p = page('Titre quelconque', [], 'Sauvegarde Supervision flux base de donnees');
+    const a = auditArchitecturePage(repo, m, p, 'application:orderhub', { now: Date.parse('2026-11-18'), cited: [], env: null, topics: ['backup', 'databases'] });
+    assert.equal(a.sections.backup, true);
+    assert.equal(a.sections.databases, true);
+    assert.equal(a.sections.flows, false); // le mot « flux » est dans le texte, mais l'IA ne l'a pas retenu
+    assert.equal(a.sections.monitoring, false);
+    assert.equal(a.sections.diagram, false);
+    assert.ok(a.absentSections.includes('flows'));
+    assert.ok(!a.absentSections.includes('backup'));
+    p.diagrams = [{ name: 'schema' }];
+    const b = auditArchitecturePage(repo, m, p, 'application:orderhub', { now: Date.parse('2026-11-18'), cited: [], env: null, topics: [] });
+    assert.equal(b.sections.diagram, true);
   });
 });

@@ -100,6 +100,28 @@ function createRepo(store) {
     store.indexEdge(k, row);
   }
 
+  /**
+   * Supprime les liens d'une page (même `sourceRef`) dont la source figure dans `sources`.
+   * Les liens des inventaires (autres sources) ne sont jamais touchés. Renvoie le nombre supprimé.
+   */
+  function removeEdgesBySourceRef(sourceRef, { sources = [] } = {}) {
+    const data = D();
+    const ref = String(sourceRef);
+    let n = 0;
+    for (const [k, e] of [...data.edges]) {
+      if (e.source_ref !== ref || !sources.includes(e.source)) continue;
+      data.edges.delete(k);
+      for (const [index, id] of [[data.edgesBySrc, e.src], [data.edgesByDst, e.dst]]) {
+        const set = index.get(id);
+        if (!set) continue;
+        set.delete(k);
+        if (!set.size) index.delete(id);
+      }
+      n++;
+    }
+    return n;
+  }
+
   /** Fusionne un patch dans les attributs d'un nœud ; une valeur undefined supprime l'attribut. */
   function patchNodeAttrs(id, patch) {
     const n = D().nodes.get(id);
@@ -209,6 +231,7 @@ function createRepo(store) {
     addAlias,
     resolve,
     addEdge,
+    removeEdgesBySourceRef,
     getNode,
     patchNodeAttrs,
     patchEdgeAttrs,

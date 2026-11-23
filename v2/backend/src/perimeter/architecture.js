@@ -11,6 +11,7 @@
  */
 const { normalize } = require('./perimeter');
 const { canonicalHost, isIPv4 } = require('../resolve/entities');
+const { serverEnv } = require('../lib/environment');
 
 // mots du titre ou des pages parentes qui signalent une page d'architecture (modifiables dans perimeter.json)
 const DEFAULT_KEYWORDS = [
@@ -107,12 +108,6 @@ function pageEnvironment(title) {
   if (/\b(prod|production|prd)\b/.test(t)) return 'prod';
   return null;
 }
-const serverEnv = (s) => {
-  const e = normalize(s?.attrs?.environment || '');
-  if (!e) return null;
-  return /\b(prod|production|prd|p)\b/.test(e) && !/pre/.test(e) ? 'prod' : 'nonprod';
-};
-
 const ipsOf = (node) =>
   String(node?.attrs?.ip || '')
     .split(/[,;|\s]+/)
@@ -120,64 +115,63 @@ const ipsOf = (node) =>
 
 /**
  * Contrôle d'une page d'architecture pour une application du périmètre.
+ * Ce que la page cite vient de la lecture vérifiée (aucun repérage dans le texte).
  * @param {object} repo
  * @param {object} matcher  createMatcher(perimeter, repo)
- * @param {object} page     page analysée (title, sections, tables, entities, diagrams, updatedAt)
+ * @param {object} page     page analysée (title, tables, diagrams, updatedAt)
  * @param {string} appId
- * @param {{now?: number}} [opt]
+ * @param {{now?: number, cited?: object[], env?: string|null, topics?: string[]}} [opt]
+ *   cited : `Verified.servers` ({ nodeId, name, inInventory }) ; env : PRD, STG, DEV ou null ;
+ *   topics : rubriques que la lecture a trouvées dans la page
  */
-function auditArchitecturePage(repo, matcher, page, appId, { now = Date.now() } = {}) {
+function auditArchitecturePage(repo, matcher, page, appId, { now = Date.now(), cited: citedServers = [], env = null, topics = [] } = {}) {
   const app = matcher.apps.find((a) => a.id === appId);
-  const env = pageEnvironment(page.title);
   const reference = [...app.servers].map((id) => repo.getNode(id)).filter(Boolean);
   // une page "production" n'a pas à lister les serveurs de recette (si l'inventaire donne l'environnement)
   const expected = env ? reference.filter((s) => serverEnv(s) === null || serverEnv(s) === env) : reference;
 
-  const text = [page.title, ...(page.sections || []).map((s) => `${s.heading || ''}\n${s.text || ''}`)].join('\n');
-  // valeurs des colonnes "serveur" des tableaux : candidats même s'ils ne suivent aucun motif de nom
-  const tableHosts = [];
+  // IP lues dans les tableaux "serveur / IP" de la page, à comparer à l'inventaire pour les serveurs cités
   const ipChecks = [];
   for (const t of page.tables || []) {
     const hostCol = (t.headers || []).find((h) => headerIs(h, HOST_HEADERS));
     const ipCol = (t.headers || []).find((h) => headerIs(h, IP_HEADERS));
-    if (!hostCol) continue;
+    if (!hostCol || !ipCol) continue;
     for (const row of t.rows || []) {
       const host = String(row[hostCol] || '').trim().split(/[\s,;/]+/)[0];
-      if (!host) continue;
-      tableHosts.push(host);
-      if (ipCol) ipChecks.push({ host, ips: String(row[ipCol] || '').split(/[\s,;/]+/).filter(isIPv4) });
+      if (host) ipChecks.push({ host, ips: String(row[ipCol] || '').split(/[\s,;/]+/).filter(isIPv4) });
     }
   }
 
-  const cited = matcher.serversIn(text, [...(page.entities?.hosts || []), ...(page.entities?.ips || []), ...tableHosts]);
+  const cited = new Set(citedServers.filter((c) => c.nodeId && repo.getNode(c.nodeId)).map((c) => c.nodeId));
   const expectedIds = new Set(expected.map((s) => s.id));
   const name = (id) => repo.getNode(id)?.name || id;
 
   const confirmed = [...cited].filter((id) => app.servers.has(id));
   const missing = expected.filter((s) => !cited.has(s.id)).map((s) => s.name);
-  const otherApp = [...cited].filter((id) => !app.servers.has(id)).map((id) => ({ server: name(id), applications: matcher.apps.filter((a) => a.servers.has(id)).map((a) => a.name) }));
+  const otherApp = [...cited]
+    .filter((id) => !app.servers.has(id))
+    .map((id) => ({ server: name(id), applications: matcher.apps.filter((a) => a.servers.has(id)).map((a) => a.name) }))
+    .filter((o) => o.applications.length);
 
-  // hôtes du texte ou des tableaux qui ne correspondent à aucun serveur connu
-  const unknown = new Set();
-  for (const h of [...(page.entities?.hosts || []), ...tableHosts]) {
-    if (isIPv4(h)) continue;
-    if (!repo.resolve(h).some((n) => n.type === 'server')) unknown.add(canonicalHost(h) || h);
-  }
   const ipMismatch = [];
   const wrongIps = new Set();
   for (const c of ipChecks) {
     const [server] = repo.resolve(c.host).filter((n) => n.type === 'server');
-    const known = ipsOf(server && repo.getNode(server.id));
-    if (!server || !known.length || !c.ips.length) continue;
+    if (!server || !cited.has(server.id)) continue;
+    const known = ipsOf(repo.getNode(server.id));
+    if (!known.length || !c.ips.length) continue;
     const wrong = c.ips.filter((ip) => !known.includes(ip));
     for (const ip of wrong) wrongIps.add(ip);
     if (wrong.length) ipMismatch.push({ server: server.name, page: wrong, inventory: known });
   }
-  // une IP déjà signalée comme différente pour un serveur connu n'est pas comptée une 2e fois comme inconnue
-  const unknownIps = (page.entities?.ips || []).filter((ip) => !wrongIps.has(ip) && !repo.resolve(ip).some((n) => n.type === 'server'));
+  // serveurs ou IP cités que les inventaires ne connaissent pas (une IP déjà signalée comme différente n'est pas comptée deux fois)
+  const unknownNames = new Set();
+  for (const c of citedServers) {
+    if (c.inInventory || wrongIps.has(c.name)) continue;
+    unknownNames.add(isIPv4(c.name) ? c.name : canonicalHost(c.name) || c.name);
+  }
 
-  const all = normalize(text);
-  const sections = Object.fromEntries(Object.entries(SECTIONS).map(([k, words]) => [k, words.some((w) => hasWord(all, w))]));
+  const sections = Object.fromEntries(Object.keys(SECTIONS).map((k) => [k, (topics || []).includes(k)]));
   sections.diagram = (page.diagrams || []).length > 0;
 
   const updated = page.updatedAt ? new Date(page.updatedAt).getTime() : NaN;
@@ -189,7 +183,7 @@ function auditArchitecturePage(repo, matcher, page, appId, { now = Date.now() } 
   if (!expected.length) problems.push({ code: 'noReference' });
   if (missing.length) problems.push({ code: 'missing', n: missing.length });
   if (otherApp.length) problems.push({ code: 'otherApp', n: otherApp.length });
-  if (unknown.size || unknownIps.length) problems.push({ code: 'unknown', n: unknown.size + unknownIps.length });
+  if (unknownNames.size) problems.push({ code: 'unknown', n: unknownNames.size });
   if (ipMismatch.length) problems.push({ code: 'ipMismatch', n: ipMismatch.length });
   const absent = Object.entries(sections).filter(([, ok]) => !ok).map(([k]) => k);
   if (ageDays !== null && ageDays > 730) problems.push({ code: 'old', n: Math.round(ageDays / 365) });
@@ -201,7 +195,7 @@ function auditArchitecturePage(repo, matcher, page, appId, { now = Date.now() } 
     confirmed: confirmed.map(name),
     missing,
     otherApp,
-    unknown: [...unknown, ...unknownIps],
+    unknown: [...unknownNames],
     ipMismatch,
     sections,
     absentSections: absent,

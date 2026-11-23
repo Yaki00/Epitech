@@ -11,6 +11,15 @@
 // Les liens documentaires ne propagent pas une panne.
 const NON_PROPAGATING = new Set(['mentions', 'documented_in', 'monitored_by']);
 
+/**
+ * Lien hors impact : retiré, ancien ou cible (période lue par l'IA), à valider ou rattaché à une autre
+ * application (confiance). Les vues et le rapport d'écarts s'appuient sur la même règle.
+ */
+function isInactiveEdge(e) {
+  const a = (e && e.attrs) || {};
+  return Boolean(a.retired) || a.period === 'past' || a.period === 'target' || a.trust === 'toValidate' || a.trust === 'otherApp';
+}
+
 function traverse(repo, startId, { direction = 'upstream', maxDepth = 5, minConfidence = 0.5, edgeTypes = null, includeRetired = false } = {}) {
   const start = repo.getNode(startId);
   if (!start) return null;
@@ -24,7 +33,7 @@ function traverse(repo, startId, { direction = 'upstream', maxDepth = 5, minConf
       const edges = direction === 'upstream' ? repo.edgesTo(id) : repo.edgesFrom(id);
       for (const e of edges) {
         if (e.confidence < minConfidence) continue;
-        if (!includeRetired && e.attrs && e.attrs.retired) continue;
+        if (!includeRetired && isInactiveEdge(e)) continue;
         if (edgeTypes ? !edgeTypes.includes(e.type) : NON_PROPAGATING.has(e.type)) continue;
         const otherId = direction === 'upstream' ? e.src : e.dst;
         usedEdges.push(e);
@@ -81,4 +90,4 @@ function neighborhood(repo, id, { depth = 2 } = {}) {
   return { nodes: [...nodes.values()], edges: [...edges.values()] };
 }
 
-module.exports = { impactOf, dependenciesOf, neighborhood, traverse };
+module.exports = { impactOf, dependenciesOf, neighborhood, traverse, isInactiveEdge };
