@@ -74,7 +74,7 @@ describe('export APM des serveurs', () => {
     assert.equal(s.attrs.ram, '32');
     assert.equal(s.attrs.cpu, '2.4 GHz');
     assert.equal(s.attrs.cpuCores, '8');
-    assert.equal(s.attrs.usedFor, 'Application server');
+    assert.equal(s.attrs.environment, 'Application server');
   });
 
   test('recherche par FQDN et par chaque IP de la liste', () => {
@@ -86,10 +86,10 @@ describe('export APM des serveurs', () => {
     const app = repo.getNode('application:orderhub');
     assert.equal(app.attrs.auid, 'AUID-0042');
     assert.equal(app.attrs.profile, 'Standard');
-    assert.equal(app.attrs.confidentiality, 'C2');
+    assert.equal(app.attrs.criticality, 'C2');
     const billing = repo.edgesFrom('application:billing').filter((e) => e.type === 'runs_on').map((e) => e.dst).sort();
     assert.deepEqual(billing, ['server:srvbil02', 'server:srvohb01']);
-    assert.equal(repo.getNode('application:billing').attrs.confidentiality, 'C3');
+    assert.equal(repo.getNode('application:billing').attrs.criticality, 'C3');
   });
 
   test('lettre hors du fichier = erreur explicite', () => {

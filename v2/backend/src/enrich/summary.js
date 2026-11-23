@@ -9,6 +9,7 @@
  * - Le résumé n'est refait que si ces entrées changent (empreinte summaryHash).
  */
 const { stableHash, sha256 } = require('../lib/hash');
+const { appCriticality } = require('../lib/environment');
 
 const SYSTEM = `Tu rédiges la description d'une application d'entreprise pour une fiche d'inventaire,
 à partir d'extraits de sa documentation interne (Confluence) et de faits d'inventaire.
@@ -43,7 +44,7 @@ function applicationFacts(repo, app) {
     application: app.name,
     auid: app.attrs.auid || null,
     profil: app.attrs.profile || null,
-    confidentialite: app.attrs.confidentiality || null,
+    confidentialite: appCriticality(app),
     serveurs: servers.length,
     environnements: count(servers.map((s) => String(s.attrs.environment || '').toUpperCase())),
     os: count(servers.map((s) => [s.attrs.os, s.attrs.osVersion].filter(Boolean).join(' '))),

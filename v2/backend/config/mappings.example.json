@@ -43,7 +43,7 @@
       "fqdn": "CK",
       "ip": "F",
       "provisioner": "D",
-      "usedFor": "I",
+      "environment": "I",
       "os": "K",
       "osVersion": "L",
       "country": "AC",
@@ -61,7 +61,7 @@
         "attrs": {
           "auid": "B",
           "profile": "AH",
-          "confidentiality": "AI"
+          "criticality": "AI"
         }
       }
     ]

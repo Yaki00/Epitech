@@ -20,11 +20,24 @@ beforeEach(() => {
 });
 
 describe('vues API', () => {
+  test('criticité depuis confidentiality, environnements limités à PRD/STG/DEV, env des serveurs recherchés', () => {
+    const x = repo.upsertNode({ type: 'application', key: 'XAPP', name: 'XAPP', source: 'apm', attrs: { confidentiality: 'C3' } });
+    const sa = repo.upsertNode({ type: 'server', key: 'srvx01', source: 'apm', attrs: { environment: 'Pré-production' } });
+    const sb = repo.upsertNode({ type: 'server', key: 'srvx02', source: 'apm', attrs: { environment: 'recette' } });
+    repo.addEdge({ src: x, dst: sa, type: 'runs_on', source: 'apm' });
+    repo.addEdge({ src: x, dst: sb, type: 'runs_on', source: 'apm' });
+    const app = views.listApplications(repo).find((a) => a.name === 'XAPP');
+    assert.equal(app.criticality, 'C3');
+    assert.deepEqual(app.environments, ['STG']);
+    assert.equal(views.searchServers(repo, 'srvx01')[0].env, 'STG');
+    assert.equal(views.searchServers(repo, 'srvx02')[0].env, null);
+    assert.equal(views.applicationDetail(repo, x).serverList.find((n) => n.name === 'srvx01').env, 'STG');
+  });
   test('liste des applications avec compteurs et environnements des serveurs', () => {
     const alto = views.listApplications(repo).find((a) => a.name === 'ALTO');
     assert.equal(alto.servers, 2);
     assert.equal(alto.databases, 1);
-    assert.deepEqual(alto.environments.sort(), ['DEV', 'PROD']);
+    assert.deepEqual(alto.environments, ['DEV', 'PRD']);
     assert.equal(alto.criticality, 'Medium');
   });
   test('fiche : serveurs dédoublonnés (meilleure confiance, toutes les sources)', () => {

@@ -4,34 +4,28 @@
  * (testées directement par jest).
  */
 
-const splitList = (v) =>
-  Array.isArray(v)
-    ? v
-    : String(v || '')
-        .split(/[,;|]/)
-        .map((s) => s.trim())
-        .filter(Boolean);
+const { serverEnv, appCriticality, ENVS } = require('../lib/environment');
 
 /** Résumé d'une application : compteurs et infos de la fiche. */
 function applicationSummary(repo, app) {
   const out = repo.edgesFrom(app.id);
   const serverIds = new Set(out.filter((e) => e.type === 'runs_on').map((e) => e.dst));
   const dbIds = new Set(out.filter((e) => e.type === 'uses_db').map((e) => e.dst));
-  const envs = new Set(splitList(app.attrs.environments || app.attrs.environment));
+  const envs = new Set();
   for (const id of serverIds) {
-    const s = repo.getNode(id);
-    for (const env of splitList(s?.attrs.environment)) envs.add(env.toUpperCase());
+    const env = serverEnv(repo.getNode(id));
+    if (env) envs.add(env);
   }
   return {
     id: app.id,
     name: app.name,
     inPerimeter: Boolean(app.attrs.perimeter),
-    criticality: app.attrs.criticality || null,
+    criticality: appCriticality(app),
     owner: app.attrs.owner || null,
     supportTeam: app.attrs.supportTeam || null,
     description: app.attrs.description || null,
     summary: app.attrs.summary || null,
-    environments: [...envs],
+    environments: ENVS.filter((e) => envs.has(e)).sort(),
     servers: serverIds.size,
     databases: dbIds.size,
     lastSync: app.updatedAt || null,
@@ -56,7 +50,7 @@ function linkedNodes(repo, id, edgeType) {
   return [...best.entries()]
     .map(([dst, info]) => {
       const n = repo.getNode(dst);
-      return n && { id: n.id, name: n.name, type: n.type, attrs: n.attrs, confidence: info.confidence, sources: [...info.sources] };
+      return n && { id: n.id, name: n.name, type: n.type, attrs: n.attrs, ...(n.type === 'server' ? { env: serverEnv(n) } : {}), confidence: info.confidence, sources: [...info.sources] };
     })
     .filter(Boolean)
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -107,10 +101,11 @@ function searchServers(repo, q, limit = 30) {
       id: s.id,
       name: s.name,
       attrs: s.attrs,
+      env: serverEnv(s),
       applications: [...new Set(repo.edgesTo(s.id).filter((e) => e.type === 'runs_on').map((e) => e.src))]
         .map((id) => repo.getNode(id))
         .filter(Boolean)
-        .map((a) => ({ id: a.id, name: a.name, criticality: a.attrs.criticality || null })),
+        .map((a) => ({ id: a.id, name: a.name, criticality: appCriticality(a) })),
     }));
 }
 
