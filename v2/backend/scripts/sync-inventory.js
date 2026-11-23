@@ -65,7 +65,7 @@ function main() {
         const { seen } = stats;
         const complete = stats.errors === 0 && records.length > 0 && seen.nodeIds.length > 0;
         delete stats.seen;
-        const change = history.recordImport({ source, seen, attrsById: seen.attrsById, complete });
+        const change = history.recordImport({ source, seen, attrsById: seen.attrsById, complete, repo });
         if (change) log.info(`${source} : ${change.added.length} ajout(s), ${change.removed.length} retrait(s), ${change.changed.length} modification(s)`);
         if (!complete) log.warn(`${source} : import incomplet (${stats.errors} erreur(s), ${records.length} ligne(s)), aucun retrait appliqué`);
         if (stats.nearMisses) {

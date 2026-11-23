@@ -29,7 +29,7 @@ beforeEach(() => {
 /** Importe, enregistre dans l'historique et applique les retraits, comme sync-inventory. */
 function run(history, records, { matcher = null, complete = true, keep } = {}) {
   const stats = ingestInventory(repo, { source: 'inv', records, mapping, matcher });
-  const change = history.recordImport({ source: 'inv', seen: stats.seen, attrsById: stats.seen.attrsById, complete: complete && stats.errors === 0 && records.length > 0 });
+  const change = history.recordImport({ source: 'inv', seen: stats.seen, attrsById: stats.seen.attrsById, complete: complete && stats.errors === 0 && records.length > 0, repo });
   history.applyRetirements(repo);
   return change;
 }
@@ -135,5 +135,35 @@ describe('historique des imports', () => {
     assert.ok(repo.allEdges().every((e) => !e.attrs.retired));
     // défense dans recordImport lui-même
     assert.equal(h.recordImport({ source: 'inv', seen: { nodeIds: [], edgeIds: [] }, attrsById: {}, complete: true }), null);
+  });
+
+  test('source jamais importée : un serveur marketplace n\'est pas retiré par un import APM seul', () => {
+    const h = createHistory(dir);
+    // serveur issu d'un import marketplace antérieur à l'historique (aucun instantané « marketplace »)
+    repo.upsertNode({ type: 'server', key: 'srvm', source: 'marketplace', attrs: { marketplace_row: 5 } });
+    run(h, [row('srv1', 'Alto')]); // premier import de la source « inv »
+    h.applyRetirements(repo);
+    assert.equal(repo.getNode('server:srvm').attrs.retired, undefined);
+    // et un serveur de la source suivie, lui, est bien retiré quand il disparaît
+    repo.upsertNode({ type: 'server', key: 'srvgone', source: 'inv', attrs: { inv_row: 9 } });
+    h.applyRetirements(repo);
+    assert.equal(repo.getNode('server:srvgone').attrs.retired, true);
+  });
+
+  test('changes.json ne liste que ce qui existe dans le graphe (lignes hors périmètre ignorées)', () => {
+    const h = createHistory(dir);
+    const file = path.join(dir, 'perimeter.json');
+    fs.writeFileSync(file, JSON.stringify({ applications: ['Alto'] }));
+    const matcher = createMatcher(loadPerimeter(file));
+    run(h, [row('srv1', 'Alto'), row('x1', 'Autre')], { matcher });
+    run(h, [row('srv1', 'Alto', '10.0.0.5'), row('srv2', 'Alto'), row('x1', 'Autre', '1.1.1.1'), row('x2', 'Autre'), row('x3', 'Autre')], { matcher });
+    const [last] = h.list(10);
+    assert.deepEqual(last.added.filter((id) => !id.includes('|')), ['server:srv2']);
+    assert.ok(last.added.every((id) => !id.includes('x2') && !id.includes('x3')));
+    assert.deepEqual(last.changed.map((c) => c.id), ['server:srv1']);
+    // le snapshot garde tout le fichier : x2 absent du suivant le ferait apparaître en retrait dans le fichier, pas dans l'historique
+    run(h, [row('srv1', 'Alto', '10.0.0.5'), row('srv2', 'Alto')], { matcher });
+    const removed = h.list(10)[0] ? h.list(10)[0].removed : [];
+    assert.ok(removed.every((id) => !id.includes('x')));
   });
 });

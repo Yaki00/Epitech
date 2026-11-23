@@ -2,6 +2,7 @@
 /**
  * Écarts entre l'inventaire, Confluence et Naemon, limités au périmètre (serveurs retirés exclus).
  */
+const { serverEnv } = require('../lib/environment');
 const { writeCsvReport } = require('../lib/report');
 
 const isRetired = (x) => Boolean(x && x.attrs && x.attrs.retired);
@@ -41,7 +42,7 @@ function computeGaps(repo, status) {
 /** Écrit ecarts-naemon.csv (une ligne par écart) et renvoie son chemin. */
 function writeGapsReport(dir, gaps) {
   const rows = [
-    ...gaps.notMonitored.map((s) => ['serveur sans supervision', s.name, (s.attrs && s.attrs.ip) || '', (s.attrs && s.attrs.environment) || '']),
+    ...gaps.notMonitored.map((s) => ['serveur sans supervision', s.name, (s.attrs && s.attrs.ip) || '', serverEnv(s) || '']),
     ...gaps.unknownMonitored.map((h) => ['hôte supervisé inconnu des inventaires', h, '', '']),
     ...gaps.citedNotInInventory.map((h) => ['serveur cité dans Confluence, absent des inventaires', h, '', '']),
   ];

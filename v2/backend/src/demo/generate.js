@@ -211,7 +211,7 @@ function generateDemo(repo, history, { seed = 42, now = Date.now(), dir = null }
       edgeIds: present.map((s) => `${appId(s.app.sigle)}|${s.id}|runs_on|${SOURCE}`),
     };
     const attrsById = Object.fromEntries(present.map((s) => [s.id, attrsAt(s, k)]));
-    history.recordImport({ source: SOURCE, seen, attrsById, complete: true });
+    history.recordImport({ source: SOURCE, seen, attrsById, complete: true, repo });
   }
   history.applyRetirements(repo);
 

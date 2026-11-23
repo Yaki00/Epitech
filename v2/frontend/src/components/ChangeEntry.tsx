@@ -14,8 +14,8 @@ import { edgeLabel, sourceLabel } from '../lib/sources';
 import { Badge } from './ui';
 
 /** « 2 ajouts, 1 retrait, 3 modifications » (liens comptés à part). */
-export function changeSummary(t: TFunction, c: Pick<Change, 'added' | 'removed' | 'changed'>, sep = ', '): string {
-  const n = changeCounts(c);
+export function changeSummary(t: TFunction, c: Pick<Change, 'added' | 'removed' | 'changed' | 'counts'>, sep = ', '): string {
+  const n = c.counts ?? changeCounts(c);
   const parts: string[] = [];
   if (n.addedNodes) parts.push(t('changes.added', { n: n.addedNodes }));
   if (n.removedNodes) parts.push(t('changes.removed', { n: n.removedNodes }));

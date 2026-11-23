@@ -23,7 +23,7 @@ function createHistory(dataDir, { keep = DEFAULT_KEEP } = {}) {
   /**
    * @returns {object|null} l'entrée d'historique créée (null : import incomplet, premier import ou rien de changé)
    */
-  function recordImport({ source, seen, attrsById = {}, complete = false }) {
+  function recordImport({ source, seen, attrsById = {}, complete = false, repo = null }) {
     if (!complete || !seen || !(seen.nodeIds || []).length) return null; // rien vu : on ne déduit rien
     const snaps = loadSnapshots();
     const prev = snaps[source];
@@ -34,12 +34,19 @@ function createHistory(dataDir, { keep = DEFAULT_KEEP } = {}) {
 
     const prevAll = new Set([...prev.nodeIds, ...prev.edgeIds]);
     const nextAll = new Set([...next.nodeIds, ...next.edgeIds]);
-    const added = [...nextAll].filter((id) => !prevAll.has(id));
-    const removed = [...prevAll].filter((id) => !nextAll.has(id));
+    // les instantanés gardent tout le fichier (retraits), mais l'historique ne parle que de ce qui existe dans le graphe
+    // (hors périmètre, une ligne du fichier n'est jamais importée : elle ne doit pas inonder les changements)
+    const exists = (id) => {
+      if (!repo) return true;
+      const ends = String(id).includes('|') ? String(id).split('|').slice(0, 2) : [id];
+      return ends.every((x) => Boolean(repo.getNode(x)));
+    };
+    const added = [...nextAll].filter((id) => !prevAll.has(id) && exists(id));
+    const removed = [...prevAll].filter((id) => !nextAll.has(id) && exists(id));
     const changed = [];
     for (const [id, now] of Object.entries(next.attrs)) {
       const before = prev.attrs[id];
-      if (!before) continue;
+      if (!before || !exists(id)) continue;
       for (const attr of new Set([...Object.keys(before), ...Object.keys(now)])) {
         if (String(before[attr] ?? '') !== String(now[attr] ?? '')) changed.push({ id, attr, before: before[attr] ?? null, after: now[attr] ?? null });
       }
@@ -67,9 +74,11 @@ function createHistory(dataDir, { keep = DEFAULT_KEEP } = {}) {
     for (const node of repo.listByType('server')) {
       // seuls les serveurs créés par un inventaire suivi sont concernés
       if (!sources.some((s) => node.attrs[`${s}_row`] !== undefined)) continue;
+      // une source jamais importée (aucun instantané) n'a rien « retiré » : on ne conclut pas à l'absence
+      const unseenSource = Object.keys(node.attrs).some((k) => /_row$/.test(k) && !snaps[k.slice(0, -4)]);
       if (liveNodes.has(node.id)) {
         if (node.attrs.retired) repo.patchNodeAttrs(node.id, { retired: undefined, retiredAt: undefined });
-      } else if (!node.attrs.retired) {
+      } else if (!node.attrs.retired && !unseenSource) {
         repo.patchNodeAttrs(node.id, { retired: true, retiredAt: t });
         nodes++;
       }

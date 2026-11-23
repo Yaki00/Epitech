@@ -64,4 +64,17 @@ describe('vues API', () => {
   test('config UI', () => {
     assert.deepEqual(views.uiConfig({ NAEMON_URL_TEMPLATE: 'http://n/{app}' }), { naemonUrlTemplate: 'http://n/{app}', sources: { servicenow: false, bitbucket: false } });
   });
+
+  test('serveur déplacé de A vers B : lien A retiré, plus actif sous A, recherche sans A', () => {
+    const a = repo.upsertNode({ type: 'application', key: 'APPA', name: 'APPA', source: 'apm' });
+    const b = repo.upsertNode({ type: 'application', key: 'APPB', name: 'APPB', source: 'apm' });
+    const srv = repo.upsertNode({ type: 'server', key: 'srvmv', source: 'apm', attrs: { environment: 'PRD' } });
+    repo.addEdge({ src: a, dst: srv, type: 'runs_on', source: 'apm' });
+    repo.addEdge({ src: b, dst: srv, type: 'runs_on', source: 'apm' });
+    repo.patchEdgeAttrs(repo.edgesFrom(a)[0].id, { retired: true });
+    const underA = views.applicationDetail(repo, a).serverList.find((n) => n.name === 'srvmv');
+    assert.equal(underA.retired, true);
+    assert.equal(views.applicationDetail(repo, b).serverList.find((n) => n.name === 'srvmv').retired, false);
+    assert.deepEqual(views.searchServers(repo, 'srvmv')[0].applications.map((x) => x.name), ['APPB']);
+  });
 });

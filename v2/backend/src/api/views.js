@@ -69,16 +69,18 @@ function linkedNodes(repo, id, edgeType, ctx = null) {
   const best = new Map();
   for (const e of repo.edgesFrom(id).filter((x) => x.type === edgeType)) {
     const prev = best.get(e.dst);
+    const live = Boolean(prev && prev.live) || !isRetired(e); // actif tant qu'un lien non retiré existe
     if (prev && prev.confidence >= e.confidence) {
       prev.sources.add(e.source);
+      prev.live = live;
       continue;
     }
-    best.set(e.dst, { confidence: e.confidence, sources: new Set([...(prev?.sources || []), e.source]) });
+    best.set(e.dst, { confidence: e.confidence, live, sources: new Set([...(prev?.sources || []), e.source]) });
   }
   return [...best.entries()]
     .map(([dst, info]) => {
       const n = repo.getNode(dst);
-      return n && { id: n.id, name: n.name, type: n.type, attrs: n.attrs, retired: isRetired(n), ...(n.type === 'server' ? { env: serverEnv(n), state: serverState(ctx, n.id) } : {}), confidence: info.confidence, sources: [...info.sources] };
+      return n && { id: n.id, name: n.name, type: n.type, attrs: n.attrs, retired: isRetired(n) || !info.live, ...(n.type === 'server' ? { env: serverEnv(n), state: serverState(ctx, n.id) } : {}), confidence: info.confidence, sources: [...info.sources] };
     })
     .filter(Boolean)
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -132,7 +134,7 @@ function searchServers(repo, q, limit = 30, ctx = null) {
       env: serverEnv(s),
       retired: isRetired(s),
       state: serverState(ctx, s.id),
-      applications: [...new Set(repo.edgesTo(s.id).filter((e) => e.type === 'runs_on').map((e) => e.src))]
+      applications: [...new Set(repo.edgesTo(s.id).filter((e) => e.type === 'runs_on' && !isRetired(e)).map((e) => e.src))]
         .map((id) => repo.getNode(id))
         .filter(Boolean)
         .map((a) => ({ id: a.id, name: a.name, criticality: appCriticality(a) })),

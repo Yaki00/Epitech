@@ -86,9 +86,21 @@ function withLabels(repo, entry) {
   return { ...entry, labels };
 }
 
-function changesView(d, limit = 20) {
+/**
+ * Historique des imports. `cap` : nombre maximal d'identifiants gardés par liste (accueil, interrogé chaque minute) ;
+ * l'entrée porte alors `counts` (totaux réels, mêmes catégories que le résumé de l'interface) et `truncated`.
+ */
+function changesView(d, limit = 20, { cap = null } = {}) {
   if (!d.history) return [];
-  return d.history.list(limit).map((e) => withLabels(d.repo, e));
+  return d.history.list(limit).map((e) => {
+    if (!cap) return withLabels(d.repo, e);
+    const isLink = (id) => String(id).includes('|');
+    const nodes = (ids) => ids.filter((id) => !isLink(id)).length;
+    const counts = { addedNodes: nodes(e.added), removedNodes: nodes(e.removed), addedLinks: e.added.length - nodes(e.added), removedLinks: e.removed.length - nodes(e.removed), changed: e.changed.length };
+    const cut = { ...e, added: e.added.slice(0, cap), removed: e.removed.slice(0, cap), changed: e.changed.slice(0, cap) };
+    const truncated = cut.added.length < e.added.length || cut.removed.length < e.removed.length || cut.changed.length < e.changed.length;
+    return { ...withLabels(d.repo, cut), counts, truncated };
+  });
 }
 
 function sourcesView(d) {
@@ -166,7 +178,7 @@ function overviewView(d) {
     alerts,
     atRisk,
     sources: sourcesView(d),
-    recentChanges: changesView(d, 5),
+    recentChanges: changesView(d, 5, { cap: 20 }),
     gaps: { counts: gapsView(d).gaps.counts, available: Boolean(ctx.status) },
     lowestDocs: appRows
       .slice()

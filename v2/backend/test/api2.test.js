@@ -35,6 +35,18 @@ describe('API v2 (graphe démo)', () => {
   const app = createApp({ repo: ctx.repo, llm: null, poller: ctx.poller, history: ctx.history, config: ctx.config });
   const get = (url) => request(app).get(url);
 
+  test('overview : changements récents plafonnés, totaux exacts ; /api/changes reste complet', () => {
+    const { changesView } = require('../src/api/views2');
+    const added = Array.from({ length: 100 }, (_, i) => `server:s${i}`).concat(['application:a|server:s1|runs_on|apm']);
+    const history = { list: () => [{ at: '2026-11-20T10:00:00.000Z', source: 'apm', added, removed: [], changed: [] }] };
+    const d = { repo: ctx.repo, history };
+    const [capped] = changesView(d, 5, { cap: 20 });
+    assert.equal(capped.added.length, 20);
+    assert.equal(capped.truncated, true);
+    assert.deepEqual(capped.counts, { addedNodes: 100, removedNodes: 0, addedLinks: 1, removedLinks: 0, changed: 0 });
+    assert.equal(changesView(d, 5)[0].added.length, 101);
+  });
+
   test('GET /api/overview : forme attendue', async () => {
     const r = await get('/api/overview').expect(200);
     const o = r.body;

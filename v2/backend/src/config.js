@@ -95,7 +95,8 @@ const config = {
 
   // supervision Naemon : off (défaut), thruk (API REST), csv (export Thruk) ; mock en mode démo
   naemon: {
-    source: ['thruk', 'csv', 'mock'].includes(env('NAEMON_SOURCE', 'off').trim().toLowerCase()) ? env('NAEMON_SOURCE', 'off').trim().toLowerCase() : 'off',
+    // « mock » n'existe qu'en démo (le serveur branche alors son propre simulateur) : ailleurs il vaut « off »
+    source: ['thruk', 'csv'].includes(env('NAEMON_SOURCE', 'off').trim().toLowerCase()) ? env('NAEMON_SOURCE', 'off').trim().toLowerCase() : 'off',
     thrukUrl: env('NAEMON_THRUK_URL', ''),
     token: env('NAEMON_TOKEN', ''),
     user: env('NAEMON_USER', ''),

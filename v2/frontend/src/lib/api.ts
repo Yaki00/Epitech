@@ -72,6 +72,17 @@ export interface Change {
   removed: string[];
   changed: ChangeAttr[];
   labels: Record<string, string>;
+  /** Accueil seulement : listes tronquées, ces totaux restent exacts. */
+  counts?: ChangeCounts;
+  truncated?: boolean;
+}
+
+export interface ChangeCounts {
+  addedNodes: number;
+  removedNodes: number;
+  addedLinks: number;
+  removedLinks: number;
+  changed: number;
 }
 
 // ---------- /api/config ----------

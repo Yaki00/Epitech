@@ -64,4 +64,12 @@ describe('writeGapsReport', () => {
     assert.ok(text.includes('hostinconnu01'));
     assert.ok(text.includes('srvghost01'));
   });
+
+  test('la colonne environnement du CSV est normalisée (PRD, pas « prod »)', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lyra-ecarts-env-'));
+    const file = writeGapsReport(dir, { notMonitored: [{ name: 'srvz', attrs: { environment: 'prod' } }, { name: 'srvq', attrs: { environment: 'inconnu' } }], unknownMonitored: [], citedNotInInventory: [] });
+    const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/);
+    assert.ok(lines.some((l) => l.includes('srvz') && /PRD/.test(l) && !/prod/.test(l)));
+    assert.ok(lines.some((l) => l.includes('srvq') && !/inconnu/.test(l)));
+  });
 });

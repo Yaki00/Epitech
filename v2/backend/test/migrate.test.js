@@ -136,4 +136,23 @@ describe('migrateFromV1', () => {
     assert.match(def.description, /récupération assurée par la v1/);
     assert.equal(jobDefinitions({ CONFLUENCE_BASE_URL: 'https://x' }).confluence.steps[0][0], 'fetch-confluence.js');
   });
+
+  test('clé en double dans le .env de la v1 : la dernière valeur est lue, comme dotenv', () => {
+    const { parseEnv } = require('../../scripts/lib/migrate');
+    const text = 'CONFLUENCE_EXPORT_DIR=./ancien\nPORT=3001\nCONFLUENCE_EXPORT_DIR=./actuel\n';
+    assert.equal(parseEnv(text).CONFLUENCE_EXPORT_DIR, './actuel');
+    assert.equal(parseEnv(text).CONFLUENCE_EXPORT_DIR, dotenv.parse(text).CONFLUENCE_EXPORT_DIR);
+  });
+
+  test('migrated vrai seulement après une vraie reprise ; verrou et .tmp du store non copiés', () => {
+    const t = makeTree();
+    write(path.join(t.v1b, 'data', 'store', '.sync.lock'), '123');
+    write(path.join(t.v1b, 'data', 'store', 'g.json.tmp'), '{');
+    const r = migrateFromV1({ v1Root: t.v1Root, v2Root: t.v2Root, log: () => {} });
+    assert.equal(r.migrated, true);
+    assert.ok(fs.existsSync(path.join(t.v2b, 'data', 'store', 'apps.json')));
+    assert.ok(!fs.existsSync(path.join(t.v2b, 'data', 'store', '.sync.lock')));
+    assert.ok(!fs.existsSync(path.join(t.v2b, 'data', 'store', 'g.json.tmp')));
+    assert.ok(!migrateFromV1({ v1Root: t.v1Root, v2Root: t.v2Root, log: () => {} }).migrated);
+  });
 });
