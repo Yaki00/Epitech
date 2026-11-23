@@ -7,40 +7,11 @@ const path = require('path');
 const { openStore } = require('../src/store/store');
 const { createRepo } = require('../src/store/repo');
 const { loadPerimeter, createMatcher, ensurePerimeterNodes } = require('../src/perimeter/perimeter');
-const { architectureScore, auditArchitecturePage, pageEnvironment } = require('../src/perimeter/architecture');
-const { extractEntities } = require('../src/resolve/entities');
+const { auditArchitecturePage } = require('../src/perimeter/architecture');
 
 const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'lyra-archi-')), 'perimeter.json');
 fs.writeFileSync(file, JSON.stringify({ applications: ['OrderHub', 'Alto'] }));
 const PERIMETER = loadPerimeter(file);
-
-const noEntities = { hosts: [], ips: [] };
-
-describe("reconnaître une page d'architecture", () => {
-  test('par le titre, y compris un DAT', () => {
-    assert.ok(architectureScore({ title: 'OrderHub - Architecture technique' }).score >= 0.8);
-    assert.ok(architectureScore({ title: 'DAT OrderHub v3' }).score >= 0.8);
-    assert.ok(architectureScore({ title: 'Serveurs de production' }).score >= 0.8);
-  });
-  test('par un tableau serveurs / IP, sans mot-clé dans le titre', () => {
-    const r = architectureScore({ title: 'Liste', tables: [{ headers: ['Hostname', 'Adresse IP', 'Rôle'], rows: [] }] });
-    assert.equal(r.score, 0.7);
-  });
-  test('pas une page de contacts ni une page quelconque', () => {
-    assert.ok(architectureScore({ title: 'Contacts', tables: [{ headers: ['Nom', 'Téléphone', 'Adresse'], rows: [] }] }).score < 0.6);
-    assert.ok(architectureScore({ title: 'Réunion du lundi' }).score < 0.6);
-  });
-  test('page parente seule : pas suffisant', () => {
-    assert.ok(architectureScore({ title: 'Ports ouverts' }, { ancestors: ['Architecture'] }).score < 0.6);
-  });
-  test('environnement de la page', () => {
-    assert.equal(pageEnvironment('Serveurs de production'), 'prod');
-    assert.equal(pageEnvironment('Serveurs PRD'), 'prod');
-    assert.equal(pageEnvironment('Architecture recette'), 'nonprod');
-    assert.equal(pageEnvironment('Architecture préproduction'), 'nonprod');
-    assert.equal(pageEnvironment('Architecture'), null);
-  });
-});
 
 describe("contrôle d'une page d'architecture", () => {
   let repo;
@@ -74,7 +45,6 @@ describe("contrôle d'une page d'architecture", () => {
       updatedAt: '2020-01-15T10:00:00Z',
       sections: [{ heading: 'Serveurs', text: `${text}\n${tableText}` }],
       tables: [{ headers: ['Serveur', 'IP', 'Rôle'], rows }],
-      entities: extractEntities(`${text}\n${tableText}`),
       diagrams: [],
     };
   };

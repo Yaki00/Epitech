@@ -9,7 +9,6 @@
  * l'ingestion reprend les diagrammes et macros depuis le storage (voir mergeStorageMacros).
  */
 const { parseXml, walk, textOf, removeElements, isObsolete } = require('../../lib/xml');
-const { extractEntities } = require('../../resolve/entities');
 const { tableToJson, tableToText } = require('./storage');
 
 const HEADING = /^h([1-6])$/;
@@ -154,7 +153,6 @@ function parseViewPage(html, meta = {}) {
     macros,
     diagrams,
     jiraKeys: [...jiraKeys],
-    entities: extractEntities(text),
     obsoleteFragments,
   };
 }

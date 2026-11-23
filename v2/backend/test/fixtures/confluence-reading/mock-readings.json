@@ -1,0 +1,32 @@
+{
+  "OrderHub - Architecture": {
+    "page": { "kind": "architecture", "period": "current", "env": "PRD", "topics": ["servers", "databases", "contacts"] },
+    "applications": [{ "name": "OrderHub", "written": "OrderHub", "role": "subject", "evidence": "OrderHub tourne sur srvorh01" }],
+    "entities": [
+      { "name": "srvorh01", "type": "server", "env": "PRD", "ip": "10.20.40.11", "status": "active", "evidence": "srvorh01 | 10.20.40.11" },
+      { "name": "srvnew01", "type": "server", "env": "PRD", "ip": "10.20.40.12", "status": "active", "evidence": "srvnew01 | 10.20.40.12" },
+      { "name": "ORA_ORH", "type": "database", "env": null, "ip": null, "status": "active", "evidence": "la base ORA_ORH" },
+      { "name": "srvfake09", "type": "server", "env": null, "ip": null, "status": "active", "evidence": "srvfake09 en secours" }
+    ],
+    "links": [
+      { "from": "OrderHub", "to": "srvorh01", "type": "runs_on", "evidence": "OrderHub tourne sur srvorh01" },
+      { "from": "OrderHub", "to": "srvnew01", "type": "runs_on", "evidence": "le nouveau serveur srvnew01 en production" },
+      { "from": "OrderHub", "to": "ORA_ORH", "type": "uses_db", "evidence": "OrderHub → ORA_ORH" }
+    ],
+    "owners": [{ "name": "Alice Martin", "kind": "person", "application": "OrderHub", "role": "owner", "evidence": "Responsable : Alice Martin" }]
+  },
+  "OrderHub - Architecture 2018": {
+    "page": { "kind": "architecture", "period": "past", "env": null, "topics": ["servers"] },
+    "applications": [{ "name": "OrderHub", "written": "OrderHub", "role": "subject", "evidence": "OrderHub tournait sur srvold01" }],
+    "entities": [{ "name": "srvold01", "type": "server", "env": null, "ip": null, "status": "decommissioned", "evidence": "srvold01, arrêté depuis la migration" }],
+    "links": [{ "from": "OrderHub", "to": "srvold01", "type": "runs_on", "evidence": "OrderHub tournait sur srvold01" }],
+    "owners": []
+  },
+  "CR réunion d'équipe du 12/11": {
+    "page": { "kind": "meeting", "period": "current", "env": null, "topics": [] },
+    "applications": [{ "name": "OrderHub", "written": "Ordrehub", "role": "cited", "evidence": "Ordrehub : la montée de version est prévue" }],
+    "entities": [],
+    "links": [],
+    "owners": []
+  }
+}

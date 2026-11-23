@@ -185,7 +185,7 @@ async function main() {
       const { parseViewPage } = require('../src/parse/confluence/viewHtml');
       const page = parseViewPage(sample.html, sample.p);
       info(
-        `exemple "${sample.p.title}" : ${page.sections.length} sections, ${page.tables.length} tableaux, ${page.entities.ips.length} IP, ${page.entities.hosts.length} hôtes, ${page.diagrams.length} diagrammes, ${page.obsoleteFragments} passages barrés`
+        `exemple "${sample.p.title}" : ${page.sections.length} sections, ${page.tables.length} tableaux, ${page.diagrams.length} diagrammes, ${page.obsoleteFragments} passages barrés`
       );
     }
   });

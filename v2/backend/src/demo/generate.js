@@ -126,7 +126,6 @@ function buildDemoPerimeter() {
   return {
     applications: APPS.map((a, i) => ({ name: a.name, aliases: [a.sigle], auid: `AUID-${String(101 + i)}`, naemonHostgroups: [] })),
     ignoreOtherApplications: true,
-    architectureKeywords: null,
     hash: 'demo',
   };
 }

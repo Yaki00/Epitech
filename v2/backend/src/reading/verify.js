@@ -169,4 +169,4 @@ function verifyReading(reading, ctx) {
   return { kind: page.kind, period: page.period === undefined ? 'current' : page.period, env: page.env || null, topics: page.topics || [], apps, servers, links, owners, rejected };
 }
 
-module.exports = { verifyReading };
+module.exports = { verifyReading, DOC_SOURCES };

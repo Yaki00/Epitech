@@ -20,8 +20,8 @@ function jobDefinitions(env = process.env) {
     confluence: {
       label: 'Confluence',
       description: fetchOff
-        ? "Analyse l'export existant avec l'IA, puis met à jour les résumés (récupération assurée par la v1, CONFLUENCE_FETCH=false)"
-        : 'Récupère les pages modifiées, les analyse avec l\'IA, puis met à jour les résumés',
+        ? "Lecture des pages de l'export existant par l'IA, puis mise à jour des résumés (récupération assurée par la v1, CONFLUENCE_FETCH=false)"
+        : "Récupère les pages modifiées, lecture des pages par l'IA, puis mise à jour des résumés",
       steps: [...confluenceFetch, ['sync-confluence.js', '--llm'], ['summarize-apps.js']],
     },
     apm: { label: 'APM', description: "Télécharge l'export s'il a un lien, puis l'importe", steps: [['fetch-inventory.js', 'apm'], ['sync-inventory.js', 'apm']] },

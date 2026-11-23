@@ -51,6 +51,8 @@ const config = {
     maxTokens: { extract: int('LLM_MAX_TOKENS_EXTRACT', 4096) },
     concurrency: int('LLM_CONCURRENCY', 4),
     mock: bool('LLM_MOCK', 'false'),
+    // avec LLM_MOCK : lectures de pages préparées ({ "<titre>": lecture }), sinon lectures vides
+    mockReadingsFile: env('LLM_MOCK_READINGS', '') ? path.resolve(ROOT, env('LLM_MOCK_READINGS', '')) : '',
     cacheDir: path.resolve(ROOT, env('LLM_CACHE_DIR', './data/cache/llm')),
     // Certaines passerelles n'acceptent pas response_format : on peut le couper.
     jsonMode: bool('LLM_JSON_MODE', 'true'),
@@ -91,6 +93,8 @@ const config = {
 
   // applications suivies (liste fermée) : absent = tout est analysé
   perimeterFile: path.resolve(ROOT, env('PERIMETER_FILE', './config/perimeter.json')),
+  // lecture des pages par l'IA : taille d'un morceau de page (caractères) envoyé en un appel
+  reading: { chunkChars: Math.max(1000, int('READING_CHUNK_CHARS', 12000) || 12000) },
   // consignes de lecture pour l'IA (texte libre, facultatif)
   consignesFile: path.resolve(ROOT, env('CONSIGNES_FILE', './config/consignes-ia.md')),
   // rapports lisibles dans Excel (pages par application, orthographes rencontrées)

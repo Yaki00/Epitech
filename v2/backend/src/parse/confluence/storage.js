@@ -5,7 +5,6 @@
  * pièces jointes, images, diagrammes draw.io/Gliffy, tickets Jira, entités (IP, hôtes…).
  */
 const { parseXml, walk, textOf, removeElements, isObsolete } = require('../../lib/xml');
-const { extractEntities } = require('../../resolve/entities');
 
 const HEADING = /^h([1-6])$/;
 const param = (macro, name) => {
@@ -133,7 +132,6 @@ function parseStoragePage(storage, meta = {}) {
     macros,
     diagrams,
     jiraKeys: [...jiraKeys],
-    entities: extractEntities(text),
     obsoleteFragments,
   };
 }

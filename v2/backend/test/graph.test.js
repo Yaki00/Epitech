@@ -8,9 +8,7 @@ const { createRepo } = require('../src/store/repo');
 const { ingestInventory } = require('../src/ingest/inventory');
 const { ingestConfluencePage } = require('../src/ingest/confluence');
 const { parseStoragePage } = require('../src/parse/confluence/storage');
-const { parseDrawio } = require('../src/parse/confluence/drawio');
 const { impactOf, dependenciesOf, neighborhood, isInactiveEdge } = require('../src/graph/impact');
-const { applyRelations, sanitize } = require('../src/enrich/relations');
 
 const marketplace = [
   { Hostname: 'SRVALTO01.dom.example.com', IP: '10.20.30.41', RAM: '16', Application: 'ALTO' },
@@ -71,53 +69,23 @@ describe('impact', () => {
 });
 
 describe('Confluence -> graphe', () => {
-  test('mentions, documentation et liens draw.io entre entités connues', () => {
+  test('la page devient un nœud document, sans mention ni lien draw.io (seule la lecture IA en écrit)', () => {
     const xml = fs.readFileSync(path.join(__dirname, 'fixtures/page-alto.xml'), 'utf8');
     const page = parseStoragePage(xml, { id: '42', title: 'ALTO' });
-    const drawio = parseDrawio(`<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>
-      <mxCell id="a" value="ALTO" vertex="1" parent="1"/><mxCell id="b" value="ORA_ALTO" vertex="1" parent="1"/>
-      <mxCell id="c" value="Inconnu" vertex="1" parent="1"/>
-      <mxCell id="e" edge="1" source="a" target="b" parent="1"/><mxCell id="f" edge="1" source="a" target="c" parent="1"/>
-    </root></mxGraphModel>`);
-    const stats = ingestConfluencePage(repo, page, { drawioResults: [drawio] });
-    assert.ok(stats.mentions >= 2);
-    assert.equal(stats.diagramLinks, 1);
-    assert.ok(stats.unresolved.includes('ALTO -> Inconnu'));
-    const uses = repo.edgesFrom('application:alto').find((e) => e.type === 'uses_db');
-    assert.equal(uses.dst, 'database:ora_alto');
-    assert.equal(uses.source, 'drawio');
-    // si la base tombe, ALTO est impactée ; la page Confluence (mentions) ne propage pas
+    const id = ingestConfluencePage(repo, page, { url: 'https://wiki.example.local/42', attrs: { folder: 'x' } });
+    assert.equal(id, 'document:confluence-42');
+    assert.equal(repo.getNode(id).attrs.url, 'https://wiki.example.local/42');
+    assert.equal(repo.getNode(id).attrs.folder, 'x');
+    assert.deepEqual(repo.edgesFrom(id), []);
+    assert.ok(!repo.edgesFrom('application:alto').some((e) => e.type === 'uses_db'));
+  });
+  test('impact : la base fait tomber ALTO, la mention de la page ne propage pas', () => {
+    const doc = ingestConfluencePage(repo, { id: '42', title: 'ALTO' });
+    repo.addEdge({ src: 'application:alto', dst: 'database:ora_alto', type: 'uses_db', source: 'llm', sourceRef: '42', confidence: 0.8 });
+    repo.addEdge({ src: doc, dst: 'database:ora_alto', type: 'mentions', source: 'confluence', sourceRef: '42', confidence: 0.9 });
     const imp = impactOf(repo, 'database:ora_alto');
     assert.deepEqual(imp.items.map((i) => i.id), ['application:alto']);
     assert.ok(neighborhood(repo, 'application:alto').nodes.length >= 4);
-  });
-});
-
-describe('relations IA', () => {
-  test('sanitize filtre types inconnus, faible confiance et doublons', () => {
-    const s = sanitize({
-      entities: [{ name: 'MQ_ALTO', type: 'queue' }, { name: 'x', type: 'bizarre' }],
-      relations: [
-        { from: 'ALTO', to: 'MQ_ALTO', type: 'writes_to', confidence: 0.9 },
-        { from: 'alto', to: 'mq_alto', type: 'writes_to', confidence: 1 },
-        { from: 'ALTO', to: 'Y', type: 'invente', confidence: 1 },
-        { from: 'ALTO', to: 'Z', type: 'calls', confidence: 0.2 },
-      ],
-    });
-    assert.equal(s.relations.length, 1);
-    assert.equal(s.entities[1].type, 'other');
-  });
-  test('applyRelations réutilise les entités connues et crée les autres', () => {
-    const n = applyRelations(
-      repo,
-      { entities: [{ name: 'MQ_ALTO', type: 'queue' }], relations: [{ from: 'alto', to: 'MQ_ALTO', type: 'writes_to', confidence: 1, evidence: 'ALTO publie dans MQ_ALTO' }] },
-      { sourceRef: '42' }
-    );
-    assert.equal(n, 1);
-    const e = repo.edgesFrom('application:alto').find((x) => x.type === 'writes_to');
-    assert.equal(e.dst, 'queue:mq_alto');
-    assert.equal(e.confidence, 0.8);
-    assert.equal(repo.getNode('queue:mq_alto').attrs.fromLlm, true);
   });
 });
 

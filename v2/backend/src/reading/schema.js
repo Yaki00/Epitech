@@ -16,14 +16,14 @@
  * mais méconnaissable : null veut dire « non fiable » (traité ensuite comme « à valider », hors
  * impact). Absents ou vides, ils valent `current` et `active`.
  */
-const { SECTIONS } = require('../perimeter/architecture');
+const { SECTION_KEYS } = require('../perimeter/architecture');
 const { normalizeEnv } = require('../lib/environment');
 const { isIPv4 } = require('../resolve/entities');
 
 const KINDS = ['architecture', 'operations', 'install', 'incident', 'release', 'meeting', 'project', 'other'];
 const PERIODS = ['current', 'past', 'target'];
 const ENVS = ['PRD', 'STG', 'DEV'];
-const TOPICS = Object.keys(SECTIONS);
+const TOPICS = SECTION_KEYS;
 const APP_ROLES = ['subject', 'cited'];
 const ENTITY_TYPES = ['server', 'ip', 'database', 'url', 'queue', 'path', 'person', 'team'];
 const STATUSES = ['active', 'decommissioned', 'planned'];

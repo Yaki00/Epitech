@@ -2,10 +2,10 @@
 /**
  * Périmètre d'analyse : la liste fermée des applications suivies (config/perimeter.json).
  *
- * Dans Confluence (et parfois dans les exports), une application du périmètre peut être
- * écrite autrement que son nom de référence : abrégée, incomplète, en sigle, avec une faute.
- * Ce module reconnaît ces variantes SANS IA, et dit pour chaque page quelles applications
- * du périmètre elle concerne, avec un score et les raisons (titre, page parente, serveur connu…).
+ * Dans les exports d'inventaire et dans les noms rendus par la lecture IA des pages, une
+ * application du périmètre peut être écrite autrement que son nom de référence : abrégée,
+ * incomplète, en sigle, avec une faute. Ce module ramène un tel nom à l'application du périmètre
+ * (il ne repère rien dans le texte des pages : c'est la lecture IA qui dit de quoi parle une page).
  *
  * Tout ce qui est hors périmètre est ignoré (ignoreOtherApplications, vrai par défaut).
  */
@@ -47,16 +47,13 @@ function editDistance(a, b, max = 2) {
   return prev[b.length];
 }
 
-// à incrémenter quand les règles de rattachement changent : les pages sont réanalysées au passage suivant
-const RULES_VERSION = 3;
-
 // scores d'une mention selon la façon dont elle a été reconnue
 const SCORE = { exact: 1, alias: 1, colle: 0.95, auid: 0.9, sigle: 0.7, faute: 0.75, partiel: 0.6 };
 const FUZZY_MIN = 5; // pas de recherche de faute sous 5 lettres : trop de faux positifs
 
 /**
  * Lit config/perimeter.json. Absent = pas de périmètre (tout est analysé, comportement d'origine).
- * @returns {null | {applications: Array<{name, aliases, auid, naemonHostgroups}>, ignoreOtherApplications: boolean, architectureKeywords: string[]|null, hash: string}}
+ * @returns {null | {applications: Array<{name, aliases, auid, naemonHostgroups}>, ignoreOtherApplications: boolean, hash: string}}
  */
 function loadPerimeter(file) {
   if (!file || !fs.existsSync(file)) return null;
@@ -72,14 +69,13 @@ function loadPerimeter(file) {
       naemonHostgroups: Array.isArray(a.naemonHostgroups) ? a.naemonHostgroups.map((x) => String(x).trim()).filter(Boolean) : [],
     }));
   if (!applications.length) throw new Error(`${file} : aucune application dans "applications"`);
-  const architectureKeywords = Array.isArray(raw.architectureKeywords) && raw.architectureKeywords.length ? raw.architectureKeywords.map(String) : null;
   return {
     applications,
     ignoreOtherApplications: raw.ignoreOtherApplications !== false,
-    architectureKeywords,
-    // changer la liste ou les mots-clés relance l'analyse des pages concernées
-    // naemonHostgroups n'influence pas l'analyse des pages : hors du hash (même valeur qu'en v1, pas de réanalyse)
-    hash: sha256(JSON.stringify([applications.map(({ naemonHostgroups, ...rest }) => rest), architectureKeywords])).slice(0, 12),
+    // changer la liste relance la lecture des pages. naemonHostgroups n'influence pas la lecture : hors du hash.
+    // Le second élément (null) est gardé pour que l'empreinte reste celle de la v1 (ancienne liste de mots-clés,
+    // retirée) : un perimeter.json inchangé ne change pas d'empreinte.
+    hash: sha256(JSON.stringify([applications.map(({ naemonHostgroups, ...rest }) => rest), null])).slice(0, 12),
   };
 }
 
@@ -110,39 +106,6 @@ function createMatcher(perimeter, repo = null) {
   const maxWords = Math.max(...apps.flatMap((a) => a.variants.map((v) => v.words.length))) + 1;
   const auidCount = new Map();
   for (const a of apps) if (a.auidNorm) auidCount.set(a.auidNorm, (auidCount.get(a.auidNorm) || 0) + 1);
-
-  // index des serveurs du périmètre : nom court, FQDN et IP -> serveur ; serveur -> applications hébergées.
-  // Sert à repérer un serveur cité dans une page même si son nom ne suit pas HOST_SHORTNAME_PATTERN.
-  const { canonicalHost } = require('../resolve/entities');
-  const serverOwners = new Map();
-  const serverKeys = new Map();
-  for (const app of apps) {
-    for (const sid of app.servers) {
-      if (!serverOwners.has(sid)) serverOwners.set(sid, new Set());
-      serverOwners.get(sid).add(app.id);
-      const node = repo.getNode(sid);
-      if (!node) continue;
-      const keys = [node.name, sid.slice('server:'.length), node.attrs.fqdn, ...String(node.attrs.ip || '').split(/[,;|\s]+/)];
-      for (const k of keys) {
-        const c = k ? canonicalHost(k) : '';
-        if (c && c.length >= 3) serverKeys.set(c, sid);
-        if (k && String(k).includes('.')) serverKeys.set(String(k).trim().toLowerCase(), sid);
-      }
-    }
-  }
-
-  /** Serveurs du périmètre cités dans un texte (noms courts, FQDN, IP). */
-  function serversIn(text, extra = []) {
-    const found = new Set();
-    for (const tok of String(text || '').split(/[^\w.-]+/)) {
-      const t = tok.toLowerCase().replace(/\.+$/, '');
-      const sid = t && (serverKeys.get(t) || serverKeys.get(canonicalHost(t)));
-      if (sid) found.add(sid);
-    }
-    // hôtes et IP déjà repérés par les règles : recherche complète par alias (IP de la marketplace, FQDN…)
-    for (const tok of extra) for (const n of repo.resolve(tok)) if (serverOwners.has(n.id)) found.add(n.id);
-    return found;
-  }
 
   /**
    * Reconnaît un nom isolé (cellule d'export, nom renvoyé par l'IA, libellé de schéma).
@@ -207,7 +170,7 @@ function createMatcher(perimeter, repo = null) {
               if (editDistance(gramCompact, v.compact, max) <= max) add(app, 'faute', found);
             } else if (v.words.length >= 2 && n < v.words.length && gramNorm === v.words.slice(0, n).join(' ') && norms[i + n] !== v.words[n]) {
               // nom incomplet (et pas le début du nom complet) : au moins 2 mots. Un seul mot ("Batch", "Gestion",
-              // "Portail"…) est trop courant : il passe par un alias déclaré ou par le tri IA.
+              // "Portail"…) est trop courant : il passe par un alias déclaré ou par la lecture IA.
               if (n >= 2) add(app, 'partiel', found);
             }
           }
@@ -220,60 +183,6 @@ function createMatcher(perimeter, repo = null) {
     // un AUID partagé par plusieurs applications ne désigne aucune d'elles en particulier
     for (const list of hits.values()) for (const h of list) if (h.kind === 'auid' && auidCount.get(compact(h.found)) > 1) h.score = 0.6;
     return hits;
-  }
-
-  /**
-   * Applications du périmètre concernées par une page analysée.
-   * @param {object} page  { title, ancestors, sections, entities }
-   * @returns {Array<{id, name, score, reasons: string[], spellings: string[]}>} trié par score décroissant
-   */
-  function scanPage(page) {
-    const res = new Map();
-    const note = (appId, score, reason, spellings = []) => {
-      if (!res.has(appId)) res.set(appId, { scores: [], reasons: new Set(), spellings: new Set() });
-      const r = res.get(appId);
-      r.scores.push(score);
-      r.reasons.add(reason);
-      for (const s of spellings) r.spellings.add(s);
-    };
-    const fromHits = (hits, weight, where) => {
-      for (const [appId, list] of hits) {
-        const best = list.reduce((a, b) => (b.score > a.score ? b : a));
-        // un nom répété 3 fois dans le texte compte davantage qu'une mention isolée
-        const s = where === 'texte' && list.length >= 3 ? Math.max(best.score * weight, 0.8) : best.score * weight;
-        // orthographes à vérifier : tout ce qui n'est pas le nom de référence ou un alias déclaré
-        note(appId, s, `${where} (${best.kind})`, list.filter((h) => h.kind !== 'exact' && h.kind !== 'alias').map((h) => h.found));
-      }
-    };
-    fromHits(scanText(page.title), 1, 'titre');
-    fromHits(scanText((page.ancestors || []).map((a) => (typeof a === 'string' ? a : a.title)).join(' . ')), 0.8, 'page parente');
-    fromHits(scanText((page.sections || []).map((s) => `${s.heading || ''}\n${s.text || ''}`).join('\n')), 0.7, 'texte');
-    if (serverKeys.size) {
-      const text = [page.title, ...(page.sections || []).map((s) => `${s.heading || ''}\n${s.text || ''}`)].join('\n');
-      const cited = serversIn(text, [...(page.entities?.hosts || []), ...(page.entities?.ips || [])]);
-      const exclusive = new Map(); // appId -> nombre de serveurs cités qui lui sont propres
-      for (const sid of cited) {
-        const owners = serverOwners.get(sid);
-        const name = repo.getNode(sid)?.name || sid;
-        for (const appId of owners) {
-          // serveur partagé entre plusieurs applications du périmètre : il ne désigne aucune d'elles en particulier
-          if (owners.size > 1) note(appId, 0.6, `serveur partagé ${name}`);
-          else {
-            note(appId, 0.85, `serveur ${name}`);
-            exclusive.set(appId, (exclusive.get(appId) || 0) + 1);
-          }
-        }
-      }
-      for (const [appId, n] of exclusive) if (n >= 2) note(appId, 0.9, `${n} serveurs de l'application`);
-    }
-    return [...res.entries()]
-      .map(([id, r]) => {
-        const app = apps.find((a) => a.id === id);
-        // plusieurs indices différents se renforcent, sans jamais atteindre une certitude
-        const score = Math.min(0.95, Math.max(...r.scores) + 0.05 * (r.reasons.size - 1));
-        return { id, name: app.name, score: +score.toFixed(2), reasons: [...r.reasons], spellings: [...r.spellings] };
-      })
-      .sort((a, b) => b.score - a.score);
   }
 
   /**
@@ -291,10 +200,7 @@ function createMatcher(perimeter, repo = null) {
     return { app, kind: hits[0].best.kind, score: hits[0].best.score, found: hits[0].best.found };
   }
 
-  // empreinte des serveurs connus de chaque application : change à chaque réimport d'inventaire qui modifie le périmètre
-  const serversHash = sha256(JSON.stringify(apps.map((a) => [a.id, [...a.servers].sort()]))).slice(0, 12);
-
-  return { apps, matchName, resolveAppName, scanText, scanPage, serversIn, ignoreOthers: perimeter.ignoreOtherApplications, hash: perimeter.hash, serversHash, rulesVersion: RULES_VERSION };
+  return { apps, matchName, resolveAppName, scanText, ignoreOthers: perimeter.ignoreOtherApplications, hash: perimeter.hash };
 }
 
 /**

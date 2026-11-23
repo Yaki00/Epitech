@@ -7,7 +7,6 @@ const { createRepo } = require('../src/store/repo');
 const { findPageDirs, readExportPages, normalizeMetadata, exportHash, analyseEntry, loadDiagrams } = require('../src/ingest/confluenceExport');
 const { parseViewPage } = require('../src/parse/confluence/viewHtml');
 const { ingestConfluencePage } = require('../src/ingest/confluence');
-const { impactOf } = require('../src/graph/impact');
 
 const ROOT = path.join(__dirname, 'fixtures', 'confluence-export');
 const entries = () => [...readExportPages(ROOT)];
@@ -33,9 +32,8 @@ describe('export Confluence local (dossier par page)', () => {
     assert.deepEqual(lc.labels, ['orderhub', 'servers']);
   });
   test('les entités du fetcher (téléphones pris pour des IP) sont ignorées', () => {
-    const e = byTitle('Paris Service Delivery');
-    const page = analyseEntry(e);
-    assert.deepEqual(page.entities.ips, []);
+    const page = analyseEntry(byTitle('Paris Service Delivery'));
+    assert.equal(page.entities, undefined);
   });
   test("l'empreinte change si le storage change", () => {
     assert.notEqual(exportHash({ html: 'a', storage: null }), exportHash({ html: 'a', storage: 'b' }));
@@ -58,11 +56,11 @@ describe('page.html (format rendu)', () => {
     assert.equal(page.obsoleteFragments, 4);
     assert.ok(!page.text.includes('Paul Ancien'));
   });
-  test('serveurs, IP, diagramme, image, Jira, lien de page', () => {
+  test('texte, diagramme, image, Jira, lien de page', () => {
     const e = byTitle('OrderHub - Servers');
     const page = analyseEntry(e);
-    assert.deepEqual(page.entities.ips, ['10.20.40.11']); // 10.20.40.99 est barrée
-    assert.ok(page.entities.hosts.includes('srvorh01.dom.example.com'));
+    assert.ok(page.text.includes('srvorh01.dom.example.com | 10.20.40.11'));
+    assert.ok(!page.text.includes('10.20.40.99')); // ligne barrée
     assert.ok(page.text.includes('/data/orderhub/logs')); // contenu d'un bloc repliable
     assert.deepEqual(page.diagrams.map((d) => d.name), ['archi-orderhub']);
     assert.deepEqual(page.jiraKeys.sort(), ['ORH-42', 'ORH-43']); // ORH-43 vient du storage
@@ -76,7 +74,6 @@ describe('page.html (format rendu)', () => {
   test('script et style ne polluent pas le texte', () => {
     const page = parseViewPage('<p>a</p><script>var x = "10.1.1.1";</script><style>.x{}</style>', { title: 'T' });
     assert.equal(page.text, 'T\na');
-    assert.deepEqual(page.entities.ips, []);
   });
   test('tableau clé / valeur (1re colonne en <th>)', () => {
     const page = parseViewPage('<table><tr><th>Serveur</th><td>srv01</td></tr><tr><th>IP</th><td>10.0.0.1</td></tr></table>', {});
@@ -88,26 +85,18 @@ describe('page.html (format rendu)', () => {
 });
 
 describe('export -> graphe', () => {
-  test('mentions, application documentée (titre et page parente), lien draw.io', () => {
+  test('document et diagramme trouvé ; aucun lien écrit sans lecture IA', () => {
     const repo = createRepo(openStore(':memory:'));
     repo.upsertNode({ type: 'application', key: 'OrderHub', name: 'OrderHub', source: 'apm' });
-    repo.upsertNode({ type: 'server', key: 'srvorh01', aliases: ['10.20.40.11'], source: 'marketplace' });
-    repo.upsertNode({ type: 'database', key: 'ORA_ORH', name: 'ORA_ORH', source: 'test' });
-
     const e = byTitle('OrderHub - Servers');
     const page = analyseEntry(e);
     const diagrams = loadDiagrams(ROOT, e, page);
     assert.deepEqual(diagrams.missing, []);
-    const stats = ingestConfluencePage(repo, page, { drawioResults: diagrams.results, url: e.p.url });
-
-    assert.equal(stats.diagramLinks, 1);
-    const docId = 'document:confluence-9001200';
-    const mentions = repo.edgesFrom(docId).filter((x) => x.type === 'mentions');
-    assert.deepEqual([...new Set(mentions.map((x) => x.dst))], ['server:srvorh01']);
-    assert.equal(mentions[0].attrs.pageUpdatedAt, '2024-03-12T10:00:00.000+01:00');
-    const doc = repo.edgesFrom('application:orderhub').find((x) => x.type === 'documented_in');
-    assert.equal(doc.dst, docId);
-    assert.equal(doc.confidence, 0.7); // début du titre "OrderHub - Servers"
-    assert.deepEqual(impactOf(repo, 'database:ora_orh').items.map((i) => i.id), ['application:orderhub']);
+    assert.equal(diagrams.results.length, 1);
+    const docId = ingestConfluencePage(repo, page, { url: e.p.url });
+    assert.equal(docId, 'document:confluence-9001200');
+    assert.equal(repo.getNode(docId).attrs.updatedAt, '2024-03-12T10:00:00.000+01:00');
+    assert.deepEqual(repo.edgesFrom(docId), []);
+    assert.deepEqual(repo.edgesFrom('application:orderhub'), []);
   });
 });

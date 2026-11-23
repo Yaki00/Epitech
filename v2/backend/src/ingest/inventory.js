@@ -202,6 +202,8 @@ function ingestInventory(repo, { source, records, headers, mapping: rawMapping, 
         const attrs = { [`${source}_row`]: i + 2, ...pickAttrs(row, mapping.attrs) };
         const aliases = mapping.aliases.flatMap((col) => splitAliases(row[col]));
         const id = repo.upsertNode({ type: mapping.entity, key, name: row[mapping.name || mapping.key] || key, attrs, source, aliases });
+        // un élément d'abord connu par une lecture de page est maintenant dans un inventaire
+        repo.patchNodeAttrs(id, { outOfInventory: undefined, fromLlm: undefined });
         stats.nodes++;
 
         for (const rel of mapping.relations) {

@@ -14,7 +14,7 @@
  *
  * Règles :
  *  - la clé d'une page est metadata.pageId (le nom du dossier, "0006 - …", est un numéro d'ordre instable)
- *  - metadata.entities / metadata.keywords sont ignorés : Lyra recalcule les entités avec ses propres règles
+ *  - metadata.entities / metadata.keywords sont ignorés : ce que la page cite vient de la lecture IA vérifiée
  */
 const fs = require('fs');
 const path = require('path');

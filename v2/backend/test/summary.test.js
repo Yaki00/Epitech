@@ -49,6 +49,32 @@ describe('résumé IA des applications', () => {
     assert.equal(facts.auid, 'ECO-1');
   });
 
+  test('summary uses subject pages only', () => {
+    const repo = setup();
+    const doc = (id, title, role) => {
+      repo.upsertNode({ type: 'document', key: `confluence-${id}`, name: title, source: 'confluence', attrs: { excerpt: `Texte ${id}.` } });
+      repo.addEdge({ src: 'application:orderhub', dst: `document:confluence-${id}`, type: 'documented_in', source: 'confluence', sourceRef: id, confidence: 0.9, attrs: { role } });
+    };
+    doc('10', 'Architecture commune', 'subject');
+    doc('11', 'CR comité', 'cited');
+    const titles = summaryInputs(repo, repo.getNode('application:orderhub')).docs.map((d) => d.title);
+    assert.ok(titles.includes('Architecture commune'));
+    assert.ok(!titles.includes('CR comité'));
+    assert.ok(titles.includes('OrderHub')); // ancien lien sans rôle : gardé
+  });
+
+  test('facts skip inactive links', () => {
+    const repo = setup();
+    repo.upsertNode({ type: 'server', key: 'srvold', attrs: { environment: 'PROD' }, source: 'llm' });
+    repo.addEdge({ src: 'application:orderhub', dst: 'server:srvold', type: 'runs_on', source: 'llm', sourceRef: 'p9', attrs: { period: 'past' } });
+    repo.addEdge({ src: 'application:orderhub', dst: 'database:ora_ohb', type: 'uses_db', source: 'llm', sourceRef: 'p9', attrs: { trust: 'toValidate' } });
+    repo.upsertNode({ type: 'application', key: 'Ancien', name: 'Ancien', source: 'llm' });
+    repo.addEdge({ src: 'application:ancien', dst: 'application:orderhub', type: 'calls', source: 'llm', sourceRef: 'p9', attrs: { period: 'target' } });
+    const { facts } = summaryInputs(repo, repo.getNode('application:orderhub'));
+    assert.equal(facts.serveurs, 3);
+    assert.deepEqual(facts.utilisee_par, ['Portail']);
+  });
+
   test('empreinte : stable, change si une page change', () => {
     const repo = setup();
     const app = () => repo.getNode('application:orderhub');

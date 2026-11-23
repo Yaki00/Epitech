@@ -6,7 +6,7 @@ const zlib = require('zlib');
 
 const { parseLlmJson, validateShape } = require('../src/lib/json');
 const { parseCsv } = require('../src/lib/csv');
-const { classifyToken, extractEntities, extractIps, canonicalHost, hostAliases } = require('../src/resolve/entities');
+const { canonicalHost, hostAliases, isIPv4 } = require('../src/resolve/entities');
 const { resolveInputFile } = require('../src/ingest/inventory');
 const os = require('os');
 const { parseStoragePage } = require('../src/parse/confluence/storage');
@@ -39,30 +39,10 @@ describe('parseCsv', () => {
   test('séparateur virgule', () => assert.equal(parseCsv('a,b\n1,2').records[0].b, '2'));
 });
 
-describe('entités', () => {
-  test('classifyToken : règles avant IA', () => {
-    assert.equal(classifyToken('10.1.2.3'), 'ip');
-    assert.equal(classifyToken('/data/app'), 'filesystem');
-    assert.equal(classifyToken('\\\\partage\\x'), 'filesystem');
-    assert.equal(classifyToken('D:\\apps'), 'filesystem');
-    assert.equal(classifyToken('srv01.dom.example.com'), 'host');
-    assert.equal(classifyToken('https://x.y'), 'url');
-    assert.equal(classifyToken('srv01'), 'unknown');
-  });
+describe('clés des serveurs', () => {
   test('canonicalHost / alias', () => {
     assert.equal(canonicalHost('SRV01.Dom.Example.com'), 'srv01');
     assert.deepEqual(hostAliases('SRV01.dom.example.com').sort(), ['srv01', 'srv01.dom.example.com']);
-  });
-  test('extractEntities ignore les noms de fichiers et sépare les URL', () => {
-    const e = extractEntities('Voir https://wiki.dom.example.com/x, srv01.dom.example.com 10.0.0.9 et schema.archi.png');
-    assert.deepEqual(e.ips, ['10.0.0.9']);
-    assert.deepEqual(e.hosts, ['srv01.dom.example.com']);
-    assert.equal(e.urls.length, 1);
-  });
-  test('motif de nom court configurable', () => {
-    process.env.HOST_SHORTNAME_PATTERN = '^srv[a-z]+\\d{2}$';
-    assert.ok(extractEntities('installé sur srvalto01').hosts.includes('srvalto01'));
-    delete process.env.HOST_SHORTNAME_PATTERN;
   });
 });
 
@@ -85,10 +65,10 @@ describe('page Confluence (storage)', () => {
     assert.deepEqual(page.diagrams, [{ type: 'drawio', name: 'archi-alto', pageId: undefined }]);
     assert.deepEqual(page.jiraKeys, ['ALTO-123']);
   });
-  test('entités extraites et paramètres de macro exclus du texte', () => {
-    assert.ok(page.entities.ips.includes('10.20.30.41'));
-    assert.ok(page.entities.hosts.includes('srvalto01.dom.example.com'));
-    assert.ok(page.entities.paths.includes('/data/alto/logs'));
+  test('texte gardé, paramètres de macro exclus du texte, aucune entité repérée par le code', () => {
+    assert.ok(page.text.includes('10.20.30.41'));
+    assert.ok(page.text.includes('/data/alto/logs'));
+    assert.equal(page.entities, undefined);
     assert.ok(!page.text.includes('archi-alto'));
     assert.ok(page.text.includes('curl https://alto.dom.example.com/api'));
   });
@@ -129,22 +109,14 @@ describe('draw.io', () => {
 
 describe('IP : règle stricte', () => {
   const cases = [
-    ['Tel 01.23.45.82.17', []],
-    ['01.23.45.82', []],
-    ['srv sur 10.12.0.5.', ['10.12.0.5']],
-    ['IP:192.168.1.10/24', ['192.168.1.10']],
-    ['256.1.1.1', []],
-    ['v1.10.0.1.2', []],
-    ['(172.16.4.20)', ['172.16.4.20']],
-    ['10.0.0.1, 10.0.0.2 et 10.0.0.1', ['10.0.0.1', '10.0.0.2']],
+    ['10.12.0.5', true],
+    ['192.168.1.10', true],
+    ['01.23.45.82', false], // morceau de téléphone
+    ['256.1.1.1', false],
+    ['10.0.0', false],
+    ['srv01', false],
   ];
-  for (const [text, expected] of cases) test(text, () => assert.deepEqual(extractIps(text), expected));
-  test('téléphone : ni IP ni hôte', () => {
-    const e = extractEntities('Phone 01.23.45.82.17 / 01.23.45.75.82');
-    assert.deepEqual(e.ips, []);
-    assert.deepEqual(e.hosts, []);
-  });
-  test("classifyToken : un morceau de téléphone n'est pas une IP", () => assert.equal(classifyToken('01.23.45.82'), 'unknown'));
+  for (const [text, expected] of cases) test(text, () => assert.equal(isIPv4(text), expected));
 });
 
 describe('fichier d\'inventaire avec motif', () => {

@@ -2,14 +2,17 @@
 /**
  * Résumé IA d'une application : rédigé à partir de ses pages Confluence et des faits sûrs de l'inventaire.
  *
- * - Pages : celles rattachées à l'application (lien documented_in), pages d'architecture d'abord,
- *   puis les plus pertinentes et les plus récentes, jusqu'à un budget de texte.
- *   Leur texte vient de attrs.excerpt, gardé par la synchro Confluence pour les pages du périmètre.
- * - Faits : serveurs, environnements, OS, bases, échanges avec les autres applications (graphe).
+ * - Pages : celles dont l'application est un sujet (lien documented_in de rôle `subject`, ou sans
+ *   rôle pour les données antérieures à la lecture IA), pages d'architecture d'abord, puis les plus
+ *   pertinentes et les plus récentes, jusqu'à un budget de texte. Une page qui cite seulement
+ *   l'application n'en fait pas partie. Leur texte vient de attrs.excerpt, gardé par la synchro Confluence.
+ * - Faits : serveurs, environnements, OS, bases, échanges avec les autres applications (graphe),
+ *   liens actifs seulement (ni anciens, ni cibles, ni à valider, ni d'une autre application).
  * - Le résumé n'est refait que si ces entrées changent (empreinte summaryHash).
  */
 const { stableHash, sha256 } = require('../lib/hash');
 const { appCriticality } = require('../lib/environment');
+const { isInactiveEdge } = require('../graph/impact');
 
 const SYSTEM = `Tu rédiges la description d'une application d'entreprise pour une fiche d'inventaire,
 à partir d'extraits de sa documentation interne (Confluence) et de faits d'inventaire.
@@ -32,11 +35,11 @@ const EXCERPT_MAX = 3000;
 
 /** Faits sûrs tirés du graphe pour une application. */
 function applicationFacts(repo, app) {
-  const out = repo.edgesFrom(app.id);
+  const out = repo.edgesFrom(app.id).filter((e) => !isInactiveEdge(e));
   const nodes = (type) => [...new Set(out.filter((e) => e.type === type).map((e) => e.dst))].map((id) => repo.getNode(id)).filter(Boolean);
   const servers = nodes('runs_on');
   const count = (vals) => Object.entries(vals.filter(Boolean).reduce((acc, v) => ((acc[v] = (acc[v] || 0) + 1), acc), {})).map(([k, n]) => `${k} (${n})`);
-  const calledBy = [...new Set(repo.edgesTo(app.id).filter((e) => ['calls', 'reads_from', 'depends_on'].includes(e.type)).map((e) => e.src))]
+  const calledBy = [...new Set(repo.edgesTo(app.id).filter((e) => ['calls', 'reads_from', 'depends_on'].includes(e.type) && !isInactiveEdge(e)).map((e) => e.src))]
     .map((id) => repo.getNode(id)?.name)
     .filter(Boolean)
     .sort();
@@ -61,7 +64,8 @@ function applicationFacts(repo, app) {
  */
 function summaryInputs(repo, app, { maxChars = 14000 } = {}) {
   const best = new Map();
-  for (const e of repo.edgesFrom(app.id).filter((x) => x.type === 'documented_in')) {
+  // page où l'application est seulement citée : hors résumé (rôle absent : ancienne analyse, gardée)
+  for (const e of repo.edgesFrom(app.id).filter((x) => x.type === 'documented_in' && (x.attrs.role === undefined || x.attrs.role === 'subject'))) {
     const prev = best.get(e.dst);
     if (!prev || e.confidence > prev) best.set(e.dst, e.confidence);
   }

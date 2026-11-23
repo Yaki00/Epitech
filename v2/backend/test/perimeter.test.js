@@ -8,7 +8,6 @@ const { openStore } = require('../src/store/store');
 const { createRepo } = require('../src/store/repo');
 const { loadPerimeter, createMatcher, ensurePerimeterNodes, editDistance, acronym } = require('../src/perimeter/perimeter');
 const { ingestInventory } = require('../src/ingest/inventory');
-const { applyRelations, buildMessages, triagePage } = require('../src/enrich/relations');
 
 function perimeterFile(content) {
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'lyra-perimetre-')), 'perimeter.json');
@@ -34,6 +33,12 @@ describe('outils', () => {
     assert.equal(editDistance('orderhub', 'xyz', 2), 3);
   });
   test('sigle', () => assert.equal(acronym('Gestion Commerciale Entreprises'), 'gce'));
+  test('ancienne liste de mots-clés de titre ignorée : même empreinte, aucun champ exposé', () => {
+    const plain = loadPerimeter(perimeterFile({ applications: ['OrderHub'] }));
+    const old = loadPerimeter(perimeterFile({ applications: ['OrderHub'], architectureKeywords: ['dat'] }));
+    assert.equal(old.hash, plain.hash);
+    assert.deepEqual(Object.keys(old).sort(), ['applications', 'hash', 'ignoreOtherApplications']);
+  });
   test('fichier absent = pas de périmètre ; liste vide = erreur', () => {
     assert.equal(loadPerimeter(path.join(os.tmpdir(), 'nexiste-pas.json')), null);
     assert.throws(() => loadPerimeter(perimeterFile({ applications: [] })), /aucune application/);
@@ -114,27 +119,6 @@ describe('pages du périmètre', () => {
     assert.equal(repo.resolve('orh')[0].id, 'application:orderhub');
   });
 
-  test('titre, page parente et serveur connu', () => {
-    const m = createMatcher(PERIMETER, repo);
-    const page = {
-      title: 'Procédure de redémarrage',
-      ancestors: ['Home', 'Oderhub'],
-      sections: [{ heading: 'Serveurs', text: 'Redémarrer 10.20.40.11 puis vérifier les logs.' }],
-      entities: { hosts: [], ips: ['10.20.40.11'] },
-    };
-    const [r] = m.scanPage(page);
-    assert.equal(r.name, 'OrderHub');
-    assert.ok(r.reasons.includes('serveur srvorh01'));
-    assert.ok(r.reasons.some((x) => x.startsWith('page parente')));
-    assert.deepEqual(r.spellings, ['Oderhub']);
-    assert.ok(r.score >= 0.85 && r.score <= 0.95);
-  });
-
-  test('page sans rapport : rien', () => {
-    const m = createMatcher(PERIMETER, repo);
-    assert.deepEqual(m.scanPage({ title: 'Charte graphique', sections: [{ text: 'Couleurs et logos.' }], entities: { hosts: [], ips: [] } }), []);
-  });
-
   test('AUID partagé par deux applications : indice faible', () => {
     const shared = loadPerimeter(perimeterFile({ applications: [{ name: 'App Un', auid: 'ECO-1' }, { name: 'App Deux', auid: 'ECO-1' }] }));
     const hits = createMatcher(shared).scanText('Écosystème ECO-1');
@@ -159,111 +143,6 @@ describe('import APM limité au périmètre', () => {
     const servers = repo.edgesFrom('application:orderhub').map((e) => e.dst).sort();
     assert.deepEqual(servers, ['server:srvorh01', 'server:srvorh02']);
     assert.ok(!repo.getNode('server:srvy01'));
-  });
-});
-
-describe('IA avec périmètre', () => {
-  let repo;
-  let m;
-  beforeEach(() => {
-    repo = createRepo(openStore(':memory:'));
-    ensurePerimeterNodes(repo, PERIMETER);
-    repo.upsertNode({ type: 'application', key: 'Hors Liste', source: 'marketplace' });
-    m = createMatcher(PERIMETER, repo);
-  });
-
-  test('le prompt liste le périmètre, les applis de la page et la consigne d\'ignorer le reste', () => {
-    const scope = { apps: PERIMETER.applications, ignoreOthers: true, pageApps: ['OrderHub'], knownServers: ['srvorh01'] };
-    const [sys, user] = buildMessages({ pageTitle: 'P', section: { heading: 'S', text: 'x' }, hints: { ips: [], hosts: [], paths: [] }, scope });
-    assert.match(sys.content, /- OrderHub \(aussi écrit : ORH\)/);
-    assert.match(sys.content, /AUCUNE relation/);
-    assert.match(user.content, /concerne probablement : OrderHub/);
-    assert.match(user.content, /srvorh01/);
-  });
-
-  test('nom mal écrit corrigé, applications hors périmètre écartées, serveurs gardés', () => {
-    const counters = { dropped: 0, renamed: 0 };
-    const extracted = {
-      entities: [
-        { name: 'Oderhub', type: 'application' },
-        { name: 'srvorh09', type: 'server' },
-        { name: 'Hors Liste', type: 'application' },
-        { name: 'Inconnue', type: 'application' },
-        { name: 'ORA_BILL', type: 'database' },
-      ],
-      relations: [
-        { from: 'Oderhub', to: 'srvorh09', type: 'runs_on', confidence: 1 },
-        { from: 'Oderhub', to: 'Hors Liste', type: 'calls', confidence: 1 },
-        { from: 'Inconnue', to: 'ORA_BILL', type: 'uses_db', confidence: 1 },
-        { from: 'Billing Engine', to: 'ORA_BILL', type: 'uses_db', confidence: 0.5 },
-      ],
-    };
-    const n = applyRelations(repo, extracted, { sourceRef: 'p1', matcher: m, counters });
-    assert.equal(n, 2);
-    assert.deepEqual(counters, { dropped: 2, renamed: 2 });
-    assert.deepEqual(repo.edgesFrom('application:orderhub').map((e) => e.dst), ['server:srvorh09']);
-    assert.equal(repo.edgesFrom('application:billing-engine')[0].confidence, 0.4);
-    assert.ok(!repo.getNode('application:inconnue'));
-  });
-
-  test('une base dont le nom ressemble à un sigle du périmètre reste une base', () => {
-    const counters = { dropped: 0, renamed: 0 };
-    const extracted = { entities: [{ name: 'OrderHub', type: 'application' }, { name: 'ORH', type: 'database' }], relations: [{ from: 'OrderHub', to: 'ORH', type: 'uses_db', confidence: 1 }] };
-    assert.equal(applyRelations(repo, extracted, { sourceRef: 'p', matcher: m, counters }), 1);
-    assert.equal(repo.edgesFrom('application:orderhub')[0].dst, 'database:orh');
-  });
-
-  test('sans périmètre : comportement d\'origine (application inconnue créée)', () => {
-    applyRelations(repo, { entities: [{ name: 'Inconnue', type: 'application' }], relations: [{ from: 'Inconnue', to: 'Hors Liste', type: 'calls', confidence: 1 }] }, { sourceRef: 'p' });
-    assert.equal(repo.getNode('application:inconnue').attrs.fromLlm, true);
-  });
-
-  test('tri IA : réponses peu sûres filtrées', async () => {
-    let sent;
-    const llm = {
-      chatJson: async (req) => {
-        sent = req;
-        return { applications: [{ name: 'OrderHub', confidence: 0.9, evidence: 'le batch de commandes' }, { name: 'Alto', confidence: 0.3 }] };
-      },
-    };
-    const r = await triagePage(llm, { title: 'Batch de nuit', ancestors: ['Home'], text: 'Le batch de commandes…', scope: { apps: PERIMETER.applications } });
-    assert.deepEqual(r.map((x) => x.name), ['OrderHub']);
-    assert.match(sent.messages[0].content, /Billing Engine/);
-    assert.equal(sent.task, 'extract');
-  });
-});
-
-describe('application retrouvée par ses serveurs', () => {
-  let repo;
-  beforeEach(() => {
-    repo = createRepo(openStore(':memory:'));
-    ensurePerimeterNodes(repo, PERIMETER);
-    // noms qui ne suivent aucun motif de nom de serveur : seule la liste connue permet de les repérer
-    repo.upsertNode({ type: 'server', key: 'PARAPPX1', attrs: { fqdn: 'parappx1.dom.example.com', ip: '10.9.9.1' }, source: 'apm' });
-    repo.upsertNode({ type: 'server', key: 'PARAPPX2', source: 'apm' });
-    repo.upsertNode({ type: 'server', key: 'MUTUSRV', source: 'apm' });
-    repo.addEdge({ src: 'application:orderhub', dst: 'server:parappx1', type: 'runs_on', source: 'apm', confidence: 1 });
-    repo.addEdge({ src: 'application:orderhub', dst: 'server:parappx2', type: 'runs_on', source: 'apm', confidence: 1 });
-    repo.addEdge({ src: 'application:orderhub', dst: 'server:mutusrv', type: 'runs_on', source: 'apm', confidence: 1 });
-    repo.addEdge({ src: 'application:alto', dst: 'server:mutusrv', type: 'runs_on', source: 'apm', confidence: 1 });
-  });
-  const page = (text) => ({ title: 'Procédure', sections: [{ text }], entities: { hosts: [], ips: [] } });
-
-  test('nom court, FQDN ou IP repérés sans motif', () => {
-    const m = createMatcher(PERIMETER, repo);
-    for (const t of ['Redémarrer PARAPPX1 le soir', 'voir parappx1.dom.example.com', 'ping 10.9.9.1']) {
-      const [r] = m.scanPage(page(t));
-      assert.equal(r.name, 'OrderHub', t);
-      assert.equal(r.score, 0.85);
-    }
-  });
-  test('deux serveurs propres : indice plus fort', () => {
-    const [r] = createMatcher(PERIMETER, repo).scanPage(page('PARAPPX1 et PARAPPX2'));
-    assert.ok(r.score >= 0.9);
-  });
-  test('serveur partagé : indice faible pour chaque application', () => {
-    const r = createMatcher(PERIMETER, repo).scanPage(page('Arrêt de MUTUSRV'));
-    assert.deepEqual(r.map((x) => [x.name, x.score]).sort(), [['Alto', 0.6], ['OrderHub', 0.6]]);
   });
 });
 

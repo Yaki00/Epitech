@@ -1,0 +1,6 @@
+<mxfile><diagram name="Flux"><mxGraphModel><root>
+<mxCell id="0"/><mxCell id="1" parent="0"/>
+<mxCell id="a" value="OrderHub" vertex="1" parent="1"/>
+<mxCell id="b" value="ORA_ORH" vertex="1" parent="1"/>
+<mxCell id="e" value="JDBC" edge="1" source="a" target="b" parent="1"/>
+</root></mxGraphModel></diagram></mxfile>

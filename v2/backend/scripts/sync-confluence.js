@@ -8,27 +8,27 @@
  * Le format historique pages/*.json + attachments/<pageId>/ est toujours accepté.
  *
  * Usage :
- *   node scripts/sync-confluence.js            étape sans IA (structure, liens, draw.io)
- *   node scripts/sync-confluence.js --llm      + extraction des relations par IA
- *   node scripts/sync-confluence.js --force    retraite même les pages inchangées
+ *   node scripts/sync-confluence.js --llm      lecture des pages par l'IA, vérifiée par le code
+ *   node scripts/sync-confluence.js            sans IA : pages lues et stockées, rien n'est déduit
+ *   node scripts/sync-confluence.js --force    relit même les pages inchangées
  *   node scripts/sync-confluence.js --limit 20 ne traite que 20 pages (test)
- *   node scripts/sync-confluence.js --llm --no-triage  sans le tri IA des pages où aucun nom du périmètre n'est reconnu
  *
- * Avec un périmètre (config/perimeter.json) : chaque page est rattachée aux applications suivies
- * (nom, variante, faute, sigle, serveur connu…). Seules ces pages partent à l'IA, et les relations
- * vers des applications hors périmètre sont écartées. Rapports CSV dans data/rapports/.
- * Lancer l'import APM AVANT : il donne les serveurs de chaque application, qui servent d'indice.
+ * Chaque page est lue par l'IA (nature, période, applications, serveurs, liens, responsables, avec
+ * une citation), puis le code garde ce qui est cité dans la page et le rapproche des inventaires
+ * et du périmètre (config/perimeter.json). Les consignes de config/consignes-ia.md sont données à
+ * l'IA ; les modifier relance la lecture des pages au passage suivant. Rapports CSV dans data/rapports/.
+ * Lancer l'import des inventaires AVANT : ils servent de référence à la vérification.
  */
 const fs = require('fs');
+const path = require('path');
 const config = require('../src/config');
 const { openStore, acquireLock } = require('../src/store/store');
 const { createRepo } = require('../src/store/repo');
-const { ingestConfluencePage, documentId } = require('../src/ingest/confluence');
-const { readExportPages, exportHash, analyseEntry, loadDiagrams } = require('../src/ingest/confluenceExport');
-const { extractRelations, applyRelations, triagePage, chunkText } = require('../src/enrich/relations');
-const { loadPerimeter, createMatcher, ensurePerimeterNodes } = require('../src/perimeter/perimeter');
-const { architectureScore, auditArchitecturePage, DEFAULT_KEYWORDS, SECTION_LABELS_FR } = require('../src/perimeter/architecture');
-const { writeCsvReport } = require('../src/lib/report');
+const { loadPerimeter } = require('../src/perimeter/perimeter');
+const { loadConsignes } = require('../src/reading/consignes');
+const { runConfluenceSync } = require('../src/reading/syncPages');
+const { createReadingMock } = require('../src/reading/mockReadings');
+const { configureEnvironmentsFromFile } = require('../src/lib/environment');
 const { createLlmClient } = require('../src/lib/llmClient');
 const { createLogger } = require('../src/lib/logger');
 
@@ -37,155 +37,27 @@ const args = process.argv.slice(2);
 const opt = {
   llm: args.includes('--llm'),
   force: args.includes('--force'),
-  triage: !args.includes('--no-triage'),
   limit: args.includes('--limit') ? Number(args[args.indexOf('--limit') + 1]) : Infinity,
 };
-const FLUSH_EVERY = 100; // sauvegarde régulière : une synchro interrompue garde ce qui est fait
+if (args.includes('--no-triage')) log.warn("--no-triage est ignoré : il n'y a plus de tri séparé, chaque page est lue une fois par l'IA");
 
-/**
- * Envoie une page à l'IA.
- * Sans périmètre : toutes les sections. Avec périmètre : seulement si la page concerne une application suivie,
- * reconnue par les règles ou, à défaut, par un tri IA rapide (titre, pages parentes, début du texte).
- * @returns {Promise<Array<PromiseSettledResult>>}
- */
-async function enrichPage({ llm, repo, page, p, nodeId, related, matcher, scope, counters, stats }) {
-  let pageApps = related.map((x) => x.name);
-  if (matcher && !pageApps.length) {
-    if (!opt.triage) {
-      stats.outOfScope++;
-      return [];
-    }
-    const text = page.sections.map((s) => `${s.heading || ''}\n${s.text}`).join('\n');
-    const ancestors = (p.ancestors || []).map((a) => (typeof a === 'string' ? a : a.title));
-    let found;
-    try {
-      found = await triagePage(llm, { title: page.title, ancestors, text, scope });
-    } catch (err) {
-      return [{ status: 'rejected', reason: err }];
-    }
-    for (const f of found) {
-      const m = matcher.resolveAppName(f.name);
-      if (!m) continue;
-      repo.upsertNode({ type: 'document', key: documentId(p.id), name: page.title, source: 'confluence', attrs: { excerpt: pageExcerpt(page), updatedAt: p.updatedAt || null } });
-      const confidence = +(0.6 * f.confidence + 0.1).toFixed(2); // tri IA : 0.46 à 0.7, sous les règles
-      repo.addEdge({ src: m.app.id, dst: nodeId, type: 'documented_in', source: 'llm', sourceRef: p.id, confidence, attrs: { evidence: f.evidence } });
-      if (!pageApps.includes(m.app.name)) pageApps.push(m.app.name);
-    }
-    if (!pageApps.length) {
-      stats.outOfScope++;
-      return [];
-    }
-    stats.triaged++;
+/** Hôtes supervisés par Naemon mais absents des inventaires (corroborent un serveur hors inventaire). */
+function naemonHosts() {
+  try {
+    const st = JSON.parse(fs.readFileSync(path.join(config.dataDir, 'naemon-status.json'), 'utf8'));
+    return (st.unmatchedHosts || []).map((h) => String(h).toLowerCase());
+  } catch (_) {
+    return [];
   }
-  const scoped = matcher ? { ...scope, pageApps, knownServers: knownServersOf(repo, page, matcher, pageApps) } : null;
-  // toutes les sections partent en parallèle (la concurrence est limitée par le client LLM)
-  const jobs = page.sections.flatMap((s) =>
-    chunkText(s.text).map((text) =>
-      extractRelations(llm, { pageTitle: page.title, section: { heading: s.heading, text }, hints: page.entities, scope: scoped }).then((res) => {
-        return applyRelations(repo, res, { sourceRef: p.id, docId: nodeId, matcher, counters });
-      })
-    )
-  );
-  return Promise.allSettled(jobs);
 }
 
-/**
- * Rapports tirés du graphe (donc complets même quand les pages inchangées sont sautées) :
- *  - perimetre-pages.csv : pour chaque application, les pages qui la concernent, avec score et raisons
- *  - perimetre-orthographes.csv : les façons dont chaque application est écrite, à valider en alias
- */
-function writePerimeterReports(repo, matcher) {
-  const rows = [];
-  const spellings = new Map();
-  for (const app of matcher.apps) {
-    for (const e of repo.edgesFrom(app.id).filter((x) => x.type === 'documented_in')) {
-      const doc = repo.getNode(e.dst);
-      if (!doc) continue;
-      const how = e.source === 'llm' ? 'tri IA' : 'règles';
-      rows.push([app.name, doc.name, doc.attrs.url || '', e.confidence, e.attrs.reasons || [e.attrs.evidence || ''], e.attrs.spellings || [], how]);
-      for (const sp of e.attrs.spellings || []) {
-        const k = `${app.name}|${sp}`;
-        spellings.set(k, (spellings.get(k) || 0) + 1);
-      }
-    }
+function createLlm() {
+  if (!opt.llm) return null;
+  if (config.llm.mock) {
+    log.warn(`LLM_MOCK actif : lectures simulées${config.llm.mockReadingsFile ? ` (${config.llm.mockReadingsFile})` : ' (pages vides)'}`);
+    return createLlmClient({ ...config.llm, cacheDir: '' }, { mockHandler: createReadingMock(config.llm.mockReadingsFile) });
   }
-  rows.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : b[3] - a[3]));
-  const f1 = writeCsvReport(config.reportsDir, 'perimetre-pages', ['application', 'page', 'url', 'score', 'raisons', 'orthographes à vérifier', 'trouvé par'], rows);
-  const f2 = writeCsvReport(
-    config.reportsDir,
-    'perimetre-orthographes',
-    ['application', 'écrit dans Confluence', 'nombre de pages', 'action'],
-    [...spellings.entries()]
-      .map(([k, n]) => [...k.split('|'), n, "si c'est bien elle : l'ajouter en alias dans config/perimeter.json ; sinon le signaler"])
-      .sort((a, b) => b[2] - a[2])
-  );
-  const f3 = writeArchitectureReports(repo, matcher);
-  log.info(`rapports : ${f1} ; ${f2} ; ${f3.join(' ; ')}`);
-}
-
-/**
- * Contrôle des pages d'architecture :
- *  - architecture-pages.csv : une ligne par page et application (serveurs confirmés, manquants, inconnus, IP, rubriques)
- *  - architecture-applications.csv : par application, serveurs documentés dans AUCUNE page d'architecture
- */
-function writeArchitectureReports(repo, matcher) {
-  const rows = [];
-  const summary = [];
-  for (const app of matcher.apps) {
-    const documented = new Set();
-    let pages = 0;
-    let best = null;
-    for (const e of repo.edgesFrom(app.id).filter((x) => x.type === 'documented_in' && x.attrs.audit)) {
-      const doc = repo.getNode(e.dst);
-      if (!doc) continue;
-      const a = e.attrs.audit;
-      pages++;
-      for (const n of a.confirmed) documented.add(n.toLowerCase());
-      if (a.completeness !== null && (best === null || a.completeness > best)) best = a.completeness;
-      rows.push([
-        app.name, doc.name, doc.attrs.url || '', doc.attrs.updatedAt || '', a.environment === 'prod' ? 'production' : a.environment === 'nonprod' ? 'hors production' : '',
-        a.completeness === null ? '' : `${Math.round(a.completeness * 100)} %`,
-        a.confirmed,
-        a.missing,
-        a.otherApp.map((o) => `${o.server} (${o.applications.join(', ')})`),
-        a.unknown,
-        a.ipMismatch.map((m) => `${m.server} : page ${m.page.join(', ')} / inventaire ${m.inventory.join(', ')}`),
-        a.absentSections.map((k) => SECTION_LABELS_FR[k] || k),
-        a.verdict,
-      ]);
-    }
-    const never = [...app.servers].map((id) => repo.getNode(id)?.name).filter((n) => n && !documented.has(n.toLowerCase()));
-    summary.push([app.name, pages, best === null ? '' : `${Math.round(best * 100)} %`, app.servers.size, never, pages ? '' : "aucune page d'architecture trouvée"]);
-  }
-  return [
-    writeCsvReport(
-      config.reportsDir,
-      'architecture-pages',
-      ['application', 'page', 'url', 'modifiée le', 'environnement', 'complétude', 'serveurs confirmés', 'serveurs manquants', "serveurs d'une autre application", 'inconnus des inventaires', 'IP différentes', 'rubriques absentes', 'verdict'],
-      rows
-    ),
-    writeCsvReport(config.reportsDir, 'architecture-applications', ['application', "pages d'architecture", 'meilleure complétude', 'serveurs (inventaires)', "serveurs documentés dans aucune page d'architecture", 'remarque'], summary),
-  ];
-}
-
-/** Texte d'une page pour le résumé IA : titres et paragraphes, 4000 caractères au plus. */
-function pageExcerpt(page) {
-  return page.sections
-    .map((s) => [s.heading, s.text].filter(Boolean).join('\n'))
-    .join('\n\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .slice(0, 4000);
-}
-
-/** Serveurs des applications de la page qui sont cités dans la page (indice pour l'IA). */
-function knownServersOf(repo, page, matcher, pageApps) {
-  const apps = matcher.apps.filter((a) => pageApps.includes(a.name));
-  const text = [page.title, ...page.sections.map((s) => s.text)].join('\n');
-  const cited = matcher.serversIn(text, [...page.entities.hosts, ...page.entities.ips]);
-  return [...cited]
-    .filter((sid) => apps.some((a) => a.servers.has(sid)))
-    .map((sid) => repo.getNode(sid)?.name || sid)
-    .slice(0, 30);
+  return createLlmClient(config.llm);
 }
 
 async function main() {
@@ -194,133 +66,32 @@ async function main() {
     log.error(`Dossier d'export introuvable : ${dir} (CONFLUENCE_EXPORT_DIR dans backend/.env)`);
     process.exit(1);
   }
+  configureEnvironmentsFromFile(config.inventory.mappingFile);
   const release = acquireLock(config.dataDir);
   const repo = createRepo(openStore(config.dataDir));
-  const llm = opt.llm ? createLlmClient(config.llm) : null;
-  const runId = repo.startRun(opt.llm ? 'confluence+llm' : 'confluence');
-  const stats = { pages: 0, skipped: 0, errors: 0, mentions: 0, diagramLinks: 0, diagramsMissing: 0, obsoleteFragments: 0, llmRelations: 0, unresolved: 0 };
-  const llmJobs = [];
-
-  const perimeter = loadPerimeter(config.perimeterFile);
-  let matcher = null;
-  let scope = null;
-  if (perimeter) {
-    ensurePerimeterNodes(repo, perimeter);
-    matcher = createMatcher(perimeter, repo);
-    scope = { apps: perimeter.applications, ignoreOthers: perimeter.ignoreOtherApplications };
-    Object.assign(stats, { inScope: 0, triaged: 0, outOfScope: 0, llmDropped: 0, llmRenamed: 0, architecturePages: 0 });
-    const noServers = matcher.apps.filter((a) => !a.servers.size).map((a) => a.name);
-    log.info(`périmètre : ${perimeter.applications.length} applications`);
-    if (noServers.length) log.warn(`sans serveur connu (import APM fait ?) : ${noServers.join(', ')}`);
-  }
-  const counters = { dropped: 0, renamed: 0 };
-
   try {
-    for (const entry of readExportPages(dir)) {
-      if (stats.pages + stats.skipped >= opt.limit) break;
-      if (entry.error) {
-        stats.errors++;
-        repo.recordError(runId, { source: 'confluence', ref: entry.ref, step: 'read', message: entry.error.message });
-        log.warn(`${entry.ref} illisible : ${entry.error.message}`);
-        continue;
-      }
-      const { p } = entry;
-      const docId = `confluence:${p.id}`;
-      const hash = exportHash(entry);
-      const prev = repo.getDocument(docId);
-      // contenu et liste des applications inchangés : l'IA n'a pas à repasser
-      const unchanged = !opt.force && prev && prev.content_hash === hash && prev.status !== 'error' && (prev.attrs?.perimeterHash || null) === (matcher ? matcher.hash : null);
-      // inventaires réimportés ou règles de rattachement modifiées : on refait les règles et les contrôles, pas l'IA
-      const rulesChanged =
-        Boolean(matcher) && ((prev?.attrs?.serversHash || null) !== matcher.serversHash || (prev?.attrs?.rulesVersion || null) !== matcher.rulesVersion);
-      const needLlm = opt.llm && !(unchanged && prev.status === 'enriched');
-      if (unchanged && !rulesChanged && !needLlm) {
-        stats.skipped++;
-        continue;
-      }
-      const docBase = { attrs: {}, id: docId, source: 'confluence', title: p.title, url: p.url, version: p.version, updatedAt: p.updatedAt, contentHash: hash };
-      try {
-        const page = analyseEntry(entry);
-        const diagrams = loadDiagrams(dir, entry, page);
-        const docAttrs = { folder: entry.ref, parentId: p.parentId || null, ancestors: p.ancestors || [], images: entry.imageFiles.length, diagramsMissing: diagrams.missing };
-        const r = ingestConfluencePage(repo, page, { drawioResults: diagrams.results, url: p.url, attrs: docAttrs });
-        const nodeId = `document:${documentId(p.id)}`;
-        // applications du périmètre reconnues par les règles (sans IA)
-        // applications du périmètre citées (envoi à l'IA dès 0.5 : une simple mention peut porter une relation) ;
-        // la page n'est rangée dans la documentation d'une application que si elle en parle vraiment :
-        // titre, page parente, serveur de l'application, ou nom répété dans le texte (score >= 0.8)
-        const related = matcher ? matcher.scanPage({ ...page, ancestors: p.ancestors || page.ancestors || [] }).filter((x) => x.score >= 0.5) : [];
-        const about = related.filter((x) => x.score >= 0.6 && (x.score >= 0.8 || x.reasons.some((r) => !r.startsWith('texte'))));
-        if (matcher) {
-          docBase.attrs = { perimeterHash: matcher.hash, serversHash: matcher.serversHash, rulesVersion: matcher.rulesVersion, perimeterApps: about.map((x) => ({ id: x.id, score: x.score })) };
-          // page d'architecture : contrôlée par rapport aux inventaires pour chaque application concernée
-          const archi = architectureScore(page, { keywords: perimeter.architectureKeywords || DEFAULT_KEYWORDS, ancestors: p.ancestors || [] });
-          const isArchi = archi.score >= 0.6;
-          if (isArchi) {
-            stats.architecturePages++;
-            repo.upsertNode({ type: 'document', key: documentId(p.id), name: page.title, source: 'confluence', attrs: { pageKind: 'architecture', architecture: archi } });
-          }
-          // texte gardé pour le résumé IA des applications (seulement les pages du périmètre)
-          if (about.length) repo.upsertNode({ type: 'document', key: documentId(p.id), name: page.title, source: 'confluence', attrs: { excerpt: pageExcerpt(page), updatedAt: p.updatedAt || null } });
-          for (const x of about) {
-            const audit = isArchi ? auditArchitecturePage(repo, matcher, { ...page, updatedAt: p.updatedAt || page.updatedAt }, x.id) : undefined;
-            repo.addEdge({ src: x.id, dst: nodeId, type: 'documented_in', source: 'confluence', sourceRef: p.id, confidence: x.score, attrs: { reasons: x.reasons, spellings: x.spellings, audit } });
-          }
-          if (related.length) stats.inScope++;
-        }
-        stats.pages++;
-        stats.mentions += r.mentions;
-        stats.diagramLinks += r.diagramLinks;
-        stats.diagramsMissing += diagrams.missing.length;
-        stats.obsoleteFragments += page.obsoleteFragments || 0;
-        stats.unresolved += r.unresolved.length;
-        // page déjà enrichie dont seuls les inventaires ont changé : elle garde son statut, l'IA n'est pas relancée
-        const keepStatus = !needLlm && prev && prev.status === 'enriched' && unchanged;
-        repo.saveDocument({ ...docBase, status: keepStatus ? 'enriched' : 'parsed', attrs: { ...docBase.attrs, obsoleteFragments: page.obsoleteFragments || 0, sections: page.sections.length, tables: page.tables.length } });
-
-        if (llm && needLlm) {
-          llmJobs.push(
-            enrichPage({ llm, repo, page, p, nodeId, related, matcher, scope, counters, stats }).then((results) => {
-              const failures = results.filter((x) => x.status === 'rejected');
-              stats.llmRelations += results.filter((x) => x.status === 'fulfilled').reduce((a, x) => a + x.value, 0);
-              if (failures.length) {
-                stats.errors++;
-                const message = failures.map((f) => f.reason.message).join(' | ');
-                repo.recordError(runId, { source: 'confluence', ref: p.id, step: 'llm', message });
-                repo.saveDocument({ ...docBase, status: 'error', error: message });
-              } else {
-                repo.saveDocument({ ...docBase, status: 'enriched' });
-              }
-            })
-          );
-        }
-      } catch (err) {
-        stats.errors++;
-        repo.recordError(runId, { source: 'confluence', ref: p.id || entry.ref, step: 'parse', message: err.message });
-        repo.saveDocument({ ...docBase, status: 'error', error: err.message });
-        log.warn(`page ${p.id} (${p.title}) en erreur : ${err.message}`);
-      }
-      const done = stats.pages + stats.skipped;
-      if (done % FLUSH_EVERY === 0) {
-        repo.flush();
-        log.info('progression', stats);
-      }
-    }
-
-    await Promise.all(llmJobs);
-    if (matcher) {
-      stats.llmDropped = counters.dropped;
-      stats.llmRenamed = counters.renamed;
-      writePerimeterReports(repo, matcher);
-      const pagesOf = (a) => new Set(repo.edgesFrom(a.id).filter((e) => e.type === 'documented_in').map((e) => e.dst)).size;
-      log.info('pages par application du périmètre', Object.fromEntries(matcher.apps.map((a) => [a.name, pagesOf(a)])));
-    }
-    const status = stats.errors ? 'partial' : 'success';
-    repo.finishRun(runId, { status, stats: { ...stats, llm: llm ? llm.stats : undefined } });
+    const perimeter = loadPerimeter(config.perimeterFile);
+    if (perimeter) log.info(`périmètre : ${perimeter.applications.length} applications`);
+    const consignes = loadConsignes(config.consignesFile);
+    log.info(consignes.text ? `consignes : ${consignes.chars} caractères${consignes.truncated ? ' (coupées)' : ''}` : 'consignes : aucune (config/consignes-ia.md absent ou vide)');
+    const llm = createLlm();
+    if (!llm) log.warn("sans --llm : les pages sont lues et stockées, mais rien n'en est déduit (ni serveurs, ni rattachements, ni nature)");
+    const { status, stats } = await runConfluenceSync({
+      repo,
+      exportDir: dir,
+      llm,
+      perimeter,
+      consignes,
+      naemonHosts: naemonHosts(),
+      reportsDir: config.reportsDir,
+      force: opt.force,
+      limit: opt.limit,
+      chunkChars: config.reading.chunkChars,
+      maxTokens: config.llm.maxTokens.extract,
+      maxInFlight: Math.max(2, (config.llm.concurrency || 4) * 2),
+      log,
+    });
     log.info(`terminé (${status})`, { ...stats, llm: llm ? llm.stats : undefined });
-  } catch (err) {
-    repo.finishRun(runId, { status: 'error', stats, error: err.message });
-    throw err;
   } finally {
     repo.flush();
     release();
