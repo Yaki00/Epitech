@@ -1,0 +1,20 @@
+{
+  "_comment": "Copier en perimeter.json (non versionné) et lister les applications suivies. 'name' = nom de référence, de préférence celui de l'APM (colonne A). 'aliases' = autres façons de l'écrire (abréviation, ancien nom, code), à compléter avec le rapport data/rapports/perimetre-orthographes.csv. 'auid' est facultatif : l'import APM le renseigne. Les fautes de frappe, sigles et noms incomplets sont reconnus sans les lister. ignoreOtherApplications = true : toute autre application est ignorée. architectureKeywords (facultatif) : mots du titre ou des pages parentes qui signalent une page d'architecture ; par défaut architecture, archi, DAT, serveurs, production, infra, topologie, hébergement, déploiement, environnement, socle…",
+  "ignoreOtherApplications": true,
+  "applications": [
+    {
+      "name": "OrderHub",
+      "aliases": [
+        "ORH",
+        "Order Hub Manager"
+      ]
+    },
+    {
+      "name": "Billing Engine",
+      "aliases": [
+        "BILL"
+      ],
+      "auid": "AUID-0042"
+    }
+  ]
+}
