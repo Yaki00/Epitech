@@ -43,9 +43,10 @@ function verifyReading(reading, ctx) {
   const recentPage = pagePeriod === 'current' && pageUpdatedAt && now - Date.parse(pageUpdatedAt) < CORROBORATION_DAYS * DAY;
 
   // ---- applications ----
+  const openApps = new Map(); // applications hors périmètre acceptées (ignoreOtherApplications faux)
   const appIdOf = (name) => {
     const hit = matcher && matcher.resolveAppName(name);
-    return hit ? hit.app.id : null;
+    return hit ? hit.app.id : openApps.get(normKey(name)) || null;
   };
   const apps = [];
   for (const a of reading.applications || []) {
@@ -57,6 +58,7 @@ function verifyReading(reading, ctx) {
         continue;
       }
       appId = `application:${nodeKey('application', a.name)}`;
+      openApps.set(normKey(a.name), appId);
     }
     apps.push({ appId, role: a.role, written: a.written, evidence: a.evidence });
   }
@@ -73,11 +75,14 @@ function verifyReading(reading, ctx) {
   const resolveServer = (name) => repo.resolve(name).find((n) => n.type === 'server') || null;
   function isSupervised(name, node) {
     const names = [name, node && node.name, node && node.attrs && node.attrs.fqdn].filter(Boolean).map((s) => String(s).toLowerCase());
-    return names.some((n) => naemonLower.has(n) || naemonLower.has(n.split('.')[0]));
+    const isIp = (n) => /^\d{1,3}(\.\d{1,3}){3}$/.test(n);
+    return names.some((n) => naemonLower.has(n) || (!isIp(n) && naemonLower.has(n.split('.')[0])));
   }
 
   function addServer(k, name, node, e) {
-    const inInventory = Boolean(node && !isRetired(node) && (inventoryOwners(node.id).size > 0 || !(node.attrs && node.attrs.horsInventaire)));
+    const attrs = (node && node.attrs) || {};
+    const hasRow = Object.keys(attrs).some((k) => k.endsWith('_row') && k !== 'confluence_row');
+    const inInventory = Boolean(node && !isRetired(node) && !attrs.outOfInventory && (hasRow || inventoryOwners(node.id).size > 0));
     const entry = {
       nodeId: node ? node.id : null,
       name: node ? node.name : name,

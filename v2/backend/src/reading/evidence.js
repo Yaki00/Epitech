@@ -11,6 +11,9 @@ function normalizeText(s) {
     .toLowerCase()
     .replace(/[‘’‚‛ʼ`´]/g, "'")
     .replace(/[“”„‟«»]/g, '"')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/[\u2010\u2011]/g, '-')
+    .replace(/\s*(?:->|=>|\u2192)\s*/g, ' -> ')
     .replace(/\s*"\s*/g, '"')
     .replace(/[|\s   ]+/g, ' ')
     .trim();
@@ -18,7 +21,7 @@ function normalizeText(s) {
 
 function hasEvidence(haystack, quote) {
   const q = normalizeText(quote);
-  if (!q) return false;
+  if (q.length < 4 || !/[\p{L}\p{N}]/u.test(q)) return false;
   return normalizeText(haystack).includes(q);
 }
 

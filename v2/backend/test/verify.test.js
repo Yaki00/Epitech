@@ -48,6 +48,13 @@ describe('hasEvidence', () => {
     assert.ok(hasEvidence('« Base de données » du Système', '"base de donnees" du systeme'));
     assert.ok(hasEvidence('srvorh01 | PRD | actif', 'srvorh01 PRD actif'));
     assert.ok(!hasEvidence('texte', ''));
+    assert.ok(hasEvidence('A → B (lien)', 'a -> b (lien)'));
+    assert.ok(hasEvidence('pré\u2011prod', 'pré-prod'));
+  });
+
+  test('too short evidence is rejected', () => {
+    assert.ok(!hasEvidence('abc srv 12', 'srv'));
+    assert.ok(!hasEvidence('a | b ... c', '...'));
   });
 });
 
@@ -186,9 +193,9 @@ describe('verifyReading', () => {
       page: { kind: 'architecture', period: null, env: null, topics: [] },
       applications: [{ name: 'OrderHub', written: 'OrderHub', role: 'subject', evidence: 'OrderHub' }],
       links: [runsOn('srvorh01', 'srvorh01'), { from: 'OrderHub', to: 'Billing Engine', type: 'calls', evidence: 'Billing' }],
-      owners: [{ name: 'Awa', kind: 'person', application: 'ORH', role: 'owner', evidence: 'Awa' }],
+      owners: [{ name: 'Awa', kind: 'person', application: 'ORH', role: 'owner', evidence: 'Awa Diallo' }],
     });
-    const v = verifyReading(r, ctxOf(env, { pageText: 'OrderHub srvorh01 Billing Awa' }));
+    const v = verifyReading(r, ctxOf(env, { pageText: 'OrderHub srvorh01 Billing Awa Diallo' }));
     assert.deepEqual(v.links.map((l) => l.trust), ['confirmed', 'toValidate']);
     assert.equal(v.apps.length, 1);
     assert.equal(v.owners[0].period, 'current');
@@ -199,6 +206,28 @@ describe('verifyReading', () => {
     const r = reading({ entities: [server('srvnew01', 'srvnew01', { status: null }), server('srvorh01', 'srvorh01', { status: null })], links: [runsOn('srvnew01', 'srvnew01'), runsOn('srvorh01', 'srvorh01')] });
     const v = verifyReading(r, ctxOf(env, { pageText: 'srvnew01 srvorh01', naemonHosts: new Set(['srvnew01']) }));
     assert.deepEqual(v.links.map((l) => l.trust), ['toValidate', 'confirmed']);
+  });
+
+  test('server node created by documentation only is not in inventory and can be corroborated by naemon', () => {
+    const env = setup();
+    env.repo.upsertNode({ type: 'server', key: 'srvdoc01', name: 'srvdoc01', source: 'confluence', attrs: { outOfInventory: true } });
+    env.repo.upsertNode({ type: 'server', key: 'srvdoc02', name: 'srvdoc02', source: 'confluence' });
+    env.repo.addEdge({ src: 'application:orderhub', dst: 'server:srvdoc02', type: 'runs_on', source: 'llm' });
+    const r = reading({ links: [runsOn('srvdoc01', 'srvdoc01'), runsOn('srvdoc02', 'srvdoc02')] });
+    const v = verifyReading(r, ctxOf(env, { pageText: 'srvdoc01 srvdoc02', naemonHosts: new Set(['srvdoc01', 'srvdoc02']), pageUpdatedAt: OLD }));
+    assert.deepEqual(v.servers.map((s) => [s.inInventory, s.corroborated]), [[false, true], [false, true]]);
+    assert.deepEqual(v.links.map((l) => l.trust), ['added', 'added']);
+  });
+
+  test('unknown application is linkable when ignoreOthers is false', () => {
+    const env = setup(false);
+    const r = reading({
+      applications: [{ name: 'Inconnue', written: 'Inconnue', role: 'cited', evidence: 'Inconnue' }],
+      links: [{ from: 'OrderHub', to: 'Inconnue', type: 'calls', evidence: 'appelle Inconnue' }],
+    });
+    const v = verifyReading(r, ctxOf(env, { pageText: 'Inconnue appelle Inconnue' }));
+    assert.deepEqual(v.rejected, []);
+    assert.equal(v.links[0].dst, 'application:inconnue');
   });
 
   test('retired inventory edge does not count', () => {
