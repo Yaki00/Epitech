@@ -7,14 +7,25 @@ const express = require('express');
 const { impactOf, dependenciesOf, neighborhood } = require('../graph/impact');
 const { ask } = require('../assistant/ask');
 const views = require('./views');
+const v2 = require('./views2');
+const { writeGapsReport } = require('../naemon/gaps');
 const path = require('path');
 const fs = require('fs');
 
 /**
- * @param {object} deps { repo, llm, logger, frontendDist, toolsMode, jobs }
+ * @param {object} deps { repo, llm, logger, frontendDist, toolsMode, jobs, poller, history, config }
  *   jobs : lanceur de synchros (createJobRunner) ; absent = boutons de synchro désactivés
+ *   poller : relève Naemon (snapshot()) ; absent = supervision désactivée (états « unknown », source « off »)
+ *   history : historique des imports ; absent = aucun changement listé
  */
-function createApp({ repo, llm, logger, frontendDist, toolsMode = 'native', jobs = null }) {
+function createApp({ repo, llm, logger, frontendDist, toolsMode = 'native', jobs = null, poller = null, history = null, config = null }) {
+  const d = { repo, poller, history, config, jobs };
+  let version = null;
+  try {
+    version = require('../../../package.json').version || null;
+  } catch (err) {
+    version = null;
+  }
   const app = express();
   app.use(express.json({ limit: '1mb' }));
   app.use((req, res, next) => {
@@ -46,13 +57,48 @@ function createApp({ repo, llm, logger, frontendDist, toolsMode = 'native', jobs
     res.json(repo.search(q, intOr(req.query.limit, 20)));
   });
 
-  app.get('/api/config', (req, res) => res.json(views.uiConfig()));
-  app.get('/api/applications', (req, res) => res.json(views.listApplications(repo)));
-  app.get('/api/applications/:id', (req, res) => {
-    const d = views.applicationDetail(repo, req.params.id);
-    return d ? res.json(d) : res.status(404).json({ error: 'introuvable' });
+  app.get('/api/config', (req, res) => {
+    const env = { ...process.env };
+    if (!env.NAEMON_URL_TEMPLATE && config && config.naemon && config.naemon.urlTemplate) env.NAEMON_URL_TEMPLATE = config.naemon.urlTemplate;
+    res.json(views.uiConfig(env, { demo: Boolean(config && config.demo), naemonSource: poller ? v2.snap(d).source : (config && config.naemon && config.naemon.source) || 'off', version }));
   });
-  app.get('/api/servers', (req, res) => res.json(views.searchServers(repo, req.query.q, intOr(req.query.limit, 30))));
+  app.get('/api/applications', (req, res) => res.json(views.listApplications(repo, v2.ctxOf(d))));
+  app.get('/api/applications/:id', (req, res) => {
+    const r = views.applicationDetail(repo, req.params.id, v2.ctxOf(d));
+    return r ? res.json(r) : res.status(404).json({ error: 'introuvable' });
+  });
+  app.get('/api/servers', (req, res) => res.json(views.searchServers(repo, req.query.q, intOr(req.query.limit, 30), v2.ctxOf(d))));
+
+  // ---- API v2 ----
+  app.get('/api/overview', (req, res) => res.json(v2.overviewView(d)));
+  app.get('/api/status', (req, res) => res.json(v2.statusView(d)));
+  app.get('/api/gaps', (req, res) => {
+    const { gaps, raw } = v2.gapsView(d);
+    if (req.query.format === 'csv') {
+      const file = writeGapsReport((config && config.reportsDir) || require('os').tmpdir(), raw);
+      return res.download(file, path.basename(file));
+    }
+    res.json(gaps);
+  });
+  app.get('/api/changes', (req, res) => res.json(v2.changesView(d, Math.min(Math.max(intOr(req.query.limit, 20), 1), 200))));
+  app.get('/api/servers/:id', (req, res) => {
+    const r = v2.serverDetail(d, req.params.id);
+    return r ? res.json(r) : res.status(404).json({ error: 'introuvable' });
+  });
+  app.post('/api/simulate', (req, res) => {
+    const ids = req.body && req.body.nodeIds;
+    if (!Array.isArray(ids) || !ids.length || ids.length > 500 || !ids.every((x) => typeof x === 'string' && x)) {
+      return res.status(400).json({ error: 'nodeIds : liste non vide de chaînes (500 au plus)' });
+    }
+    res.json(v2.simulate(d, [...new Set(ids)], { includeRetired: req.body.includeRetired === true, depth: Math.min(intOr(req.body.depth, 5), 8) }));
+  });
+  app.get('/api/map', (req, res) => {
+    const scope = String(req.query.scope || 'perimeter');
+    if (scope !== 'perimeter' && !/^app:.+/.test(scope)) return res.status(400).json({ error: 'scope : perimeter ou app:<id>' });
+    const envs = req.query.envs ? String(req.query.envs).split(',') : null;
+    const r = v2.mapView(d, { scope, envs, includeRetired: req.query.includeRetired === 'true' });
+    return r ? res.json(r) : res.status(404).json({ error: 'introuvable' });
+  });
   app.get('/api/teams', (req, res) => res.json(views.listTeams(repo)));
 
   app.get('/api/nodes/:id', (req, res) => {
