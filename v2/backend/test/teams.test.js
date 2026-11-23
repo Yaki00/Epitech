@@ -114,12 +114,29 @@ describe('équipes et responsables', () => {
     assert.equal(docScore(repo, a).parts.find((p) => p.key === 'architecture').points, 35);
   });
 
+  test('documents carry the period read on the page node', () => {
+    const a = app('Alto');
+    const old = page('p-old', { period: 'past' });
+    const cur = page('p-cur', { period: 'current' });
+    repo.addEdge({ src: a, dst: old, type: 'documented_in', source: 'confluence', attrs: { role: 'subject' } });
+    repo.addEdge({ src: a, dst: cur, type: 'documented_in', source: 'confluence', attrs: { role: 'cited' } });
+    const docs = views.applicationDetail(repo, a).documents;
+    assert.deepEqual(docs.map((d) => [d.id, d.role, d.period]).sort(), [
+      [cur, 'cited', 'current'],
+      [old, 'subject', 'past'],
+    ]);
+  });
+
   test('server lists flag outOfInventory and show inactive links with their marks', () => {
     const a = app('Alto');
     const s = repo.upsertNode({ type: 'server', key: 'srvghost', source: 'llm', attrs: { fromLlm: true, outOfInventory: true } });
     repo.addEdge({ src: a, dst: s, type: 'runs_on', source: 'llm', attrs: { trust: 'added', period: 'past' } });
+    const db = repo.upsertNode({ type: 'database', key: 'oldbase', name: 'Old Base', source: 'llm', attrs: {} });
+    repo.addEdge({ src: a, dst: db, type: 'uses_db', source: 'llm', attrs: { trust: 'added', period: 'past' } });
     const det = views.applicationDetail(repo, a);
     assert.equal(det.servers, 0);
+    assert.equal(det.databases, 0);
+    assert.equal(det.databaseList[0].active, false);
     assert.equal(det.serverList[0].outOfInventory, true);
     assert.equal(det.serverList[0].period, 'past');
     assert.equal(det.serverList[0].active, false);

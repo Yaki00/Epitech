@@ -32,7 +32,7 @@ function appStatus(ctx, id) {
 function applicationSummary(repo, app, ctx = null) {
   const out = repo.edgesFrom(app.id).filter((e) => !isRetired(e));
   const serverIds = new Set(out.filter((e) => e.type === 'runs_on' && !isInactiveEdge(e)).map((e) => e.dst));
-  const dbIds = new Set(out.filter((e) => e.type === 'uses_db').map((e) => e.dst));
+  const dbIds = new Set(out.filter((e) => e.type === 'uses_db' && !isInactiveEdge(e)).map((e) => e.dst));
   const envs = new Set();
   for (const id of serverIds) {
     const srv = repo.getNode(id);
@@ -161,7 +161,8 @@ function applicationDetail(repo, id, ctx = null) {
       url: d.attrs.url || null,
       architecture: d.attrs.pageKind === 'architecture',
       role: prev?.role === 'subject' ? 'subject' : mark(e, 'role') || prev?.role || null,
-      period: mark(e, 'period') || prev?.period || null,
+      // la période est lue sur la page (nœud document), un lien peut la préciser
+      period: mark(e, 'period') || prev?.period || d.attrs.period || null,
       audit: prev?.audit || e.attrs.audit || null,
     });
   }
