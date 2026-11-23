@@ -6,7 +6,7 @@
 import { useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { Info, Server as ServerIcon, X } from 'lucide-react';
-import { api, useApi, type ServerState, type ServerSummary } from '../lib/api';
+import { api, REFRESH_MS, useApi, type ServerState, type ServerSummary } from '../lib/api';
 import { useI18n } from '../lib/i18n';
 import { useTitle } from '../lib/useTitle';
 import { useLiveStatus } from '../lib/live';
@@ -28,7 +28,7 @@ export default function ServersPage() {
   const { t } = useI18n();
   useTitle(t('page.servers.title'));
   // l'API de recherche est limitée : on demande tout le parc d'un coup et on filtre ici
-  const { data, error, loading, refreshing, reload } = useApi((signal) => api.servers(undefined, SERVERS_LIMIT, { signal }), []);
+  const { data, error, loading, refreshing, reload } = useApi((signal) => api.servers(undefined, SERVERS_LIMIT, { signal }), [], { refreshMs: REFRESH_MS });
   const { status: live } = useLiveStatus();
   const [envFilter] = useEnvFilter();
   const [params, setParams] = useSearchParams();

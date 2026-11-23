@@ -632,6 +632,7 @@ function MonitoringTab({ app }: { app: ApplicationDetail }) {
   const { t, lang } = useI18n();
   const { config } = useConfig();
   const { status: live } = useLiveStatus();
+  const [envFilter] = useEnvFilter();
   if (config?.naemonSource === 'off' || live?.source === 'off') {
     return (
       <Card>
@@ -640,7 +641,6 @@ function MonitoringTab({ app }: { app: ApplicationDetail }) {
     );
   }
   const active = app.serverList.filter((s) => !s.retired);
-  const [envFilter] = useEnvFilter();
   const envCounts = { PRD: 0, STG: 0, DEV: 0, none: 0 };
   for (const s of active) envCounts[s.env ?? 'none'] += 1;
   const servers = active
