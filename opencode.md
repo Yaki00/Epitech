@@ -134,7 +134,8 @@ tu **installes, configures, lances et testes**, tu ne modifies jamais le code (`
 fichiers de documentation. Tu ne touches jamais à `v1/` depuis la v2. Documentation : `v2/README.md` et `v2/ARCHITECTURE.md`.
 
 Fichiers que tu peux modifier : `v2/backend/.env`, `v2/backend/config/perimeter.json`, `v2/backend/config/mappings.json`
-(proposition puis accord de l'utilisateur), `v2/backend/data/raw/...`, `v2/logs/`.
+et `v2/backend/config/consignes-ia.md` (pour ces trois derniers : proposition puis accord de l'utilisateur, jamais d'écriture
+directe), `v2/backend/data/raw/...`, `v2/logs/`. Le modèle `consignes-ia.example.md` ne se modifie pas.
 
 ## Commandes (depuis `v2/`, Node 16.20.x)
 
@@ -174,8 +175,28 @@ L'interface est déjà compilée dans `v2/frontend/dist` ; si elle manque, seule
 | `NAEMON_CSV_FILE` | pour `csv` ; les colonnes sont décrites dans le bloc `naemon` de `mappings.json` (proposer, attendre l'accord) |
 | `NAEMON_POLL_MINUTES` | minutes entre deux relevés (5 par défaut) |
 | `NAEMON_URL_TEMPLATE` | lien du bouton « Monitoring Naemon », `{app}` = nom de l'application |
+| `LLM_REASONING_EFFORT` | vide par défaut ; `none` si l'IA rend des réponses vides ou coupées |
+| `LLM_MAX_TOKENS_EXTRACT`, `READING_CHUNK_CHARS`, `CONSIGNES_FILE` | laisser les valeurs par défaut sauf demande |
 
 `NODE_EXTRA_CA_CERTS` (certificat d'entreprise) se définit dans l'environnement **système**, pas dans `.env`.
+
+## Lecture des pages par l'IA et consignes (v2)
+
+L'IA lit chaque page Confluence et le code vérifie ses citations : plus aucune règle de repérage dans le code. Les conventions de
+l'entreprise (noms de serveurs, sens de « recette », vocabulaire) se disent dans `v2/backend/config/consignes-ia.md`, créé par
+`npm run setup` depuis le modèle. Tu peux proposer une modification de ce fichier, comme pour `perimeter.json`, et l'écrire
+seulement après l'accord de l'utilisateur. Ne jamais y mettre de mot de passe, de jeton ni de donnée personnelle. Modifier les
+consignes fait relire toutes les pages au prochain passage : le dire à l'utilisateur avant.
+
+- `npm run doctor` indique la présence et la taille des consignes (au-delà de 8 000 caractères la fin est ignorée), les synonymes
+  d'environnement lus dans `mappings.json` et le résultat d'une petite lecture d'essai.
+- Au premier passage après la mise à jour (ou après une reprise de la v1), **toutes les pages sont relues par l'IA** : c'est normal et long.
+  Toujours faire l'essai sur 20 pages d'abord : `node backend/scripts/sync-confluence.js --llm --limit 20`.
+- Sans `--llm` ou sans IA joignable, les pages sont stockées mais rien n'est déduit (ni serveurs cités, ni responsables) : le signaler.
+- Regarder dans `backend/data/rapports/` : `perimetre-pages.csv`, `perimetre-orthographes.csv`, `lectures-rejets.csv` (éléments écartés
+  faute de citation ou d'application connue), `architecture-*.csv`. Les résumer dans le rapport.
+- Page **Équipes** et carte **Responsables** de la fiche application : alimentées par les pages lues. Liens « À valider », « Ancien »,
+  « Cible » et serveurs « Hors inventaire » : normaux, ils ne comptent pas (ou pas tous) dans l'impact.
 
 ## Erreurs fréquentes (v2)
 
@@ -190,6 +211,9 @@ L'interface est déjà compilée dans `v2/frontend/dist` ; si elle manque, seule
 | Hôtes « non rapprochés » | noms Naemon différents de ceux de l'inventaire | les lister dans le rapport, ne rien modifier |
 | `backend/.env existe déjà : reprise de la v1 ignorée` | `.env` créé avant la reprise | le dire à l'utilisateur ; ne pas supprimer le `.env` sans accord |
 | `unable to get local issuer certificate` | certificat d'entreprise | `NODE_EXTRA_CA_CERTS` (variable système) |
+| Réponses vides ou coupées de l'IA (`réponse vide`, `réponse coupée`, pages en erreur, doctor le signale) | le modèle « réfléchit » et épuise sa place | proposer `LLM_REASONING_EFFORT=none` dans `.env`, relancer `npm run doctor` puis l'essai sur 20 pages |
+| `doctor` : consignes absentes, vides ou trop longues | `consignes-ia.md` manquant ou > 8 000 caractères | proposer de le créer depuis le modèle ou de le raccourcir (accord de l'utilisateur) |
+| Aucune équipe ni serveur cité après la synchro | pas de `--llm`, IA injoignable ou pages en erreur | lancer avec `--llm`, voir `lectures-rejets.csv` et le journal |
 | Applications du périmètre toutes à « inconnu » après reprise | `perimeter.json` ou export APM absent | vérifier `data/raw/apm/` et `config/perimeter.json` |
 
 Pour rapporter un problème : mêmes règles que pour la v1 (commande exacte, sortie complète sans secret, `node -v`, `npm run doctor`,

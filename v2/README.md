@@ -2,8 +2,9 @@
 
 Graphe de dépendances applications, serveurs et bases, construit depuis l'export Confluence, la marketplace, l'APM
 et Naemon, pour répondre à « si je touche X, qu'est-ce qui est impacté ? ». La v2 reprend le moteur de la v1 et ajoute
-une interface refaite, la supervision Naemon en direct, l'historique des changements, les éléments retirés et un score
-de documentation.
+une interface refaite, la supervision Naemon en direct, l'historique des changements, les éléments retirés, un score
+de documentation, et surtout un **repérage fait par l'IA** : elle lit chaque page Confluence (serveurs, bases, liens,
+responsables, nature et période de la page) et le code ne fait que vérifier ce qu'elle rend.
 
 Architecture, conventions et contrat d'API : voir **[ARCHITECTURE.md](ARCHITECTURE.md)**.
 
@@ -46,6 +47,11 @@ Si `../v1/backend/.env` existe et que `v2/backend/.env` n'existe pas encore, `np
    clés sont mises en commentaire dans la copie (dotenv garde la dernière occurrence d'une clé, donc le bloc v2, placé à la fin, l'emporte).
 6. Les chemins absolus de la v1 (`DATA_DIR`, `LLM_CACHE_DIR`) sont ramenés aux dossiers de la v2.
 
+**Au premier passage après la mise à jour, toutes les pages sont relues par l'IA** : la façon d'analyser a changé, donc les demandes
+envoyées au modèle aussi, et le cache de la v1 ne sert plus pour la lecture (il sert encore pour les résumés tant que leurs entrées
+ne changent pas). Prévoir un passage long (de l'ordre d'une demi-heure pour 150 pages avec une IA locale). Les passages suivants ne
+relisent que les pages modifiées, ou toutes si les consignes ou le périmètre changent.
+
 Relancer `npm run setup` n'écrase rien et n'ajoute pas deux fois le bloc v2. La v1 reste seule à récupérer Confluence :
 la v2 lit son export sans jamais le modifier (`CONFLUENCE_FETCH=false`). Pour que la v2 récupère elle-même Confluence,
 mettre `CONFLUENCE_FETCH=true` et décider qui, de la v1 ou de la v2, garde la récupération.
@@ -68,10 +74,11 @@ npm run setup      # npm install du backend + backend/.env, config/mappings.json
 #    clés des espaces Confluence : node backend/scripts/fetch-confluence.js --list-spaces
 # 2. backend/config/perimeter.json : les applications suivies (noms de la colonne A de l'APM)
 # 3. backend/config/mappings.json : fichiers CSV et colonnes (nom exact ou lettre Excel, ex. "CK")
+# 4. backend/config/consignes-ia.md : consignes de lecture pour l'IA (copie du modèle faite par setup, voir plus bas)
 #    export APM : déposer le CSV dans backend/data/raw/apm/ (le plus récent est pris)
 npm run doctor     # vérifie IA, Confluence, Naemon, fichiers ; rapport à copier-coller
 npm test           # tests du backend (jest), sans IA ni réseau
-npm run sync:all   # récupère Confluence, importe les CSV, analyse avec l'IA (seulement ce qui a changé)
+npm run sync:all   # récupère Confluence, importe les CSV, lit les pages avec l'IA (seulement ce qui a changé)
 npm start          # http://localhost:3002
 ```
 
@@ -126,6 +133,92 @@ Le rapprochement entre hôtes Naemon et serveurs du graphe se fait par nom court
 Certificat d'entreprise : si `npm run doctor` signale `unable to get local issuer certificate`, définir la variable
 d'environnement **système** `NODE_EXTRA_CA_CERTS=<chemin du certificat racine .pem>` (pas dans `.env`), puis relancer.
 
+## Lecture des pages par l'IA et consignes
+
+L'analyse Confluence ne contient aucune règle de repérage (pas de liste de noms de serveurs, pas de motif de nom, pas de mot-clé de
+titre). Pour chaque page, l'IA rend en JSON la nature de la page, sa période (actuelle, ancienne, cible), les applications dont elle
+parle, les serveurs, bases, files, URL cités avec leur environnement et leur statut, les liens entre eux et les responsables, chaque
+élément avec une **citation** du texte. Le code garde un élément seulement si sa citation se retrouve dans la page, puis rapproche les
+serveurs de l'inventaire (nom court, FQDN ou IP). Une page longue est lue en plusieurs morceaux (`READING_CHUNK_CHARS`, 12000 caractères
+par défaut). L'IA ne calcule jamais un impact ni un état : cela reste le travail du graphe et de Naemon.
+
+### Le fichier de consignes
+
+Tout ce qui dépend des conventions de l'entreprise (noms de serveurs, sens des environnements, vocabulaire, pages à ignorer) s'écrit en
+texte libre dans `backend/config/consignes-ia.md`, sans toucher au code. `npm run setup` le crée depuis le modèle
+`backend/config/consignes-ia.example.md` (4 rubriques, exemples fictifs à remplacer). Le fichier n'est pas versionné et se règle avec
+`CONSIGNES_FILE` dans `.env`.
+
+- Phrases simples, une règle par ligne. Au-delà de 8 000 caractères, la fin est ignorée (`npm run doctor` le signale).
+- Fichier absent ou vide : l'analyse marche quand même, avec les seules règles générales.
+- Modifier les consignes relance la lecture de **toutes** les pages au prochain passage (elles entrent dans l'empreinte de l'analyse).
+- Les consignes ne contiennent ni mot de passe ni donnée personnelle : le texte part à l'IA avec chaque page.
+
+### Synonymes d'environnement
+
+Les environnements sont `PRD`, `STG` et `DEV` (sinon « Non précisé »). Pour l'import des inventaires, des synonymes se déclarent dans
+le bloc facultatif `environnements` de `backend/config/mappings.json` :
+
+```json
+"environnements": { "STG": ["recette", "uat"], "DEV": ["integration"], "PRD": ["exploitation"] }
+```
+
+Les mêmes mots se disent à l'IA dans la rubrique « Environnements » des consignes (l'IA ne rend que `PRD`, `STG`, `DEV` ou rien).
+
+### Réglages du modèle
+
+| Variable | Rôle |
+|---|---|
+| `LLM_REASONING_EFFORT` | vide par défaut (rien n'est envoyé). Mettre `none` si le modèle « réfléchit » et rend des réponses vides ou coupées |
+| `LLM_MAX_TOKENS_EXTRACT` | place de réponse pour la lecture d'un morceau (4096 par défaut) |
+| `READING_CHUNK_CHARS` | taille d'un morceau de page (12000 par défaut, 1000 au minimum) |
+| `CONSIGNES_FILE` | chemin du fichier de consignes (`./config/consignes-ia.md` par défaut) |
+
+Une réponse vide, coupée ou en JSON illisible n'est jamais gardée en cache : une nouvelle tentative a lieu avec le double de place, puis la page
+passe en erreur et garde sa lecture précédente. Elle est reprise au passage suivant. `npm run doctor` envoie une petite lecture d'essai et
+conseille `LLM_REASONING_EFFORT=none` quand la réponse est vide ou coupée.
+
+### Ce que la vérification décide
+
+L'inventaire (APM, marketplace) reste la référence pour « quel serveur appartient à quelle application ».
+
+| L'IA lit « A tourne sur S » | Effet |
+|---|---|
+| S est dans l'inventaire, rattaché à A | confirme le lien existant, rien de nouveau |
+| S est dans l'inventaire, rattaché à une autre application | aucun lien ajouté, écart « autre application » signalé |
+| S est hors inventaire, supervisé par Naemon ou cité actif par une page actuelle modifiée depuis moins de 24 mois | lien ajouté, S marqué « Hors inventaire », compté dans l'impact |
+| S est hors inventaire et rien ne le corrobore | lien « À valider » : grisé, hors impact par défaut, listé dans le rapport d'écarts |
+| la page est ancienne ou décrit une cible, ou S est dit décommissionné ou prévu | lien gardé avec sa période (« Ancien », « Cible »), hors impact et hors carte par défaut |
+
+Les liens entre applications, vers les bases et entre bases et serveurs n'existent pas dans les inventaires : ils viennent des pages
+actuelles. Dans l'interface, la case « Afficher retirés, anciens et à valider » les rend visibles.
+
+### Sans IA
+
+Sans IA configurée, ou sans `--llm` en ligne de commande, il n'y a plus de repérage de secours : les pages sont stockées mais n'apportent ni serveurs cités, ni
+rattachement, ni nature de page. La synchronisation le dit dans son journal et `npm run doctor` aussi. Si l'appel échoue pour une page, elle
+garde sa lecture précédente. L'import des inventaires, l'impact, Naemon et le score de documentation ne dépendent pas de l'IA.
+
+### Rapports
+
+Dans `backend/data/rapports/` (CSV, ouverts avec Excel) : `perimetre-pages.csv` (pages par application, avec la citation et la forme écrite),
+`perimetre-orthographes.csv` (formes écrites rapprochées d'une application, hors nom et alias déclarés), `lectures-rejets.csv` (éléments
+écartés par la vérification : citation introuvable, application inconnue ou hors périmètre) et `architecture-*.csv` (contrôle des pages
+d'architecture contre l'inventaire).
+
+## Équipes et responsables
+
+Les responsables viennent de ce que l'IA lit dans les pages (personne ou équipe, application, rôle : responsable, support, astreinte,
+autre, période actuelle ou ancienne) et, si les colonnes sont décrites dans la relation APM de `mappings.json` (`owner`, `supportTeam`,
+voir `mappings.example.json`), de l'APM. Si les deux divergent, les deux sont montrés avec leur source. Seuls le nom, le rôle,
+l'application et la page source sont gardés : ni adresse électronique ni téléphone (l'IA est consignée de ne pas les rendre, le code
+les retire s'ils apparaissent).
+
+- Page **Équipes** : une carte par personne ou équipe avec ses applications (filtre `?q=`, recherche Ctrl+K), « Non renseignée » en dernier.
+- Fiche application : carte **Responsables** avec les pages sources.
+- API : `GET /api/teams` et `owners[]` dans `GET /api/applications/:id`.
+- Assistant : « Qui s'occupe de X ? » (outil `owners_of`).
+
 ## Historique, éléments retirés et score de documentation
 
 - **Historique** : à chaque import d'inventaire (APM, marketplace), Lyra compare avec le précédent et note ce qui a été ajouté,
@@ -147,7 +240,7 @@ npm test          # vitest
 ```
 
 Pages : Accueil, Applications (fiche à onglets), Serveurs (fiche serveur), Cartographie (zones PRD, STG, DEV, Non précisé,
-simulation de panne), Supervision, Historique, Synchronisation, bulle de l'assistant sur toutes les pages.
+simulation de panne), Équipes, Supervision, Historique, Synchronisation, bulle de l'assistant sur toutes les pages.
 Environnements : `PRD`, `STG`, `DEV`, plus « Non précisé » pour un serveur sans environnement connu.
 
 ## Alimenter le graphe
@@ -161,9 +254,10 @@ node scripts/fetch-confluence.js --full   # retélécharge tout (ex. une fois pa
 node scripts/summarize-apps.js            # résumé IA des applications (après sync-confluence --llm)
 npm run sync:inventory                    # toutes les sources CSV de mappings.json (historique et retraits inclus)
 node scripts/sync-inventory.js apm        # une seule
-npm run sync:confluence                   # sans IA : structure, tableaux, liens, draw.io, mentions
-node scripts/sync-confluence.js --llm --limit 20   # test de l'extraction IA sur 20 pages
+npm run sync:confluence                   # sans IA : pages stockées, rien n'est déduit (voir « Sans IA »)
+node scripts/sync-confluence.js --llm --limit 20   # test de la lecture IA sur 20 pages
 npm run sync:confluence:llm               # tout, avec IA (incrémental)
+node scripts/sync-confluence.js --llm --force      # relit toutes les pages, même inchangées
 ```
 
 Les synchros peuvent tourner pendant que le serveur est lancé : il recharge les données tout seul. Elles se lancent aussi depuis

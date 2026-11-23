@@ -2,12 +2,17 @@
 
 **Assistant de code : lis d'abord `../opencode.md`.** Sur ce poste, tu installes, configures et testes ;
 tu ne modifies pas le code. Ce fichier sert à comprendre le projet. Il complète `../v1/ARCHITECTURE.md`, dont tout ce qui
-n'est pas redit ici reste vrai (extraction, périmètre, pages d'architecture, export Confluence, modèles d'IA).
+n'est pas redit ici reste vrai (périmètre, export Confluence, modèles d'IA). **Exception : l'extraction Confluence de la v1
+(repérage par règles) est remplacée par la lecture IA vérifiée décrite plus bas.**
 
 ## Ce que la v2 ajoute à la v1
 
 - Une **interface refaite** (React 19, TypeScript, Tailwind 4, Vite 8) : Accueil, Applications, Serveurs, Cartographie,
-  Supervision, Historique, Synchronisation, assistant en bulle. Plus de page Équipes ni de responsable : ces données ne sont pas fiables.
+  Équipes, Supervision, Historique, Synchronisation, assistant en bulle.
+- La **lecture des pages par l'IA** : l'IA repère (serveurs, bases, liens, responsables, nature et période de la page), le code
+  vérifie (citation retrouvée, rapprochement avec l'inventaire). Plus aucune règle de repérage dans le code.
+- Les **équipes et responsables** par application, lus dans la documentation (et dans l'APM s'il les fournit).
+- Des **consignes en texte** (`config/consignes-ia.md`) pour adapter la lecture aux conventions de l'entreprise sans toucher au code.
 - La **supervision Naemon en direct** (Thruk ou CSV) : état des serveurs et des applications, propagation du risque, rapport d'écarts.
 - L'**historique** des imports et les **éléments retirés** (jamais supprimés).
 - Le **score de documentation** par application.
@@ -43,11 +48,12 @@ v2/
                            gaps.js (rapport d'écarts), setup.js
       history/history.js   snapshots.json, changes.json, retrait des disparus
       quality/docScore.js  score de documentation
-      lib/environment.js   normalisation PRD, STG, DEV (sinon null)
+      lib/environment.js   normalisation PRD, STG, DEV (sinon null), synonymes du bloc `environnements`
+      reading/             lecture IA vérifiée : consignes, prompt, schema, readPage, evidence, verify, apply, syncPages, mockReadings
       demo/                generate.js (parc fictif), naemonMock.js, chatMock.js
       ...                  le reste comme en v1 (parse, ingest, perimeter, enrich, graph, store, assistant, fetch)
     scripts/               doctor.js, fetch-confluence.js, fetch-inventory.js, sync-inventory.js, sync-confluence.js, summarize-apps.js
-    test/                  jest (241 tests), sans réseau ni IA
+    test/                  jest, sans réseau ni IA
   frontend/
     src/                   app (routes, layout), pages, components, map (graphe ELK dans un worker), lib (API, i18n FR/EN)
     dist/                  interface compilée, versionnée
@@ -85,10 +91,93 @@ Règles d'état (`naemon/status.js`) :
 - Application : `ok`, `degraded`, `down`, `unknown`, calculée par environnement (`byEnv`). `atRisk` : application dont une dépendance (`calls`) est en panne, avec le chemin.
 - Rapport d'écarts (`gaps.js`) : serveurs du graphe non supervisés, hôtes supervisés inconnus de l'inventaire, serveurs cités dans Confluence mais absents de l'inventaire. Indisponible (`available: false`) sans relève.
 
+## Lecture IA des pages : lecture, vérification, écriture
+
+Le code ne repère rien dans le texte : ni liste de noms de serveurs, ni motif de nom ou d'IP, ni mot-clé de titre, ni score de
+reconnaissance d'application. Tout ce qui dépend des conventions va dans les consignes. La chaîne, par page (`src/reading/`) :
+
+1. **Lecture** (`readPage.js`, `prompt.js`, `schema.js`). Entrée : titre, pages parentes, espace, date de modification, sections du
+   parseur (texte barré retiré, tableaux mis à plat), schémas draw.io en texte (boîtes et flèches), applications du périmètre et leurs
+   variantes, consignes. Une page plus longue que `READING_CHUNK_CHARS` est coupée en morceaux (par sections, puis par paragraphes) lus
+   l'un après l'autre et fusionnés. Un appel `chatJson` par morceau (tâche `extract`, température 0, `LLM_MAX_TOKENS_EXTRACT`). Un
+   morceau vide, coupé ou illisible fait échouer la page entière, jamais une lecture partielle. Le résultat est nettoyé : valeurs hors
+   liste écartées ou ramenées à une valeur neutre, éléments sans citation écartés, adresses électroniques et numéros de téléphone retirés.
+2. **Vérification** (`evidence.js`, `verify.js`), sans modifier le graphe. Chaque élément garde sa citation seulement si elle se retrouve
+   dans le texte de la page (comparaison tolérante : casse, accents, guillemets typographiques, espaces insécables, retours à la ligne,
+   cellules de tableau). Les serveurs sont rapprochés de l'inventaire par `repo.resolve` (nom court, FQDN, IP), les applications du
+   périmètre par `matcher.resolveAppName` (variantes, fautes, sigles : sert à rapprocher un nom rendu par l'IA, jamais à en repérer).
+   Application inconnue ou hors périmètre, citation introuvable : élément rejeté avec sa raison.
+3. **Écriture** (`apply.js`, `syncPages.js`). Les liens et rattachements issus de la page lue précédemment (`removeEdgesBySourceRef`,
+   source `reading`) sont supprimés puis recréés ; les liens des inventaires ne sont jamais touchés. Les nœuds créés par d'anciennes
+   lectures et plus cités par aucun lien actif sont marqués retirés (jamais supprimés).
+
+### Formes
+
+```
+Reading  = { page: { kind, period, env, topics[] },
+             applications: [{ name, written, role: subject|cited, evidence }],
+             entities:     [{ name, type, env, status: active|decommissioned|planned, ip?, evidence }],
+             links:        [{ from, to, type, evidence }],
+             owners:       [{ name, kind: person|team, application, role: owner|support|oncall|other, evidence }] }
+
+Verified = { kind, period, env, topics,
+             apps:    [{ appId, role, written, evidence }],
+             servers: [{ nodeId|null, name, ip, env, status, inInventory, corroborated, evidence }],
+             links:   [{ src, dst, type, trust, period, evidence }],
+             owners:  [{ appId, name, kind, role, period, evidence }],
+             rejected: [{ what, reason: no_evidence|unknown_application|out_of_scope }] }
+```
+
+Types de lien : `runs_on`, `uses_db`, `db_on`, `calls`, `reads_from`, `writes_to`, `depends_on` (sens « src dépend de dst »).
+Nature de la page : `architecture`, `exploitation`, `installation`, `incident`, `version`, `reunion`, `projet`, `autre`. Période :
+`current`, `past`, `target`. Une valeur méconnaissable pour la période ou le statut vaut `null` (non fiable, traité comme « à valider »),
+jamais « actuel » par défaut. Le détail exact est dans le code et dans `test/reading.test.js`, `test/verify.test.js`.
+
+### Règles de confiance
+
+Une citation prouve que la page le dit, pas que c'est vrai : l'inventaire reste la référence pour « quel serveur appartient à quelle
+application ». `trust` d'un lien vaut `confirmed`, `added`, `toValidate` ou `otherApp`.
+
+| L'IA lit « A tourne sur S » | Effet |
+|---|---|
+| S dans l'inventaire, rattaché à A | `confirmed` : non écrit, déjà dans l'inventaire |
+| S dans l'inventaire, rattaché à une autre application | `otherApp` : non écrit, compté dans le contrôle de la page |
+| S hors inventaire, supervisé par Naemon ou page actuelle modifiée depuis moins de 730 jours disant S actif | `added` : écrit, serveur marqué `outOfInventory`, compte dans l'impact |
+| S hors inventaire sans corroboration (ou période illisible) | `toValidate` : écrit, inactif, listé dans `/api/gaps` |
+| page ancienne ou cible, S décommissionné ou prévu | écrit avec `period` `past` ou `target`, inactif |
+
+Un lien est **inactif** s'il est retiré, ancien, cible ou à valider (`isInactiveEdge`). Les liens inactifs sont ignorés par l'impact, les
+compteurs, l'état Naemon, le score de documentation et la carte (sauf `includeRetired=true`), mais restent listés avec leur marque. Les liens
+entre applications, vers les bases et base vers serveur n'ont pas d'inventaire : ils viennent des pages actuelles.
+
+### Décision par page et reprise
+
+`readingHash = sha256(READING_VERSION | empreinte des consignes | empreinte du périmètre)`. Une page est relue par l'IA si elle n'a pas de
+lecture gardée, si son contenu ou `readingHash` ont changé, ou avec `--force`. Si seule l'inventaire a changé (`verifyHash`), la vérification
+et l'écriture sont refaites à partir de la lecture gardée (`attrs.reading`), sans IA. Sinon la page est sautée. Une page en erreur garde sa
+lecture, son empreinte et ses rejets précédents et est reprise au passage suivant. La première analyse après la mise à jour relit donc toutes
+les pages. Sans IA, les pages sont stockées et rien n'est déduit.
+
+### Consignes, environnements, équipes
+
+- `config/consignes-ia.md` (non versionné) : texte libre, 8 000 caractères au plus, lu par `reading/consignes.js` (absent ou vide = vide) et
+  placé à la fin du message système. Modèle : `consignes-ia.example.md`. Le texte entre dans l'empreinte de la lecture.
+- `environnements` (bloc facultatif de `mappings.json`) : synonymes d'environnement pour l'import des inventaires (`configureEnvironmentsFromFile`).
+- Équipes : nœuds `person` et `team`, liens `owned_by` (application vers personne ou équipe) avec `role`, `period` et la citation, plus les
+  colonnes `owner` et `supportTeam` de l'APM si elles sont décrites. Ni adresse électronique ni téléphone ne sont stockés.
+- Rapports CSV : `perimetre-pages`, `perimetre-orthographes`, `lectures-rejets`, `architecture-*`.
+
+### Fiabilité des appels IA (`lib/llmClient.js`)
+
+`LLM_REASONING_EFFORT` est ajouté aux requêtes quand il est défini. Une réponse vide, coupée (`finish_reason = length`) ou en JSON illisible
+n'est jamais écrite au cache ; une nouvelle tentative a lieu avec le double de place (hors `LLM_MAX_RETRIES`), puis l'erreur porte un `code`
+(`empty`, `truncated`, `invalid_json`). `doctor` fait une lecture d'essai et conseille `LLM_REASONING_EFFORT=none` en cas de réponse vide ou coupée.
+
 ## Score de documentation
 
 `quality/docScore.js`, calculé à la volée : page d'architecture liée (35), aucune page d'architecture avec écart (25), part des
-serveurs cités par une page liée (30), résumé disponible (10). Les éléments retirés sont ignorés.
+serveurs cités par une page liée (30), résumé disponible (10). Les éléments retirés et les liens inactifs sont ignorés ; seules les pages où
+l'application est sujet principal comptent.
 
 ## Environnements
 
@@ -114,7 +203,7 @@ un fichier, ne modifie jamais la v1, écrit `.env` en dernier (sa présence sign
 React 19, react-router 7, Tailwind 4, `@xyflow/react` (carte), ELK dans un Web Worker (disposition), `cmdk` (palette de commandes),
 `html-to-image` (export PNG). Bilingue FR / EN (`src/lib/i18n.tsx`, un test vérifie que les deux dictionnaires ont les mêmes clés).
 Règles : pas de 0 trompeur pour une source non branchée ; état de supervision rafraîchi par `src/lib/live.tsx` ; aucun tiret long dans les textes.
-Tests : `cd frontend && npm test` (vitest, 74 tests).
+Tests : `cd frontend && npm test` (vitest).
 
 ## Conventions
 
@@ -134,11 +223,12 @@ Les routes v1 restent identiques (seuls des champs sont ajoutés). Nouvelles ou 
 |---|---|
 | `GET /api/config` | `demo`, `naemonSource`, `version`, `naemonUrlTemplate`, sources branchées |
 | `GET /api/overview` | Accueil : compteurs, applications et états, alertes, applications à risque, sources, changements récents, écarts, moins bien documentées |
-| `GET /api/applications`, `/api/applications/:id` | + `retired`, `status` (état par environnement, `atRisk`), `docScore` ; serveurs et bases portent `retired`, `env`, `state` |
+| `GET /api/applications`, `/api/applications/:id` | + `retired`, `status` (état par environnement, `atRisk`), `docScore`, `owners[]` ; serveurs et bases portent `retired`, `env`, `state`, `active`, `trust`, `period` ; serveurs : `outOfInventory` |
 | `GET /api/servers?q=&limit=` | + `env`, `retired`, `state` |
 | `GET /api/servers/:id` | fiche serveur : état, services, applications, pages, changements concernant ce serveur |
 | `GET /api/status` | état de la relève Naemon : source, dates, dernière erreur, états par serveur et application, hôtes non rapprochés |
-| `GET /api/gaps` (`?format=csv`) | rapport d'écarts de supervision |
+| `GET /api/gaps` (`?format=csv`) | rapport d'écarts de supervision, plus `toValidate` (liens à valider) |
+| `GET /api/teams` | personnes et équipes, leurs applications (rôle, période, source `doc` ou `apm`, pages) ; groupe « non renseignée » en dernier |
 | `GET /api/changes?limit=` | historique des imports (20 par défaut, 200 au plus) |
 | `POST /api/simulate` `{nodeIds, includeRetired?, depth?}` | simulation de panne sur plusieurs éléments (union des impacts) |
 | `GET /api/map?scope=perimeter\|app:<id>&envs=PRD,STG&includeRetired=` | données de la cartographie |
