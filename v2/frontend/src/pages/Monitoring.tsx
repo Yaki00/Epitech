@@ -1,14 +1,14 @@
 /**
  * Supervision : alertes en cours sur le périmètre (filtre d'environnements), impact réel (applications
- * en panne ou dégradées, applications à risque), serveurs en maintenance, rapport d'écarts (3 listes + CSV),
+ * en panne ou dégradées, applications à risque), serveurs en maintenance, rapport d'écarts (4 listes + CSV),
  * état de la relève Naemon. Source coupée : chaque zone dit comment la brancher, jamais de zéros.
  * Données : /api/overview et /api/gaps (relus chaque minute), relève partagée /api/status, liste des serveurs.
  */
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router';
-import { Activity, AppWindow, BellRing, Download, EyeOff, FileSearch, RefreshCw, ServerOff, ShieldAlert, Wrench } from 'lucide-react';
-import { api, REFRESH_MS, useApi, type Env, type Gaps, type Overview, type ServerSummary, type UseApiResult } from '../lib/api';
-import { useI18n } from '../lib/i18n';
+import { Activity, AppWindow, BellRing, Download, ExternalLink, EyeOff, FileSearch, RefreshCw, ServerOff, ShieldAlert, ShieldQuestion, Wrench } from 'lucide-react';
+import { api, REFRESH_MS, useApi, type Env, type GapToValidate, type Gaps, type Overview, type ServerSummary, type UseApiResult } from '../lib/api';
+import { useI18n, type Key } from '../lib/i18n';
 import { useTitle } from '../lib/useTitle';
 import { useLiveStatus } from '../lib/live';
 import { envVisible, useEnvFilter } from '../lib/envFilter';
@@ -376,19 +376,19 @@ function MaintenanceCard({ rows }: { rows: ReturnType<typeof maintenanceRows> })
 
 // ---------- rapport d'écarts ----------
 
-type GapTab = 'notMonitored' | 'unknownMonitored' | 'citedNotInInventory';
+type GapTab = 'notMonitored' | 'unknownMonitored' | 'citedNotInInventory' | 'toValidate';
 
 function GapsCard({ gaps, off }: { gaps: GapsResult; off: boolean }) {
   const { t } = useI18n();
   const [tab, setTab] = useState<GapTab>('notMonitored');
   const g = gaps.data;
   // sans relève, les deux listes de supervision ne veulent rien dire : pas de compteur
-  const needsPoll = (id: GapTab) => id !== 'citedNotInInventory';
+  const needsPoll = (id: GapTab) => id === 'notMonitored' || id === 'unknownMonitored';
   const reliable = (id: GapTab) => Boolean(g) && (!needsPoll(id) || Boolean(g?.available));
-  const tabs = (['notMonitored', 'unknownMonitored', 'citedNotInInventory'] as GapTab[]).map((id) => ({
+  const tabs = (['notMonitored', 'unknownMonitored', 'citedNotInInventory', 'toValidate'] as GapTab[]).map((id) => ({
     id,
     label: t(`monitoring.gaps.${id}` as 'monitoring.gaps.notMonitored'),
-    count: reliable(id) ? (g?.counts[id] ?? null) : null,
+    count: reliable(id) ? (id === 'toValidate' ? (g?.counts.toValidate ?? g?.toValidate?.length ?? null) : (g?.counts[id] ?? null)) : null,
   }));
 
   return (
@@ -426,6 +426,8 @@ function GapsCard({ gaps, off }: { gaps: GapsResult; off: boolean }) {
               />
             ) : tab === 'notMonitored' ? (
               <NotMonitoredList rows={g.notMonitored} />
+            ) : tab === 'toValidate' ? (
+              <ToValidateList rows={g.toValidate ?? []} />
             ) : (
               <NameList names={tab === 'unknownMonitored' ? g.unknownMonitored : g.citedNotInInventory} tab={tab} />
             )}
@@ -487,6 +489,85 @@ function NotMonitoredList({ rows }: { rows: Gaps['notMonitored'] }) {
           empty={<EmptyState compact icon={ServerOff} title={t('monitoring.alerts.allHidden')} text={t('monitoring.alerts.allHiddenText')} />}
         />
       )}
+    </>
+  );
+}
+
+/** Liens lus dans la documentation que rien ne corrobore : élément cité, application, page, type de lien. */
+function ToValidateList({ rows }: { rows: GapToValidate[] }) {
+  const { t } = useI18n();
+  if (rows.length === 0) return <EmptyState compact icon={ShieldQuestion} title={t('monitoring.gaps.toValidate.empty')} />;
+  const linkLabel = (type: string) => {
+    const key = `linkType.${type}` as Key;
+    const label = t(key);
+    return label === key ? type : label;
+  };
+  const columns: Column<GapToValidate>[] = [
+    {
+      key: 'item',
+      header: t('monitoring.gaps.col.item'),
+      sortValue: (r) => r.target.name.toLowerCase(),
+      cell: (r) => (
+        <span className="inline-flex flex-wrap items-center gap-1.5">
+          {r.target.type === 'server' ? (
+            <Link to={serverHref(r.target.id)} className="link font-mono text-xs font-medium whitespace-nowrap">
+              {r.target.name}
+            </Link>
+          ) : r.target.type === 'application' ? (
+            <Link to={appHref(r.target.id)} className="link text-[13px] font-medium">
+              {r.target.name}
+            </Link>
+          ) : (
+            <span className="text-[13px] font-medium text-ink">{r.target.name}</span>
+          )}
+          {r.target.type === 'server' && r.target.env !== undefined && <EnvBadge env={r.target.env} />}
+        </span>
+      ),
+    },
+    {
+      key: 'app',
+      header: t('monitoring.gaps.col.app'),
+      sortValue: (r) => r.application.name.toLowerCase(),
+      cell: (r) => (
+        <Link to={appHref(r.application.id)} className="link text-[13px]">
+          {r.application.name}
+        </Link>
+      ),
+    },
+    {
+      key: 'link',
+      header: t('monitoring.gaps.col.link'),
+      hideOnMobile: true,
+      sortValue: (r) => linkLabel(r.type),
+      cell: (r) => <span className="text-xs text-ink-2">{linkLabel(r.type)}</span>,
+    },
+    {
+      key: 'page',
+      header: t('monitoring.gaps.col.page'),
+      sortValue: (r) => r.page?.title.toLowerCase() ?? null,
+      cell: (r) =>
+        r.page?.url ? (
+          <a href={r.page.url} target="_blank" rel="noreferrer noopener" className="link inline-flex items-center gap-1 text-xs">
+            <ExternalLink aria-hidden size={11} className="shrink-0" />
+            {r.page.title}
+          </a>
+        ) : r.page ? (
+          <span className="text-xs text-ink-2">{r.page.title}</span>
+        ) : (
+          <span className="text-xs text-ink-3">{t('common.none')}</span>
+        ),
+    },
+  ];
+  return (
+    <>
+      <p className="border-b border-line px-4 py-2 text-xs text-ink-2">{t('monitoring.gaps.toValidate.help')}</p>
+      <Table
+        columns={columns}
+        rows={rows}
+        rowKey={(r) => `${r.application.id}|${r.target.id}|${r.type}`}
+        defaultSort={{ key: 'app', dir: 'asc' }}
+        caption={t('monitoring.gaps.toValidate')}
+      />
     </>
   );
 }

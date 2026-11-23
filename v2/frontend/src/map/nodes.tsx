@@ -40,6 +40,7 @@ function useItemLabel(d: ItemData): string {
   if (d.kind === 'server') parts.push(t(`env.${envKey(d.node.env)}` as 'env.PRD'));
   if (d.node.criticality) parts.push(`${t('map.criticality')} ${d.node.criticality}`);
   if (d.retired) parts.push(t('common.retired'));
+  if (d.node.outOfInventory) parts.push(t('server.outOfInventory'));
   if (d.sim === 'origin') parts.push(t('map.legend.origin'));
   if (d.sim === 'impacted') parts.push(t('map.legend.impacted'));
   return parts.join(', ');

@@ -4,12 +4,15 @@
  * - Une bande « Applications » (applications et bases) au-dessus des zones d'environnement.
  * - Zones côte à côte : PRD, STG, DEV (si coché), puis « Non précisé » (serveurs sans environnement).
  * - Un serveur n'apparaît que dans la zone de son environnement ; si cette zone est masquée, il n'est pas dessiné.
+ * - Liens inactifs (avec « Afficher retirés, anciens et à valider ») : marqués (`mark`) pour être grisés ou en
+ *   pointillés, toujours dessinés un par un ; seuls les liens actifs rangent un serveur dans le groupe d'une application.
  * - Les états et la simulation ne changent que les données des nœuds : la structure (et donc la disposition)
  *   ne dépend que de `structureKey`.
  */
 import type { Edge, Node } from '@xyflow/react';
 import type { Env, MapData, MapEdgeType, MapNode } from '../lib/api';
 import { ENVS, type EnvKey } from '../lib/status';
+import { linkMark, type LinkMark } from '../lib/trust';
 
 export const BAND_ID = 'band-apps';
 export type ZoneId = 'zone-PRD' | 'zone-STG' | 'zone-DEV' | 'zone-NONE';
@@ -90,6 +93,8 @@ export interface BandData extends Record<string, unknown> {
 export interface EdgeData extends Record<string, unknown> {
   type: MapEdgeType;
   retired: boolean;
+  /** lien inactif : à valider, ancien, cible, autre application, retiré (null : actif) */
+  mark?: LinkMark | null;
   /** runs_on : environnement du serveur (couleur du lien) */
   env?: EnvKey;
   /** lien d'hébergement regroupé : nombre de serveurs du groupe */
@@ -174,8 +179,16 @@ export function buildGraph(map: MapData, { envs, unspecified = true, simulate = 
   const lit = (id: string) => selected.has(id) || impacted.has(id);
 
   // groupe de chaque serveur : sa zone et son application principale (la première par ordre alphabétique)
+  // un lien lu dans la documentation mais inactif (à valider, ancien, cible) ne range pas un serveur dans le groupe
+  // d'une application (serveur seulement cité : groupe sans application, lien direct marqué) ; un lien retiré
+  // de l'inventaire le range comme avant (grisé dans le groupe de son ancienne application)
+  const markOf = (e: MapData['edges'][number]) => linkMark({ retired: e.retired, inactive: e.inactive, trust: e.trust, period: e.period });
+  const readOnly = (e: MapData['edges'][number]) => {
+    const m = markOf(e);
+    return m !== null && m !== 'retired';
+  };
   const hostsOf = new Map<string, string[]>();
-  for (const e of mapEdges) if (e.type === 'runs_on') (hostsOf.get(e.target) ?? hostsOf.set(e.target, []).get(e.target)!).push(e.source);
+  for (const e of mapEdges) if (e.type === 'runs_on' && !readOnly(e)) (hostsOf.get(e.target) ?? hostsOf.set(e.target, []).get(e.target)!).push(e.source);
   const primaryOf = (serverId: string): string | null => [...(hostsOf.get(serverId) ?? [])].sort()[0] ?? null;
   const clusters = new Map<string, { zone: ZoneId; appId: string | null; servers: string[] }>();
   const clusterOf = new Map<string, string>();
@@ -234,21 +247,22 @@ export function buildGraph(map: MapData, { envs, unspecified = true, simulate = 
   for (const e of mapEdges) {
     const cid = e.type === 'runs_on' ? clusterOf.get(e.target) : undefined;
     const c = cid ? clusters.get(cid) : undefined;
-    if (cid && c && c.appId === e.source) {
+    if (cid && c && c.appId === e.source && !readOnly(e)) {
       const id = `g:${e.source}>${cid}`;
       const prev = grouped.get(id);
       if (prev) {
         prev.data!.retired = prev.data!.retired && e.retired;
+        if (!e.retired) prev.data!.mark = null;
         continue;
       }
-      const data: EdgeData = { type: 'runs_on', retired: e.retired, env: envOfZone(c.zone), count: c.servers.length };
+      const data: EdgeData = { type: 'runs_on', retired: e.retired, mark: markOf(e), env: envOfZone(c.zone), count: c.servers.length };
       mark(data, simOn ? lit(e.source) && c.servers.some(lit) : e.source === focus || c.servers.includes(focus as string));
       const edge: MapFlowEdge = { id, source: e.source, target: cid, type: 'lyra', data, focusable: false, selectable: false };
       grouped.set(id, edge);
       edges.push(edge);
       continue;
     }
-    const data: EdgeData = { type: e.type, retired: e.retired };
+    const data: EdgeData = { type: e.type, retired: e.retired, mark: markOf(e) };
     if (e.type === 'runs_on') data.env = envOfZone(zoneOf(byId.get(e.target)?.env));
     mark(data, simOn ? lit(e.source) && lit(e.target) : e.source === focus || e.target === focus);
     edges.push({ id: `e:${e.id}:${e.source}|${e.target}|${e.type}`, source: e.source, target: e.target, type: 'lyra', data, focusable: false, selectable: false });

@@ -291,13 +291,15 @@ function GapsCard({ data }: { data: Overview }) {
     { key: 'notMonitored', label: t('home.gaps.notMonitored'), needsPoll: true },
     { key: 'unknownMonitored', label: t('home.gaps.unknownMonitored'), needsPoll: true },
     { key: 'citedNotInInventory', label: t('home.gaps.citedNotInInventory'), needsPoll: false },
+    // absent d'une API plus ancienne : la ligne n'est pas montrée
+    ...(counts.toValidate === undefined ? [] : [{ key: 'toValidate' as const, label: t('home.gaps.toValidate'), needsPoll: false }]),
   ];
   return (
     <Card title={t('home.gaps.title')} description={available ? undefined : t('home.gaps.unavailable')} padded={false}>
       <ul className="divide-y divide-line">
         {rows.map((r) => {
           const missing = r.needsPoll && !available;
-          const n = counts[r.key];
+          const n = counts[r.key] ?? 0;
           return (
             <li key={r.key}>
               <Link to="/monitoring" className="flex items-center gap-3 px-4 py-2 transition-colors hover:bg-surface-2">

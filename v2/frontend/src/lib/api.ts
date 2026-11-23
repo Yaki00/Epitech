@@ -22,6 +22,23 @@ export interface Ref {
   name: string;
 }
 
+/** Période d'un lien ou d'une page lue par l'IA : actuelle, ancienne, cible (prévue). */
+export type Period = 'current' | 'past' | 'target';
+/**
+ * Confiance d'un lien lu dans la documentation face à l'inventaire : `added` (ajouté, corroboré),
+ * `toValidate` (rien ne le corrobore : hors impact), `otherApp` (le serveur est à une autre application).
+ */
+export type Trust = 'added' | 'toValidate' | 'otherApp';
+export type OwnerRole = 'owner' | 'support' | 'oncall' | 'other';
+export type OwnerSource = 'doc' | 'apm';
+
+/** Page source d'un responsable. */
+export interface DocRef {
+  id: string;
+  title: string;
+  url: string | null;
+}
+
 export interface AtRisk {
   /** id de l'application en panne qui menace celle-ci */
   because: string;
@@ -122,7 +139,12 @@ export interface LinkedNode {
   name: string;
   type: NodeType;
   attrs: Attrs;
+  /** nœud retiré OU lien inactif (ancien, cible, à valider) : grisé et masqué par défaut */
   retired: boolean;
+  /** au moins un lien actif vers ce nœud (compte dans l'impact) */
+  active?: boolean;
+  trust?: Trust | null;
+  period?: Period | string | null;
   confidence: number;
   sources: string[];
 }
@@ -130,6 +152,8 @@ export interface LinkedNode {
 export interface LinkedServer extends LinkedNode {
   env: Env | null;
   state: ServerState;
+  /** cité par la documentation, absent des inventaires */
+  outOfInventory?: boolean;
 }
 
 export interface DocAudit {
@@ -141,7 +165,22 @@ export interface AppDocument {
   name: string;
   url: string | null;
   architecture: boolean;
+  /** l'application est le sujet de la page, ou seulement citée (ne compte pas dans le score) */
+  role?: 'subject' | 'cited' | null;
+  period?: Period | string | null;
   audit: DocAudit | null;
+}
+
+/** Responsable ou équipe d'une application (documentation ou colonnes de l'APM). */
+export interface AppOwner {
+  /** null : nom donné par l'APM sans nœud correspondant */
+  id: string | null;
+  name: string;
+  kind: 'person' | 'team';
+  role: OwnerRole;
+  period: Period;
+  source: OwnerSource;
+  docs: DocRef[];
 }
 
 export interface ApplicationDetail extends ApplicationSummary {
@@ -151,6 +190,30 @@ export interface ApplicationDetail extends ApplicationSummary {
   callsList: LinkedNode[];
   usedBy: Ref[];
   documents: AppDocument[];
+  /** actuels d'abord, puis anciens */
+  owners?: AppOwner[];
+}
+
+// ---------- /api/teams ----------
+
+export interface TeamApp {
+  id: string;
+  name: string;
+  criticality: string | null;
+  /** null dans le groupe `unassigned` */
+  role: OwnerRole | null;
+  period: Period | null;
+  source: OwnerSource | null;
+  docs: DocRef[];
+}
+
+export interface Team {
+  /** null : nom sans nœud (APM) ou groupe `unassigned` */
+  id: string | null;
+  /** vide pour `unassigned` */
+  name: string;
+  kind: 'person' | 'team' | 'unassigned';
+  applications: TeamApp[];
 }
 
 // ---------- serveurs ----------
@@ -165,6 +228,8 @@ export interface ServerSummary {
   attrs: Attrs;
   env: Env | null;
   retired: boolean;
+  /** cité par la documentation, absent des inventaires */
+  outOfInventory?: boolean;
   state: ServerState;
   applications: ServerApp[];
 }
@@ -175,6 +240,7 @@ export interface ServerDetail {
   attrs: Attrs;
   env: Env | null;
   retired: boolean;
+  outOfInventory?: boolean;
   state: ServerState;
   ack: boolean;
   output: string;
@@ -246,6 +312,16 @@ export interface GapCounts {
   notMonitored: number;
   unknownMonitored: number;
   citedNotInInventory: number;
+  toValidate?: number;
+}
+
+/** Lien lu dans la documentation que rien ne corrobore (hors impact tant qu'il n'est pas confirmé). */
+export interface GapToValidate {
+  target: { id: string; name: string; type: NodeType; env?: Env | null; ip?: string | null };
+  application: Ref;
+  page: { id: string; title: string; url: string | null } | null;
+  /** runs_on, uses_db, calls, db_on... */
+  type: string;
 }
 
 export interface Gaps {
@@ -254,6 +330,7 @@ export interface Gaps {
   notMonitored: { id: string; name: string; env: Env | null; ip: string | null }[];
   unknownMonitored: string[];
   citedNotInInventory: string[];
+  toValidate?: GapToValidate[];
   counts: GapCounts;
 }
 
@@ -272,6 +349,7 @@ export interface SimulateResult {
     type: NodeType;
     depth: number;
     via: { edgeType: string; from: string; source: string; confidence: number } | null;
+    outOfInventory?: boolean;
   }[];
   byType: Record<string, string[]>;
   unknown: string[];
@@ -291,6 +369,8 @@ export interface MapNode {
   state: ServerState | AppState | null;
   criticality: string | null;
   retired: boolean;
+  /** serveurs : cité par la documentation, absent des inventaires */
+  outOfInventory?: boolean;
   /** serveurs : applications présentes sur la carte qui les hébergent */
   appIds: string[];
 }
@@ -301,6 +381,10 @@ export interface MapEdge {
   target: string;
   type: MapEdgeType;
   retired: boolean;
+  /** ancien, cible, à valider ou retiré : montré seulement avec includeRetired */
+  inactive?: boolean;
+  trust?: Trust | null;
+  period?: Period | string | null;
 }
 
 export interface MapData {
@@ -445,6 +529,8 @@ export const api = {
   servers: (q?: string, limit?: number, o?: Opts) => request<ServerSummary[]>(`/servers${qs({ q, limit })}`, o),
   server: (id: string, o?: Opts) => request<ServerDetail>(`/servers/${enc(id)}`, o),
   gaps: (o?: Opts) => request<Gaps>('/gaps', o),
+  /** personnes et équipes, leurs applications ; groupe `unassigned` en dernier */
+  teams: (o?: Opts) => request<Team[]>('/teams', o),
   /** lien de téléchargement du rapport d'écarts (CSV) */
   gapsCsvUrl: () => '/api/gaps?format=csv',
   changes: (limit?: number, o?: Opts) => request<Change[]>(`/changes${qs({ limit })}`, o),

@@ -17,9 +17,10 @@ import {
   Network,
   Server as ServerIcon,
   ShieldAlert,
+  Users,
   Waypoints,
 } from 'lucide-react';
-import { ApiError, api, REFRESH_MS, useApi, type ApplicationDetail, type Env, type LinkedNode, type LinkedServer, type Ref } from '../lib/api';
+import { ApiError, api, REFRESH_MS, useApi, type ApplicationDetail, type AppOwner, type Env, type LinkedNode, type LinkedServer, type Ref } from '../lib/api';
 import { useI18n, type Key } from '../lib/i18n';
 import { useTitle } from '../lib/useTitle';
 import { useConfig, naemonLink } from '../lib/config';
@@ -53,6 +54,9 @@ import { EnvFilter } from '../components/EnvFilter';
 import { envVisible, useEnvFilter } from '../lib/envFilter';
 import { AppPath } from '../components/AppPath';
 import { ChangeDetail, ChangeHeader } from '../components/ChangeEntry';
+import { Avatar, LinkMarkBadge, OutOfInventoryBadge, OwnerPeriodBadge, OwnerSourceBadge, SourcePages } from '../components/marks';
+import { isCurrent, roleKey, sortOwners, teamsHref } from '../lib/teams';
+import { pagePeriodKey } from '../lib/trust';
 
 const TAB_IDS = ['overview', 'map', 'servers', 'databases', 'flows', 'docs', 'monitoring', 'history'] as const;
 type TabId = (typeof TAB_IDS)[number];
@@ -239,7 +243,8 @@ function OverviewTab({ app }: { app: ApplicationDetail }) {
         </Card>
         <EnvStatesCard app={app} />
       </div>
-      <Card title={t('appDetail.facts')} padded={false} className="self-start">
+      <div className="flex min-w-0 flex-col gap-4 self-start">
+      <Card title={t('appDetail.facts')} padded={false}>
         <Facts
           items={[
             { label: t('appDetail.fact.criticality'), value: app.criticality ?? <Muted>{t('common.notSpecified')}</Muted> },
@@ -254,7 +259,60 @@ function OverviewTab({ app }: { app: ApplicationDetail }) {
           ]}
         />
       </Card>
+      <OwnersCard app={app} />
+      </div>
     </div>
+  );
+}
+
+function OwnersCard({ app }: { app: ApplicationDetail }) {
+  const { t } = useI18n();
+  const owners = sortOwners(app.owners ?? []);
+  return (
+    <Card
+      title={t('appDetail.owners')}
+      padded={false}
+      actions={
+        <Link to={teamsHref(app.name)} className="link text-xs">
+          {t('appDetail.owners.all')}
+        </Link>
+      }
+    >
+      {owners.length === 0 ? (
+        <EmptyState compact icon={Users} title={t('appDetail.owners.empty')} text={t('appDetail.owners.emptyText')} />
+      ) : (
+        <ul className="divide-y divide-line">
+          {owners.map((o) => (
+            <OwnerRow key={`${o.kind}:${o.name}:${o.role}:${o.source}`} owner={o} />
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+function OwnerRow({ owner: o }: { owner: AppOwner }) {
+  const { t } = useI18n();
+  const former = !isCurrent(o);
+  const role = roleKey(o.role);
+  return (
+    <li className={cn('flex items-start gap-2.5 px-4 py-2.5', former && 'bg-surface-2/50')}>
+      <Avatar name={o.name} kind={o.kind} size="sm" muted={former} />
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <Link to={teamsHref(o.name)} className={cn('truncate text-[13px] font-medium', former ? 'text-ink-3 hover:underline' : 'link')}>
+            {o.name}
+          </Link>
+          <span className="text-2xs text-ink-3">{t(o.kind === 'team' ? 'teams.kind.team' : 'teams.kind.person')}</span>
+        </div>
+        <div className="mt-1 flex flex-wrap items-center gap-1">
+          {role && <span className={cn('mr-0.5 text-xs', former ? 'text-ink-3' : 'text-ink-2')}>{t(role)}</span>}
+          <OwnerPeriodBadge period={o.period} />
+          <OwnerSourceBadge source={o.source} />
+        </div>
+        <SourcePages docs={o.docs} className="mt-1" />
+      </div>
+    </li>
   );
 }
 
@@ -372,7 +430,8 @@ function ServersTab({ app }: { app: ApplicationDetail }) {
           <Link to={serverHref(s.id)} className={cn('font-mono text-xs font-medium', s.retired ? 'text-ink-3 hover:underline' : 'link')}>
             {s.name}
           </Link>
-          {s.retired && <Badge>{t('common.retired')}</Badge>}
+          <LinkMarkBadge item={s} />
+          {s.outOfInventory && <OutOfInventoryBadge />}
         </span>
       ),
     },
@@ -406,7 +465,7 @@ function ServersTab({ app }: { app: ApplicationDetail }) {
         <EnvFilter counts={envCounts} />
         {retiredCount > 0 && (
           <CheckToggle checked={showRetired} onChange={setShowRetired}>
-            {t('common.showRetired', { n: retiredCount })}
+            {t('common.showInactive', { n: retiredCount })}
           </CheckToggle>
         )}
       </Toolbar>
@@ -457,7 +516,7 @@ function DatabasesTab({ app }: { app: ApplicationDetail }) {
       cell: (d) => (
         <span className="inline-flex flex-wrap items-center gap-1.5">
           <span className={cn('font-medium', d.retired ? 'text-ink-3' : 'text-ink')}>{d.name}</span>
-          {d.retired && <Badge>{t('common.retired')}</Badge>}
+          <LinkMarkBadge item={d} />
         </span>
       ),
     },
@@ -469,7 +528,7 @@ function DatabasesTab({ app }: { app: ApplicationDetail }) {
       {retiredCount > 0 && (
         <Toolbar>
           <CheckToggle checked={showRetired} onChange={setShowRetired}>
-            {t('common.showRetired', { n: retiredCount })}
+            {t('common.showInactive', { n: retiredCount })}
           </CheckToggle>
         </Toolbar>
       )}
@@ -496,14 +555,14 @@ function FlowsTab({ app }: { app: ApplicationDetail }) {
   const calls = app.callsList.filter((c) => showRetired || !c.retired).sort((a, b) => a.name.localeCompare(b.name));
   const usedBy = [...app.usedBy].sort((a, b) => a.name.localeCompare(b.name));
   const appState = (id: string) => live?.apps[id]?.state ?? 'unknown';
-  const row = (r: Ref, extra?: { retired?: boolean; criticality?: string | null }) => (
+  const row = (r: Ref, extra?: { retired?: boolean; criticality?: string | null; link?: LinkedNode }) => (
     <li key={r.id} className={cn('flex items-center gap-3 px-4 py-2', extra?.retired && 'text-ink-3')}>
       <span className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
         <Link to={appHref(r.id)} className={cn('truncate text-[13px] font-medium', extra?.retired ? 'text-ink-3 hover:underline' : 'link')}>
           {r.name}
         </Link>
         {extra?.criticality && <Badge>{extra.criticality}</Badge>}
-        {extra?.retired && <Badge>{t('common.retired')}</Badge>}
+        {extra?.link && <LinkMarkBadge item={extra.link} />}
       </span>
       <StatusPill state={appState(r.id)} size="sm" />
     </li>
@@ -512,7 +571,7 @@ function FlowsTab({ app }: { app: ApplicationDetail }) {
     <div className="flex flex-col gap-4">
       {retiredCount > 0 && (
         <CheckToggle checked={showRetired} onChange={setShowRetired} className="self-start">
-          {t('common.showRetired', { n: retiredCount })}
+          {t('common.showInactive', { n: retiredCount })}
         </CheckToggle>
       )}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -520,7 +579,7 @@ function FlowsTab({ app }: { app: ApplicationDetail }) {
           {calls.length === 0 ? (
             <EmptyState compact icon={Waypoints} title={t('appDetail.flows.emptyOut')} />
           ) : (
-            <ul className="divide-y divide-line">{calls.map((c) => row(c, { retired: c.retired, criticality: attr(c, 'criticality') }))}</ul>
+            <ul className="divide-y divide-line">{calls.map((c) => row(c, { retired: c.retired, criticality: attr(c, 'criticality'), link: c }))}</ul>
           )}
         </Card>
         <Card title={t('appDetail.flows.in')} padded={false}>
@@ -556,6 +615,25 @@ function DocsTab({ app }: { app: ApplicationDetail }) {
           {d.architecture && <Badge tone="accent">{t('appDetail.docs.architecture')}</Badge>}
         </span>
       ),
+    },
+    {
+      key: 'role',
+      header: t('appDetail.col.role'),
+      sortValue: (d) => (d.role === 'cited' ? 1 : d.role === 'subject' ? 0 : null),
+      cell: (d) => {
+        const period = pagePeriodKey(d.period);
+        if (!d.role && !period) return null;
+        return (
+          <span className="inline-flex flex-wrap items-center gap-1">
+            {d.role && (
+              <Badge tone={d.role === 'subject' ? 'neutral' : 'unmon'} title={t(d.role === 'subject' ? 'appDetail.docs.role.subject.hint' : 'appDetail.docs.role.cited.hint')}>
+                {t(d.role === 'subject' ? 'appDetail.docs.role.subject' : 'appDetail.docs.role.cited')}
+              </Badge>
+            )}
+            {period && <Badge title={t(`${period}.hint` as Key)}>{t(period)}</Badge>}
+          </span>
+        );
+      },
     },
     {
       key: 'env',

@@ -18,6 +18,7 @@ import { attrText, osLabel } from '../lib/servers';
 import { Badge, Button, Card, EmptyState, EnvBadge, ErrorState, PageHeader, SkeletonRows, StatusPill, Table, type Column } from '../components/ui';
 import { CheckToggle, SearchInput, SelectField } from '../components/filters';
 import { EnvFilter } from '../components/EnvFilter';
+import { OutOfInventoryBadge } from '../components/marks';
 
 /** Nombre maximal de serveurs demandés à l'API (au-delà, la liste est tronquée et on le dit). */
 export const SERVERS_LIMIT = 5000;
@@ -74,6 +75,7 @@ export default function ServersPage() {
             {s.name}
           </Link>
           {s.retired && <Badge>{t('common.retired')}</Badge>}
+          {s.outOfInventory && <OutOfInventoryBadge />}
         </span>
       ),
     },

@@ -1,5 +1,6 @@
 /**
- * Légende de la carte : états (icône + libellé), types d'éléments, types de liens, et la simulation quand elle est active.
+ * Légende de la carte : états (icône + libellé), types d'éléments, types de liens (dont à valider, ancien ou cible,
+ * retiré), et la simulation quand elle est active.
  */
 import { AppWindow, Database } from 'lucide-react';
 import { useI18n } from '../lib/i18n';
@@ -10,9 +11,9 @@ import type { EdgeData } from './buildGraph';
 
 const STATES = ['ok', 'warning', 'degraded', 'critical', 'down', 'maintenance', 'unknown', 'not_monitored'] as const;
 
-function LineSample({ d }: { d: Pick<EdgeData, 'type' | 'retired' | 'env'> }) {
+function LineSample({ d }: { d: Pick<EdgeData, 'type' | 'retired' | 'mark' | 'env'> }) {
   const look = edgeLook(d);
-  const arrow = look.marker && !d.retired;
+  const arrow = look.marker && !d.retired && !d.mark;
   return (
     <svg aria-hidden width="34" height="10" viewBox="0 0 34 10" className="shrink-0 overflow-visible">
       <line
@@ -92,8 +93,16 @@ export function MapLegend({ simulation }: { simulation: boolean }) {
             <span title={t('map.edge.uses_db.long')}>{t('map.edge.uses_db')}</span>
           </Item>
           <Item>
+            <LineSample d={{ type: 'calls', retired: false, mark: 'toValidate' }} />
+            <span title={t('trust.toValidate.hint')}>{t('map.edge.toValidate')}</span>
+          </Item>
+          <Item>
+            <LineSample d={{ type: 'calls', retired: false, mark: 'past' }} />
+            <span title={t('trust.past.hint')}>{t('map.edge.pastTarget')}</span>
+          </Item>
+          <Item>
             <LineSample d={{ type: 'calls', retired: true }} />
-            {t('map.edge.retired')}
+            <span title={t('trust.retired.hint')}>{t('map.edge.retired')}</span>
           </Item>
         </Group>
         {simulation && (

@@ -3,7 +3,9 @@
  * - hébergement (application vers serveur) : trait fin à la couleur de l'environnement du serveur ;
  * - appel entre applications : trait plein avec flèche ;
  * - accès base : pointillés ronds avec flèche ;
- * - lien retiré : tirets gris.
+ * - lien retiré : tirets gris ;
+ * - lien à valider : pointillés courts à la couleur d'alerte ;
+ * - lien ancien ou cible : trait gris estompé.
  * En simulation, les liens entre éléments touchés passent en couleur d'accent, les autres s'effacent.
  */
 import { memo } from 'react';
@@ -27,12 +29,15 @@ export interface EdgeLook {
 }
 
 /** Apparence d'un lien (utilisée aussi par la légende). */
-export function edgeLook(d: Pick<EdgeData, 'type' | 'retired' | 'env' | 'hot' | 'dim'>): EdgeLook {
+export function edgeLook(d: Pick<EdgeData, 'type' | 'retired' | 'mark' | 'env' | 'hot' | 'dim'>): EdgeLook {
   let look: EdgeLook;
   if (d.type === 'calls') look = { stroke: 'var(--color-ink-2)', width: 1.75, opacity: 0.9, marker: 'calls' };
   else if (d.type === 'uses_db') look = { stroke: 'var(--color-ink-3)', width: 1.6, dash: '0.5 4.5', opacity: 0.95, marker: 'uses_db' };
   else look = { stroke: ENV_STROKE[d.env ?? 'none'], width: 1.2, opacity: 0.42 };
-  if (d.retired) look = { ...look, stroke: 'var(--color-unmon)', dash: '7 5', opacity: 0.55 };
+  const mark = d.mark === undefined ? (d.retired ? 'retired' : null) : d.mark;
+  if (mark === 'toValidate' || mark === 'otherApp') look = { ...look, stroke: 'var(--color-warn)', dash: '3 4', opacity: 0.85 };
+  else if (mark === 'past' || mark === 'target') look = { ...look, stroke: 'var(--color-unmon)', opacity: 0.4 };
+  else if (mark) look = { ...look, stroke: 'var(--color-unmon)', dash: '7 5', opacity: 0.55 };
   if (d.hot) look = { ...look, stroke: 'var(--color-accent)', width: look.width + 1, opacity: 1, marker: look.marker ? 'hot' : undefined };
   if (d.dim) look = { ...look, opacity: 0.07 };
   return look;

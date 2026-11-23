@@ -11,6 +11,7 @@ import { useI18n } from '../lib/i18n';
 import { appHref, appMapHref, serverHref } from '../lib/links';
 import { cn } from '../lib/cn';
 import { Badge, Button, EmptyState, EnvBadge, StatusPill } from '../components/ui';
+import { LinkMarkBadge, OutOfInventoryBadge } from '../components/marks';
 
 const TYPE_ICON: Record<string, LucideIcon> = { application: AppWindow, server: ServerIcon, database: Database };
 const GROUPS = ['application', 'server', 'database'] as const;
@@ -181,6 +182,12 @@ export function DetailPanel({ node, state, map, scope, onClose, onSimulate }: De
   const label = (id: string) => map.nodes.find((n) => n.id === id)?.label ?? id;
   const neighbours = (type: string, dir: 'out' | 'in') =>
     map.edges.filter((e) => e.type === type && (dir === 'out' ? e.source === node.id : e.target === node.id)).map((e) => (dir === 'out' ? e.target : e.source));
+  // lien inactif vers un voisin (à valider, ancien, cible, retiré) : étiquette à côté de son nom
+  const edgeTo = (id: string, key: string) =>
+    map.edges.find((e) => {
+      const type = key === 'apps' ? (node.type === 'server' ? 'runs_on' : 'uses_db') : key === 'db' ? 'uses_db' : 'calls';
+      return e.type === type && ((e.source === node.id && e.target === id) || (e.target === node.id && e.source === id));
+    });
   const rows: { key: string; title: string; ids: string[] }[] =
     node.type === 'server'
       ? [{ key: 'apps', title: t('map.detail.hostedApps'), ids: neighbours('runs_on', 'in') }]
@@ -212,6 +219,7 @@ export function DetailPanel({ node, state, map, scope, onClose, onSimulate }: De
             </Badge>
           )}
           {node.retired && <Badge>{t('common.retired')}</Badge>}
+          {node.outOfInventory && <OutOfInventoryBadge />}
         </div>
         {rows.map((r) =>
           r.ids.length ? (
@@ -224,6 +232,7 @@ export function DetailPanel({ node, state, map, scope, onClose, onSimulate }: De
                     <li key={id} className="flex min-w-0 items-center gap-1.5">
                       <ItemName id={id} type={n?.type ?? ''} name={label(id)} />
                       {n?.type === 'server' && <EnvBadge env={n.env} />}
+                      {edgeTo(id, r.key) && <LinkMarkBadge item={edgeTo(id, r.key)!} />}
                     </li>
                   );
                 })}

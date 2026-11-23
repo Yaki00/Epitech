@@ -1,12 +1,14 @@
 /**
- * Palette de recherche (Ctrl+K / ⌘K) : pages, applications (filtrées localement) et serveurs
- * (cherchés côté serveur : nom, alias, adresse IP). Entrée ouvre la fiche.
+ * Palette de recherche (Ctrl+K / ⌘K) : pages, applications (filtrées localement), personnes et équipes
+ * (/api/teams, chargé une fois par session, filtré localement) et serveurs (cherchés côté serveur : nom,
+ * alias, adresse IP). Entrée ouvre la fiche ; une personne ou une équipe ouvre la page Équipes filtrée.
  */
 import { useEffect, useRef, useState } from 'react';
 import { Command } from 'cmdk';
 import { useNavigate } from 'react-router';
-import { AppWindow, LoaderCircle, Search, Server } from 'lucide-react';
-import { api, type ApplicationSummary, type ServerSummary } from '../lib/api';
+import { AppWindow, LoaderCircle, Search, Server, User, Users } from 'lucide-react';
+import { api, type ApplicationSummary, type ServerSummary, type Team } from '../lib/api';
+import { currentCount, teamsHref } from '../lib/teams';
 import { useI18n } from '../lib/i18n';
 import { rankByText } from '../lib/search';
 import { NAV_ITEMS } from '../app/nav';
@@ -18,6 +20,23 @@ interface Props {
 }
 
 const APPS_TTL_MS = 5 * 60_000;
+/** Personnes et équipes : gardées pour toute la session (elles changent avec les synchros, pas d'une minute à l'autre). */
+let teamsCache: Team[] | null = null;
+let teamsLoading: Promise<Team[]> | null = null;
+const loadTeams = (): Promise<Team[]> => {
+  if (teamsCache) return Promise.resolve(teamsCache);
+  teamsLoading ??= api
+    .teams()
+    .then((list) => {
+      teamsCache = list.filter((x) => x.kind !== 'unassigned' && x.name);
+      return teamsCache;
+    })
+    .finally(() => {
+      teamsLoading = null;
+    });
+  return teamsLoading;
+};
+
 const ipOf = (s: ServerSummary): string | null => (typeof s.attrs?.ip === 'string' && s.attrs.ip ? s.attrs.ip : null);
 
 /** Raccourci global : Ctrl+K (Windows) ou ⌘K (Mac). */
@@ -41,6 +60,7 @@ export function CommandPalette({ open, onOpenChange }: Props) {
   const [apps, setApps] = useState<ApplicationSummary[]>([]);
   const appsAt = useRef(0);
   const [servers, setServers] = useState<ServerSummary[]>([]);
+  const [people, setPeople] = useState<Team[]>(teamsCache ?? []);
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -60,6 +80,22 @@ export function CommandPalette({ open, onOpenChange }: Props) {
       });
     return () => ctrl.abort();
   }, [open, t]);
+
+  // personnes et équipes : une fois par session (une erreur ne bloque pas le reste de la palette)
+  useEffect(() => {
+    if (!open || teamsCache) return undefined;
+    let alive = true;
+    loadTeams()
+      .then((list) => {
+        if (alive) setPeople(list);
+      })
+      .catch(() => {
+        /* page Équipes indisponible : la palette garde pages, applications et serveurs */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [open]);
 
   // serveurs : recherche côté serveur (nom, alias, IP), 200 ms après la dernière frappe
   const q = query.trim();
@@ -103,7 +139,8 @@ export function CommandPalette({ open, onOpenChange }: Props) {
 
   const pages = rankByText(NAV_ITEMS, q, (n) => t(n.labelKey), q ? 4 : NAV_ITEMS.length);
   const appMatches = rankByText(apps, q, (a) => a.name, 8);
-  const nothing = !pages.length && !appMatches.length && !servers.length && !searching;
+  const peopleMatches = q.length >= 2 ? rankByText(people, q, (p) => p.name, 6) : [];
+  const nothing = !pages.length && !appMatches.length && !peopleMatches.length && !servers.length && !searching;
 
   return (
     <Command.Dialog
@@ -152,6 +189,22 @@ export function CommandPalette({ open, onOpenChange }: Props) {
                 <StatusPill state={a.status.state} size="sm" className="ml-auto" />
               </Command.Item>
             ))}
+          </Command.Group>
+        )}
+
+        {peopleMatches.length > 0 && (
+          <Command.Group heading={t('palette.groupPeople')}>
+            {peopleMatches.map((p) => {
+              const Icon = p.kind === 'team' ? Users : User;
+              return (
+                <Command.Item key={`${p.kind}:${p.id ?? p.name}`} value={`people:${p.kind}:${p.id ?? p.name}`} onSelect={() => go(teamsHref(p.name))} className={ITEM}>
+                  <Icon aria-hidden size={15} strokeWidth={1.75} className="text-ink-3" />
+                  <span className="truncate font-medium">{p.name}</span>
+                  <span className="truncate text-xs text-ink-3">{t(p.kind === 'team' ? 'teams.kind.team' : 'teams.kind.person')}</span>
+                  <span className="ml-auto shrink-0 text-xs text-ink-3">{t('count.applications', { n: currentCount(p) })}</span>
+                </Command.Item>
+              );
+            })}
           </Command.Group>
         )}
 

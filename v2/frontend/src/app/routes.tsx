@@ -13,6 +13,7 @@ const Application = lazy(() => import('../pages/Application'));
 const Servers = lazy(() => import('../pages/Servers'));
 const Server = lazy(() => import('../pages/Server'));
 const MapPage = lazy(() => import('../pages/Map'));
+const Teams = lazy(() => import('../pages/Teams'));
 const Monitoring = lazy(() => import('../pages/Monitoring'));
 const History = lazy(() => import('../pages/History'));
 const Sync = lazy(() => import('../pages/Sync'));
@@ -32,6 +33,7 @@ export const routes: RouteObject[] = [
           { path: 'servers', element: <Servers /> },
           { path: 'servers/:id', element: <Server /> },
           { path: 'map', element: <MapPage /> },
+          { path: 'teams', element: <Teams /> },
           { path: 'monitoring', element: <Monitoring /> },
           { path: 'history', element: <History /> },
           { path: 'sync', element: <Sync /> },

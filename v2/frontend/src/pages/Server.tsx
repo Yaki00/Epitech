@@ -17,6 +17,7 @@ import { appHref } from '../lib/links';
 import { attrRows, attrText } from '../lib/servers';
 import { Badge, Button, Card, EmptyState, EnvBadge, ErrorState, PageHeader, Skeleton, SkeletonRows, StatusPill, Table, type Column } from '../components/ui';
 import { ChangeDetail, ChangeHeader } from '../components/ChangeEntry';
+import { OutOfInventoryBadge } from '../components/marks';
 
 export default function ServerPage() {
   const { id = '' } = useParams();
@@ -85,6 +86,7 @@ export default function ServerPage() {
             <EnvBadge env={server.env} long />
             {ip && <span className="font-mono text-xs text-ink-2">{ip}</span>}
             {server.retired && <Badge>{t('common.retired')}</Badge>}
+            {server.outOfInventory && <OutOfInventoryBadge />}
           </span>
         }
       />

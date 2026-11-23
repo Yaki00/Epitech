@@ -3,6 +3,7 @@ import ELK from 'elkjs/lib/elk.bundled.js';
 import type { MapData, MapNode } from '../lib/api';
 import { BAND_ID, buildGraph, clusterId, envCounts, layoutInputOf, zoneOf, zoneOfNode } from './buildGraph';
 import { computeLayout } from './layoutCore';
+import { edgeLook } from './edges';
 import { DEFAULT_ENVS } from '../lib/envFilter';
 
 const app = (id: string, extra: Partial<MapNode> = {}): MapNode => ({ id, type: 'application', label: id, env: null, state: 'ok', criticality: null, retired: false, appIds: [], ...extra });
@@ -169,5 +170,53 @@ describe('computeLayout', () => {
     }
     // l'appelant est au-dessus de l'appelé
     expect(r.positions['application:a'].y).toBeLessThan(r.positions['application:b'].y);
+  });
+});
+
+describe('liens inactifs (anciens, cibles, à valider)', () => {
+  const INACTIVE: MapData = {
+    nodes: [app('application:a'), app('application:h'), srv('server:x', 'PRD', ['application:h', 'application:a'])],
+    // « application:a » passe avant « application:h » par ordre alphabétique, mais son lien est à valider
+    edges: [
+      { id: '1', source: 'application:a', target: 'server:x', type: 'runs_on', retired: false, inactive: true, trust: 'toValidate', period: 'current' },
+      { id: '2', source: 'application:h', target: 'server:x', type: 'runs_on', retired: false, inactive: false, trust: null, period: null },
+      { id: '3', source: 'application:a', target: 'application:h', type: 'calls', retired: false, inactive: true, trust: 'added', period: 'past' },
+    ],
+  };
+
+  it('un serveur est rangé sous l’application qui l’héberge par un lien actif', () => {
+    const g = buildGraph(INACTIVE, { envs: DEFAULT_ENVS });
+    expect(parentOf(g, 'server:x')).toBe(clusterId('zone-PRD', 'application:h'));
+  });
+
+  it('marque les liens : à valider, ancien ; actif sans marque', () => {
+    const g = buildGraph(INACTIVE, { envs: DEFAULT_ENVS });
+    const grouped = g.edges.find((e) => e.source === 'application:h' && e.target === clusterId('zone-PRD', 'application:h'));
+    expect(grouped?.data?.mark).toBeNull();
+    const toValidate = g.edges.find((e) => e.source === 'application:a' && e.target === 'server:x');
+    expect(toValidate?.data?.mark).toBe('toValidate');
+    const past = g.edges.find((e) => e.data?.type === 'calls');
+    expect(past?.data?.mark).toBe('past');
+  });
+
+  it('serveur seulement cité par un lien inactif : groupe sans application, lien direct marqué', () => {
+    const only: MapData = {
+      nodes: [app('application:h'), srv('server:y', 'PRD', [])],
+      edges: [{ id: '9', source: 'application:h', target: 'server:y', type: 'runs_on', retired: false, inactive: true, trust: 'toValidate', period: 'current' }],
+    };
+    const g = buildGraph(only, { envs: DEFAULT_ENVS });
+    expect(parentOf(g, 'server:y')).toBe(clusterId('zone-PRD', null));
+    const e = g.edges.find((x) => x.source === 'application:h');
+    expect(e?.target).toBe('server:y');
+    expect(e?.data?.mark).toBe('toValidate');
+  });
+
+  it('apparence : à valider en pointillés, ancien grisé, retiré en tirets', () => {
+    expect(edgeLook({ type: 'runs_on', retired: false, mark: 'toValidate', env: 'PRD' })).toMatchObject({ stroke: 'var(--color-warn)', dash: '3 4' });
+    const past = edgeLook({ type: 'calls', retired: false, mark: 'past' });
+    expect(past.stroke).toBe('var(--color-unmon)');
+    expect(past.opacity).toBeLessThan(0.5);
+    expect(edgeLook({ type: 'calls', retired: true })).toMatchObject({ dash: '7 5' });
+    expect(edgeLook({ type: 'calls', retired: false, mark: null }).stroke).toBe('var(--color-ink-2)');
   });
 });

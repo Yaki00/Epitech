@@ -27,8 +27,8 @@ export const KNOWN_ATTRS: { key: string; label: Key }[] = [
   { key: 'provisioner', label: 'server.attr.provisioner' },
 ];
 
-/** Attributs déjà montrés ailleurs dans la fiche (environnement, retrait) : exclus de la liste générique. */
-const HIDDEN_ATTRS = new Set(['environment', 'retired', 'type', 'name', 'apm_row']);
+/** Attributs déjà montrés ailleurs dans la fiche (environnement, retrait, hors inventaire, lecture IA) : exclus de la liste générique. */
+const HIDDEN_ATTRS = new Set(['environment', 'retired', 'type', 'name', 'apm_row', 'outOfInventory', 'fromLlm']);
 
 export interface AttrRow {
   key: string;
