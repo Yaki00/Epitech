@@ -132,7 +132,11 @@ describe('mode démo : repérage par l\'IA', () => {
     assert.equal(ooi.length, 1);
     assert.equal(ooi[0].attrs.fromLlm, true);
     const mock = createMockNaemon(repo, { seed: 42, now: () => NOW });
-    assert.ok(mock.fetchRaw(0).hosts.some((h) => h.name === ooi[0].name));
+    const raw = mock.fetchRaw(0);
+    assert.ok(raw.hosts.some((h) => h.name === ooi[0].name));
+    const st = computeStatus(repo, raw, { matcher: demo.matcher });
+    assert.ok(st.servers[ooi[0].id]);
+    assert.notEqual(st.servers[ooi[0].id].state, 'not_monitored');
   });
 
   test('documented_in carries a role, documents carry pageKindAi and period', () => {
@@ -141,7 +145,6 @@ describe('mode démo : repérage par l\'IA', () => {
     assert.ok(docs.some((e) => e.attrs.role === 'cited'));
     assert.ok(repo.listByType('document').every((d) => d.attrs.pageKindAi && d.attrs.period));
     assert.ok(repo.listByType('document').some((d) => d.attrs.period === 'past'));
-    assert.ok(demo);
   });
 });
 

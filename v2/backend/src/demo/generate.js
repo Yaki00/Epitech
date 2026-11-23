@@ -125,13 +125,13 @@ const OWNERS = {
   ATP: [['Claire Vasseur', 'person', 'owner'], ['Mehdi Lambert', 'person', 'support'], ['Équipe Finance', 'team', 'support'], ['Astreinte Socle', 'team', 'oncall']],
   ORC: [['Julien Marchetti', 'person', 'owner'], ['Sofia Delorme', 'person', 'support'], ['Équipe Relation Client', 'team', 'support']],
   VGF: [['Nadia Fontaine', 'person', 'owner'], ['Équipe Finance', 'team', 'support']],
-  HLC: [['Thomas Keller', 'person', 'owner'], ['Inès Bourdin', 'person', 'support'], ['Paul Garnier', 'person', 'other'], ['Équipe Supply', 'team', 'support']],
+  HLC: [['Thomas Kessler', 'person', 'owner'], ['Inès Bourdin', 'person', 'support'], ['Paul Garnier', 'person', 'other'], ['Équipe Supply', 'team', 'support']],
   NVC: [['Sofia Delorme', 'person', 'owner'], ['Équipe Relation Client', 'team', 'support']],
   SRS: [['Marc Aubert', 'person', 'owner'], ['Hugo Rinaldi', 'person', 'owner', 'past'], ['Équipe Supply', 'team', 'support']],
   LXL: [['Marc Aubert', 'person', 'owner'], ['Équipe Supply', 'team', 'support']],
   CRH: [['Lucie Perrot', 'person', 'owner'], ['Équipe Données', 'team', 'support']],
   PGR: [['Karim Besson', 'person', 'owner'], ['Lucie Perrot', 'person', 'support'], ['Équipe Données', 'team', 'support']],
-  TTP: [['Thomas Keller', 'person', 'owner'], ['Anaïs Mercier', 'person', 'oncall'], ['Équipe Socle', 'team', 'support'], ['Astreinte Socle', 'team', 'oncall']],
+  TTP: [['Thomas Kessler', 'person', 'owner'], ['Anaïs Mercier', 'person', 'oncall'], ['Équipe Socle', 'team', 'support'], ['Astreinte Socle', 'team', 'oncall']],
   ALC: [['Nadia Fontaine', 'person', 'owner'], ['Mehdi Lambert', 'person', 'support'], ['Équipe Finance', 'team', 'support']],
 };
 const APM_OWNERS = { ZPN: { owner: 'Élodie Marchand', supportTeam: 'Équipe Notifications' } };
