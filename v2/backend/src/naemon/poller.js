@@ -8,7 +8,7 @@ const fs = require('fs');
 const { computeStatus } = require('./status');
 const { readJson, writeJsonAtomic } = require('../store/store');
 
-function createPoller({ cfg, repo, matcher = null, fetchRaw, file = null, now = Date.now, setIntervalFn = setInterval, clearIntervalFn = clearInterval }) {
+function createPoller({ cfg, repo, matcher = null, fetchRaw, file = null, onOk = null, now = Date.now, setIntervalFn = setInterval, clearIntervalFn = clearInterval }) {
   const periodMs = Math.max(1, Number(cfg.pollMinutes) || 5) * 60000;
   const state = { status: null, lastOk: null, lastError: null, nextAt: null };
   let timer = null;
@@ -43,6 +43,13 @@ function createPoller({ cfg, repo, matcher = null, fetchRaw, file = null, now = 
           writeJsonAtomic(file, { source: cfg.source, lastOk: state.lastOk, status: state.status });
         } catch (err) {
           state.lastError = `écriture de ${file} impossible : ${err.message}`;
+        }
+      }
+      if (onOk) {
+        try {
+          onOk(state.status);
+        } catch (err) {
+          state.lastError = `traitement après relève impossible : ${err.message}`;
         }
       }
     } catch (err) {

@@ -6,6 +6,8 @@ const { createLlmClient } = require('./lib/llmClient');
 const { createLogger } = require('./lib/logger');
 const { createApp } = require('./api/app');
 const { createJobRunner } = require('./api/jobs');
+const { createHistory } = require('./history/history');
+const { startNaemonPoller } = require('./naemon/setup');
 const path = require('path');
 const fs = require('fs');
 
@@ -14,12 +16,11 @@ const log = createLogger('server');
 let repo;
 let llm;
 let jobs = null;
-let poller = null; // relève Naemon (démo : source simulée) ; passé à createApp par la tâche suivante
-let history = null; // historique des imports ; idem
+let poller = null; // relève Naemon (démo : source simulée ; production : thruk ou csv ; off : aucune)
+let history = null; // historique des imports
 let dataDir = config.dataDir;
 
 if (config.demo) {
-  const { createHistory } = require('./history/history');
   const { createPoller } = require('./naemon/poller');
   const { generateDemo } = require('./demo/generate');
   const { createMockNaemon } = require('./demo/naemonMock');
@@ -53,6 +54,8 @@ if (config.demo) {
   repo = createRepo(openStore(config.dataDir));
   llm = createLlmClient(config.llm);
   // boutons « Lancer » de la page Synchronisation (ALLOW_UI_SYNC=false pour les retirer)
+  history = createHistory(config.dataDir, { keep: config.history.keep });
+  poller = startNaemonPoller({ config, repo, logger: log });
   jobs = config.allowUiSync ? createJobRunner({ scriptsDir: path.join(config.root, 'scripts'), cwd: config.root, logger: log }) : null;
 }
 
@@ -66,3 +69,12 @@ server.on('error', (err) => {
   log.error(err.code === 'EADDRINUSE' ? `Le port ${config.port} est déjà utilisé (PORT dans backend/.env)` : err.message);
   process.exit(1);
 });
+
+// arrêt propre : la relève Naemon ne retient pas le processus
+for (const sig of ['SIGINT', 'SIGTERM']) {
+  process.on(sig, () => {
+    if (poller) poller.stop();
+    server.close(() => process.exit(0));
+    setTimeout(() => process.exit(0), 2000).unref();
+  });
+}
