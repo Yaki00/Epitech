@@ -95,10 +95,10 @@ function ownersTool(repo, id) {
   const apps = new Map();
   for (const e of repo.edgesTo(n.id).filter((x) => x.type === 'owned_by' && !(x.attrs && x.attrs.retired))) {
     const a = repo.getNode(e.src);
-    if (a) apps.set(`${a.id}|${(e.attrs && e.attrs.role) || ''}`, { id: a.id, name: a.name, role: (e.attrs && e.attrs.role) || 'other', period: (e.attrs && e.attrs.period) || 'current', source: 'doc' });
+    if (a && !(a.attrs && a.attrs.retired)) apps.set(`${a.id}|${(e.attrs && e.attrs.role) || ''}`, { id: a.id, name: a.name, role: (e.attrs && e.attrs.role) || 'other', period: (e.attrs && e.attrs.period) || 'current', source: 'doc' });
   }
   const attr = n.type === 'person' ? 'owner' : 'supportTeam';
-  for (const a of repo.listByType('application')) {
+  for (const a of repo.listByType('application').filter((x) => !(x.attrs && x.attrs.retired))) {
     if (a.attrs[attr] && String(a.attrs[attr]).toLowerCase() === n.name.toLowerCase() && ![...apps.values()].some((x) => x.id === a.id)) {
       apps.set(`${a.id}|apm`, { id: a.id, name: a.name, role: n.type === 'person' ? 'owner' : 'support', period: 'current', source: 'apm' });
     }

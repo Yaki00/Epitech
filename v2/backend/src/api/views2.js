@@ -69,7 +69,7 @@ function gapsView(d) {
     unknownMonitored: g.unknownMonitored,
     citedNotInInventory: g.citedNotInInventory,
     toValidate: g.toValidate.map((l) => ({
-      server: serverLite(repo, l.server.id),
+      target: l.target.type === 'server' ? { ...serverLite(repo, l.target.id), type: 'server' } : { id: l.target.id, name: l.target.name, type: l.target.type },
       application: { id: l.application.id, name: l.application.name },
       page: l.page ? { id: l.page.id, title: l.page.name, url: l.page.attrs.url || null } : null,
       type: l.type,

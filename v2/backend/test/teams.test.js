@@ -84,7 +84,7 @@ describe('équipes et responsables', () => {
     assert.equal(raw.toValidate.length, 1);
     const { gaps } = gapsView({ repo, poller: null });
     assert.equal(gaps.counts.toValidate, 1);
-    assert.equal(gaps.toValidate[0].server.name, 'srvalto09');
+    assert.equal(gaps.toValidate[0].target.name, 'srvalto09');
     assert.equal(gaps.toValidate[0].application.name, 'Alto');
     assert.equal(gaps.toValidate[0].page.title, 'Page p1');
     const fs = require('fs');
@@ -124,5 +124,34 @@ describe('équipes et responsables', () => {
     assert.equal(det.serverList[0].period, 'past');
     assert.equal(det.serverList[0].active, false);
     assert.equal(views.searchServers(repo, 'srvghost')[0].outOfInventory, true);
+  });
+
+  test('toValidate lists the same server for two apps', () => {
+    const a = app('Alto');
+    const b = app('Borea');
+    const s = repo.upsertNode({ type: 'server', key: 'srvshared', source: 'llm', attrs: { fromLlm: true, outOfInventory: true } });
+    for (const x of [a, b]) repo.addEdge({ src: x, dst: s, type: 'runs_on', source: 'llm', confidence: 0.5, attrs: { trust: 'toValidate', period: 'current' } });
+    const { gaps } = gapsView({ repo, poller: null });
+    assert.deepEqual(gaps.toValidate.map((l) => l.application.name), ['Alto', 'Borea']);
+    assert.equal(gaps.toValidate[0].target.type, 'server');
+  });
+
+  test('toValidate calls link gives an application target', () => {
+    const a = app('Alto');
+    const b = app('Borea');
+    repo.addEdge({ src: a, dst: b, type: 'calls', source: 'llm', confidence: 0.5, attrs: { trust: 'toValidate', period: 'current' } });
+    const { gaps } = gapsView({ repo, poller: null });
+    assert.deepEqual(gaps.toValidate[0].target, { id: b, name: 'Borea', type: 'application' });
+    assert.equal(gaps.toValidate[0].type, 'calls');
+  });
+
+  test('inactive linked server is reported retired for the current interface', () => {
+    const a = app('Alto');
+    const s = repo.upsertNode({ type: 'server', key: 'srvold2', source: 'llm', attrs: {} });
+    repo.addEdge({ src: a, dst: s, type: 'runs_on', source: 'llm', attrs: { trust: 'toValidate', period: 'current' } });
+    const it = views.applicationDetail(repo, a).serverList[0];
+    assert.equal(it.retired, true);
+    assert.equal(it.active, false);
+    assert.equal(it.trust, 'toValidate');
   });
 });

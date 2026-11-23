@@ -13,7 +13,7 @@ const isRetired = (x) => Boolean(x && x.attrs && x.attrs.retired);
  *  notMonitored : serveurs des applications du périmètre sans hôte Naemon
  *  unknownMonitored : hôtes Naemon d'un hostgroup du périmètre, inconnus des inventaires
  *  citedNotInInventory : serveurs cités par les pages d'architecture, absents des inventaires
- *  toValidate : liens lus par l'IA et à valider ({ server, application, page, type })
+ *  toValidate : liens lus par l'IA et à valider ({ target, application, page, type })
  */
 function computeGaps(repo, status) {
   const apps = repo.listByType('application').filter((a) => a.attrs && a.attrs.perimeter && !isRetired(a));
@@ -25,11 +25,11 @@ function computeGaps(repo, status) {
   for (const app of apps) {
     for (const e of repo.edgesFrom(app.id)) {
       if (isRetired(e)) continue;
-      if (e.attrs && e.attrs.trust === 'toValidate' && !seenValidate.has(`${e.dst}|${e.type}`)) {
+      if (e.attrs && e.attrs.trust === 'toValidate' && !seenValidate.has(`${app.id}|${e.dst}|${e.type}`)) {
         const dst = repo.getNode(e.dst);
         if (dst && !isRetired(dst) && e.attrs.period !== 'past') {
-          seenValidate.add(`${e.dst}|${e.type}`);
-          toValidate.push({ server: dst, application: app, page: (e.attrs.docId && repo.getNode(e.attrs.docId)) || null, type: e.type });
+          seenValidate.add(`${app.id}|${e.dst}|${e.type}`);
+          toValidate.push({ target: dst, application: app, page: (e.attrs.docId && repo.getNode(e.attrs.docId)) || null, type: e.type });
         }
       }
       if (isInactiveEdge(e)) continue; // ancien, cible, à valider : jamais compté comme supervisable
@@ -48,7 +48,7 @@ function computeGaps(repo, status) {
     notMonitored: notMonitored.sort((a, b) => byName(a.name, b.name)),
     unknownMonitored: [...new Set((status && status.unmatchedHosts) || [])].sort(byName),
     citedNotInInventory: [...cited.values()].sort(byName),
-    toValidate: toValidate.sort((a, b) => byName(a.server.name, b.server.name) || byName(a.application.name, b.application.name)),
+    toValidate: toValidate.sort((a, b) => byName(a.target.name, b.target.name) || byName(a.application.name, b.application.name)),
   };
 }
 
@@ -58,7 +58,7 @@ function writeGapsReport(dir, gaps) {
     ...gaps.notMonitored.map((s) => ['serveur sans supervision', s.name, (s.attrs && s.attrs.ip) || '', serverEnv(s) || '']),
     ...gaps.unknownMonitored.map((h) => ['hôte supervisé inconnu des inventaires', h, '', '']),
     ...gaps.citedNotInInventory.map((h) => ['serveur cité dans Confluence, absent des inventaires', h, '', '']),
-    ...(gaps.toValidate || []).map((l) => [`lien à valider (${l.application.name})`, l.server.name, (l.server.attrs && l.server.attrs.ip) || '', serverEnv(l.server) || '']),
+    ...(gaps.toValidate || []).map((l) => [`lien à valider (${l.application.name})`, l.target.name, (l.target.attrs && l.target.attrs.ip) || '', (l.target.type === 'server' && serverEnv(l.target)) || '']),
   ];
   return writeCsvReport(dir, 'ecarts-naemon', ['écart', 'serveur ou hôte', 'IP', 'environnement'], rows);
 }

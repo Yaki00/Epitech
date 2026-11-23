@@ -85,14 +85,14 @@ function linkedNodes(repo, id, edgeType, ctx = null) {
       const n = repo.getNode(dst);
       if (!n) return null;
       const best = edges.slice().sort((a, b) => rank(b) - rank(a) || b.confidence - a.confidence)[0];
-      const live = edges.some((e) => !isRetired(e)); // actif tant qu'un lien non retiré existe
+      const active = !isRetired(n) && edges.some((e) => !isInactiveEdge(e));
       return {
         id: n.id,
         name: n.name,
         type: n.type,
         attrs: n.attrs,
-        retired: isRetired(n) || !live,
-        active: !isRetired(n) && edges.some((e) => !isInactiveEdge(e)),
+        retired: isRetired(n) || !active, // l'interface actuelle ne filtre que sur retired : un lien inactif y est grisé
+        active,
         trust: mark(best, 'trust'),
         period: mark(best, 'period'),
         ...(n.type === 'server' ? { env: serverEnv(n), state: serverState(ctx, n.id), outOfInventory: Boolean(n.attrs.outOfInventory) } : {}),
