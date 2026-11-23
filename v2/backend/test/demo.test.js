@@ -8,7 +8,7 @@ const { createRepo } = require('../src/store/repo');
 const { createHistory } = require('../src/history/history');
 const { generateDemo } = require('../src/demo/generate');
 const { createMockNaemon } = require('../src/demo/naemonMock');
-const { createChatMock } = require('../src/demo/chatMock');
+const { createChatMock, askedDependencies } = require('../src/demo/chatMock');
 const { createLlmClient } = require('../src/lib/llmClient');
 const { ask } = require('../src/assistant/ask');
 const { computeStatus } = require('../src/naemon/status');
@@ -138,6 +138,40 @@ describe('mode démo : chat simulé', () => {
     assert.ok(r.toolTrace.some((t) => t.tool === 'dependencies'));
     const r2 = await ask({ llm, repo, question: 'bonjour' });
     assert.ok(r2.answer.startsWith('[démo]'));
+  });
+  test('sens de la question : ce dont X a besoin ou ce qui dépend de X (FR et EN)', () => {
+    const deps = [
+      'De quoi dépend Atlas Paiements ?',
+      'Atlas Paiements dépend de quoi ?',
+      'De quoi a besoin Atlas Paiements ?',
+      'Quelles sont les dépendances de Atlas Paiements ?',
+      'Qu’est-ce que Atlas Paiements utilise ?',
+      'Sur quels serveurs tourne Atlas Paiements ?',
+      'What does Atlas Paiements depend on?',
+      'What does Atlas Paiements need?',
+      'What does Atlas Paiements use?',
+      'Atlas Paiements depends on what?',
+    ];
+    const impact = [
+      "Qu'est-ce qui dépend de Atlas Paiements ?",
+      'Qu’est-ce qui dépend de Atlas Paiements ?',
+      'Qui utilise Atlas Paiements ?',
+      'Quelles applications dépendent de Atlas Paiements ?',
+      'Que se passe-t-il si Atlas Paiements tombe ?',
+      'What depends on Atlas Paiements?',
+      'Who uses Atlas Paiements?',
+      'What happens if Atlas Paiements goes down?',
+      'Atlas Paiements',
+    ];
+    for (const q of deps) assert.equal(askedDependencies(q), true, q);
+    for (const q of impact) assert.equal(askedDependencies(q), false, q);
+  });
+  test('« Qu’est-ce qui dépend de X ? » passe par l’analyse d’impact, « De quoi dépend X ? » par les dépendances', async () => {
+    const r = await ask({ llm, repo, question: "Qu'est-ce qui dépend de Atlas Paiements ?" });
+    assert.deepEqual(r.toolTrace.map((t) => t.tool), ['impact_analysis']);
+    assert.ok(/Helios Commandes/.test(r.answer));
+    const r2 = await ask({ llm, repo, question: 'What does Atlas Paiements depend on?', lang: 'en' });
+    assert.deepEqual(r2.toolTrace.map((t) => t.tool), ['dependencies']);
   });
 });
 

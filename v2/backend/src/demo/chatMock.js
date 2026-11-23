@@ -16,6 +16,38 @@ const norm = (s) =>
 
 const completion = (message) => ({ choices: [{ message }], usage: { prompt_tokens: 0, completion_tokens: 0 }, model: 'demo' });
 
+/**
+ * Sens de la question : ce dont X a besoin (dependencies) ou ce qui est touché si X tombe (impact_analysis).
+ * X sujet de « dépendre » (« De quoi dépend X ? », « X dépend de quoi ? », « What does X depend on? ») : dependencies.
+ * X complément (« Qu'est-ce qui dépend de X ? », « Qui utilise X ? », « What depends on X? ») : impact_analysis.
+ * Formulation ambiguë : impact_analysis.
+ */
+const DEPENDENCY_PATTERNS = [
+  // français : X est sujet
+  /\bde quoi\b.*\b(depend|a besoin|ont besoin|a-t-il besoin|a-t-elle besoin)/,
+  /\bdepend(ent)? de quoi\b/,
+  /\bbesoin de quoi\b/,
+  /\bsur quoi\b.*\b(repose|reposent|s'appuie|tourne)/,
+  /\b(les |ses )?dependances (de|d')/,
+  /\bqu'?est-ce qu'?(e )?\S+.*\b(utilise|appelle|necessite)\b/,
+  /\bque (utilise|appelle|necessite)\b/,
+  /\b(sur )?quels? (serveurs?|bases?)\b/,
+  // anglais : X est sujet
+  /\bwhat (does|do|did)\b.*\b(depend|need|use|rely|call)/,
+  /\bdepends? on what\b/,
+  /\bdependencies (of|for)\b/,
+  /'s dependencies\b/,
+  /\bwhich (servers?|databases?)\b/,
+];
+const IMPACT_PATTERNS = [/\bqu'?est-ce qui\b/, /\bqui (utilise|appelle|depend)/, /\bwhat (depends|uses|calls|relies)\b/, /\bwho (depends|uses|calls)\b/];
+
+function askedDependencies(q) {
+  if (IMPACT_PATTERNS.some((re) => re.test(q))) return false;
+  return DEPENDENCY_PATTERNS.some((re) => re.test(q));
+}
+
+const question2text = (q) => norm(q).replace(/[\u2019`]/g, "'").replace(/\s+/g, ' ');
+
 function createChatMock(repo) {
   /** Entité citée dans la question : nom de serveur, nom ou sigle d'une application (celle du périmètre d'abord). */
   function findEntity(question) {
@@ -35,7 +67,7 @@ function createChatMock(repo) {
     return null;
   }
 
-  const wantsDependencies = (q) => /depend|besoin|utilise|appelle|repose|necessite|dependenc|rely|depends|needs|uses/.test(norm(q));
+  const wantsDependencies = (q) => askedDependencies(question2text(q));
   const names = (items, type) => items.filter((i) => i.type === type).map((i) => i.name);
   const list = (arr, max = 8) => (arr.length > max ? `${arr.slice(0, max).join(', ')} et ${arr.length - max} autres` : arr.join(', '));
 
@@ -103,4 +135,4 @@ function createChatMock(repo) {
   };
 }
 
-module.exports = { createChatMock };
+module.exports = { createChatMock, askedDependencies: (q) => askedDependencies(question2text(q)) };
