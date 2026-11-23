@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>Lyra</title>
+    <script>
+      // thème appliqué avant le premier affichage (évite un éclair clair en mode sombre)
+      (function () {
+        var theme = null;
+        try {
+          theme = window.localStorage.getItem('lyra.theme');
+        } catch (e) {
+          theme = null;
+        }
+        if (theme !== 'light' && theme !== 'dark') {
+          theme = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+        document.documentElement.dataset.theme = theme;
+        try {
+          var lang = window.localStorage.getItem('lyra.lang');
+          if (lang === 'en' || lang === 'fr') document.documentElement.lang = lang;
+        } catch (e) {
+          /* stockage indisponible */
+        }
+      })();
+    </script>
+    <script type="module" crossorigin src="/assets/index-Cjgbnsi8.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/rolldown-runtime-pP25SEvz.js">
+    <link rel="modulepreload" crossorigin href="/assets/ui-B8_wdRrs.js">
+    <link rel="stylesheet" crossorigin href="/assets/index-DdVm1GPw.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

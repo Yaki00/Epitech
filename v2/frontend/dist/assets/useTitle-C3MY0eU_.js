@@ -1,0 +1,1 @@
+import{r as e}from"./rolldown-runtime-pP25SEvz.js";import{$ as t}from"./ui-B8_wdRrs.js";var n=e(t(),1);function r(e){(0,n.useEffect)(()=>{document.title=e?`${e} | Lyra`:`Lyra`},[e])}export{r as t};
