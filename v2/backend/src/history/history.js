@@ -24,7 +24,7 @@ function createHistory(dataDir, { keep = DEFAULT_KEEP } = {}) {
    * @returns {object|null} l'entrée d'historique créée (null : import incomplet, premier import ou rien de changé)
    */
   function recordImport({ source, seen, attrsById = {}, complete = false }) {
-    if (!complete || !seen) return null;
+    if (!complete || !seen || !(seen.nodeIds || []).length) return null; // rien vu : on ne déduit rien
     const snaps = loadSnapshots();
     const prev = snaps[source];
     const next = { at: nowIso(), nodeIds: seen.nodeIds || [], edgeIds: seen.edgeIds || [], attrs: attrsById };

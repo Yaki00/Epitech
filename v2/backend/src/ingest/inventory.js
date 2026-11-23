@@ -95,7 +95,7 @@ function pickAttrs(row, attrs) {
  * garde son serveur en vie. Seul le filtre du mapping (lignes qui ne sont pas des entrées d'inventaire) s'applique.
  * Identité d'un lien : src|dst|type|source.
  */
-function computeSeen(records, mapping, source) {
+function computeSeen(records, mapping, source, { matcher = null, perimeterCol = null, multiPerimeter = false } = {}) {
   const nodeIds = new Set();
   const edgeIds = new Set();
   const attrsById = {};
@@ -109,7 +109,15 @@ function computeSeen(records, mapping, source) {
     nodeIds.add(id);
     attrsById[id] = pickAttrs(row, mapping.attrs);
     for (const rel of mapping.relations) {
-      for (const value of rel.multi === false ? [row[rel.column]].filter(Boolean) : splitMulti(row[rel.column])) {
+      let values = rel.multi === false ? [row[rel.column]].filter(Boolean) : splitMulti(row[rel.column]);
+      // colonne du périmètre : les vrais liens portent le nom de référence (alias, orthographe proche)
+      if (matcher && perimeterCol && rel.column === perimeterCol) {
+        values = values.map((raw) => {
+          const m = matcher.matchName(raw, { minScore: 0.95 });
+          return m ? m.app.name : raw;
+        });
+      }
+      for (const value of values) {
         const ok = nodeKey(rel.entity, value);
         if (!ok) continue;
         const otherId = `${rel.entity}:${ok}`;
@@ -155,7 +163,7 @@ function ingestInventory(repo, { source, records, headers, mapping: rawMapping, 
   ].filter((col) => col && records.length && !cols.includes(col));
   if (missing.length) throw new Error(`Colonnes absentes de l'export ${source} : ${[...new Set(missing)].join(', ')}. Vérifiez config/mappings.json.`);
 
-  const seen = computeSeen(records, mapping, source);
+  const seen = computeSeen(records, mapping, source, { matcher: scoped ? matcher : null, perimeterCol, multiPerimeter });
   stats.seen = seen;
 
   repo.transaction(() => {

@@ -62,8 +62,8 @@ function main() {
         if (resolved.length) log.info(`${source} : colonnes par lettre`, Object.fromEntries(resolved.map((r) => [r.ref, r.header])));
         const stats = ingestInventory(repo, { source, records, headers, mapping, matcher, runId });
         // un import n'est « complet » que sans erreur de ligne et avec au moins une ligne : sinon aucun retrait
-        const complete = stats.errors === 0 && records.length > 0;
         const { seen } = stats;
+        const complete = stats.errors === 0 && records.length > 0 && seen.nodeIds.length > 0;
         delete stats.seen;
         const change = history.recordImport({ source, seen, attrsById: seen.attrsById, complete });
         if (change) log.info(`${source} : ${change.added.length} ajout(s), ${change.removed.length} retrait(s), ${change.changed.length} modification(s)`);

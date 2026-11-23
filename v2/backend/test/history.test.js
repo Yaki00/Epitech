@@ -107,4 +107,33 @@ describe('historique des imports', () => {
     assert.equal(list[0].changed[0].after, '10.0.0.6');
     assert.equal(createHistory(dir, { keep: 3 }).list(100).length, 3);
   });
+
+  test('alias spelling of a perimeter app does not retire its edge', () => {
+    const h = createHistory(dir);
+    const file = path.join(dir, 'perimeter.json');
+    fs.writeFileSync(file, JSON.stringify({ applications: [{ name: 'Alto', aliases: ['ALTO-SA'] }] }));
+    const matcher = createMatcher(loadPerimeter(file));
+    run(h, [row('srv1', 'ALTO-SA')], { matcher });
+    run(h, [row('srv1', 'ALTO-SA')], { matcher });
+    const edges = repo.allEdges().filter((e) => e.type === 'runs_on');
+    assert.equal(edges.length, 1);
+    assert.equal(edges[0].src, 'application:alto');
+    assert.equal(edges[0].attrs.retired, undefined);
+  });
+
+  test('rows all dropped by the mapping filter retire nothing', () => {
+    const h = createHistory(dir);
+    const filtered = { ...mapping, filter: { Status: 'Active' } };
+    const go = (records) => {
+      const stats = ingestInventory(repo, { source: 'inv', records, mapping: filtered });
+      h.recordImport({ source: 'inv', seen: stats.seen, attrsById: stats.seen.attrsById, complete: stats.errors === 0 && records.length > 0 && stats.seen.nodeIds.length > 0 });
+      h.applyRetirements(repo);
+    };
+    go([{ ...row('srv1', 'Alto'), Status: 'Active' }]);
+    go([{ ...row('srv1', 'Alto'), Status: 'Off' }]);
+    assert.equal(repo.getNode('server:srv1').attrs.retired, undefined);
+    assert.ok(repo.allEdges().every((e) => !e.attrs.retired));
+    // défense dans recordImport lui-même
+    assert.equal(h.recordImport({ source: 'inv', seen: { nodeIds: [], edgeIds: [] }, attrsById: {}, complete: true }), null);
+  });
 });
