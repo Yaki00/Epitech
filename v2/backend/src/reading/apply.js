@@ -61,12 +61,13 @@ function applyReading(repo, verified, { pageId, docNodeId, page = {}, matcher = 
   }
 
   // 5. liens lus dans la page
-  const ensureNode = (id) => {
+  const ensureNode = (id, name) => {
     if (repo.getNode(id)) return;
     const i = id.indexOf(':');
     const type = id.slice(0, i);
     const key = id.slice(i + 1);
-    repo.upsertNode({ type, key, name: key, source: 'llm', attrs: { fromLlm: true } });
+    const attrs = type === 'server' ? { fromLlm: true, outOfInventory: true } : { fromLlm: true };
+    repo.upsertNode({ type, key, name: name || key, source: 'llm', attrs });
   };
   for (const l of verified.links || []) {
     if (l.trust === 'otherApp') {
@@ -74,8 +75,8 @@ function applyReading(repo, verified, { pageId, docNodeId, page = {}, matcher = 
       continue;
     }
     if (l.trust === 'confirmed') continue; // déjà dans l'inventaire : rien de nouveau
-    ensureNode(l.src);
-    ensureNode(l.dst);
+    ensureNode(l.src, l.srcName);
+    ensureNode(l.dst, l.dstName);
     repo.addEdge({
       src: l.src,
       dst: l.dst,

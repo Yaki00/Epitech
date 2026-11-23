@@ -8,6 +8,8 @@
  * Les nœuds et liens retirés (attrs.retired) sont ignorés.
  */
 
+const { isInactiveEdge } = require('../graph/impact');
+
 const isRetired = (x) => Boolean(x && x.attrs && x.attrs.retired);
 
 const plural = (n, one, many) => `${n} ${n > 1 ? many : one}`;
@@ -18,7 +20,7 @@ function docScore(repo, appId) {
 
   // serveurs actuels de l'application
   const servers = new Map();
-  for (const e of out.filter((x) => x.type === 'runs_on')) {
+  for (const e of out.filter((x) => x.type === 'runs_on' && !isInactiveEdge(x))) {
     const n = repo.getNode(e.dst);
     if (n && n.type === 'server' && !isRetired(n)) servers.set(n.id, n);
   }

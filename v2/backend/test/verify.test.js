@@ -159,6 +159,14 @@ describe('verifyReading', () => {
     assert.deepEqual(v.links.map((l) => [l.type, l.trust, l.period]), [['calls', 'added', 'current'], ['uses_db', 'added', 'current']]);
     assert.equal(v.links[0].src, 'application:orderhub');
     assert.equal(v.links[0].dst, 'application:billing-engine');
+    assert.equal(v.links[1].dstName, 'DB_ORDERS');
+  });
+
+  test('server ip from the reading is carried to Verified', () => {
+    const env = setup();
+    const r = reading({ entities: [server('srvorh01', 'srvorh01 10.0.0.9', { ip: '10.0.0.9' })] });
+    const v = verifyReading(r, ctxOf(env, { pageText: 'srvorh01 10.0.0.9' }));
+    assert.equal(v.servers[0].ip, '10.0.0.9');
   });
 
   test('applications outside the perimeter are out_of_scope', () => {

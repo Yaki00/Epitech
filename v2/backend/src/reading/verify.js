@@ -7,8 +7,8 @@
  * Verified = {
  *   kind, period, env, topics,
  *   apps: [{ appId, role, written, evidence }],
- *   servers: [{ nodeId|null, name, env, status, inInventory, corroborated, evidence }],
- *   links: [{ src, dst, type, trust, period, evidence }],
+ *   servers: [{ nodeId|null, name, ip|null, env, status, inInventory, corroborated, evidence }],
+ *   links: [{ src, dst, srcName, dstName, type, trust, period, evidence }],
  *   owners: [{ appId, name, kind, role, period, evidence }],
  *   rejected: [{ what, reason: 'no_evidence'|'unknown_application'|'out_of_scope' }],
  * }
@@ -88,6 +88,7 @@ function verifyReading(reading, ctx) {
       name: node ? node.name : name,
       env: (e && e.env) || (node ? serverEnv(node) : null) || page.env || null,
       status: e && e.status !== undefined ? e.status : 'active',
+      ip: (e && e.ip) || null,
       inInventory,
       corroborated: false,
       evidence: e ? e.evidence : '',
@@ -115,10 +116,10 @@ function verifyReading(reading, ctx) {
   /** Extrémité d'un lien : { id, kind, entry? } ou null. */
   function endpoint(name) {
     const ent = entityByKey.get(normKey(name));
-    if (ent && ent.kind === 'server') return { id: ent.entry.nodeId || `server:${nodeKey('server', name)}`, kind: 'server', entry: ent.entry };
-    if (ent) return { id: `${ent.kind}:${nodeKey(ent.kind, ent.name)}`, kind: ent.kind };
+    if (ent && ent.kind === 'server') return { id: ent.entry.nodeId || `server:${nodeKey('server', name)}`, kind: 'server', entry: ent.entry, name: ent.entry.name };
+    if (ent) return { id: `${ent.kind}:${nodeKey(ent.kind, ent.name)}`, kind: ent.kind, name: ent.name };
     const appId = appIdOf(name);
-    if (appId) return { id: appId, kind: 'application' };
+    if (appId) return { id: appId, kind: 'application', name };
     const node = resolveServer(name);
     if (node) {
       return { id: node.id, kind: 'server', entry: serverByKey.get(node.id) || addServer(node.id, name, node, null) };
@@ -150,7 +151,7 @@ function verifyReading(reading, ctx) {
     if (entry && entry.status === 'planned' && period === 'current') period = 'target';
     const unreadable = !pageReliable || (entry && entry.status === null && l.type === 'runs_on');
     if (unreadable && trust !== 'confirmed' && trust !== 'otherApp') trust = 'toValidate';
-    links.push({ src: from.id, dst: to.id, type: l.type, trust, period, evidence: l.evidence });
+    links.push({ src: from.id, dst: to.id, srcName: from.name || l.from, dstName: to.name || l.to, type: l.type, trust, period, evidence: l.evidence });
   }
 
   // ---- responsables ----

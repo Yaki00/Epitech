@@ -282,3 +282,19 @@ describe('marketplace : plusieurs applications dans une cellule', () => {
     assert.ok(!repo.getNode('application:autre'));
   });
 });
+
+describe('liens inactifs et périmètre', () => {
+  test('inactive llm runs_on does not make a server belong to the app', () => {
+    const repo = createRepo(openStore(':memory:'));
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'lyra-per-')), 'perimeter.json');
+    fs.writeFileSync(file, JSON.stringify({ applications: ['OrderHub'] }));
+    const perimeter = loadPerimeter(file);
+    ensurePerimeterNodes(repo, perimeter);
+    const real = repo.upsertNode({ type: 'server', key: 'srvorh01', name: 'srvorh01', source: 'apm' });
+    const ghost = repo.upsertNode({ type: 'server', key: 'srvghost', name: 'srvghost', source: 'llm' });
+    repo.addEdge({ src: 'application:orderhub', dst: real, type: 'runs_on', source: 'apm' });
+    repo.addEdge({ src: 'application:orderhub', dst: ghost, type: 'runs_on', source: 'llm', sourceRef: 'p1', attrs: { trust: 'toValidate' } });
+    const m = createMatcher(perimeter, repo);
+    assert.deepEqual([...m.apps[0].servers], [real]);
+  });
+});

@@ -136,7 +136,7 @@ describe('applyReading', () => {
         link('application:orderhub', 'server:srvx', 'runs_on', 'toValidate'),
         link('application:billing-engine', env.s1, 'runs_on', 'otherApp'),
         link('application:orderhub', env.s1, 'runs_on', 'confirmed'),
-        link('application:orderhub', 'database:ora_orh', 'uses_db', 'added', { period: 'past' }),
+        link('application:orderhub', 'database:ora_orh', 'uses_db', 'added', { period: 'past', dstName: 'ORA_ORH' }),
       ],
     });
     const r = apply(env, v);
@@ -144,7 +144,8 @@ describe('applyReading', () => {
     assert.equal(llm.length, 2);
     assert.equal(llm.find((e) => e.dst === 'server:srvx').attrs.trust, 'toValidate');
     assert.equal(llm.find((e) => e.dst === 'database:ora_orh').attrs.period, 'past');
-    assert.ok(env.repo.getNode('database:ora_orh'));
+    assert.equal(env.repo.getNode('database:ora_orh').name, 'ORA_ORH');
+    assert.equal(env.repo.getNode('server:srvx').attrs.outOfInventory, true);
     assert.equal(r.toValidate, 1);
     assert.equal(r.otherApp, 1);
     assert.equal(r.links, 2);

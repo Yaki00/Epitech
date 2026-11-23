@@ -164,3 +164,15 @@ describe('computeStatus : périmètre', () => {
     assert.equal(JSON.stringify(input), copy);
   });
 });
+
+describe('liens inactifs', () => {
+  test('inactive llm runs_on does not make a server belong to the app', () => {
+    const real = addSrv('srvalto01', 'PRD', 'alto');
+    const ghost = addSrv('srvghost01', 'PRD', null);
+    repo.addEdge({ src: 'application:alto', dst: ghost, type: 'runs_on', source: 'llm', sourceRef: 'p1', attrs: { trust: 'toValidate', period: 'current' } });
+    const r = computeStatus(repo, raw([host('srvalto01', 0), host('srvghost01', 1)]));
+    assert.equal(r.servers[real].state, 'ok');
+    assert.equal(r.servers[ghost].state, 'down');
+    assert.equal(r.apps['application:alto'].state, 'ok'); // le serveur à valider ne compte pas
+  });
+});

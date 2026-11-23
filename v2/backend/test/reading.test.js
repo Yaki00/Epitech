@@ -402,3 +402,17 @@ describe('lecture IA d\'une page', () => {
     assert.equal(llm.calls.length, 2);
   });
 });
+
+describe('ip des serveurs', () => {
+  test('server ip is kept, non-ip value dropped', () => {
+    const r = sanitizeReading({
+      entities: [
+        { name: 'srv1', type: 'server', ip: ' 10.1.2.3 ', evidence: 'srv1 10.1.2.3' },
+        { name: 'srv2', type: 'server', ip: 'pas une ip', evidence: 'srv2 pas une ip' },
+        { name: 'srv3', type: 'server', ip: '999.1.1.1', evidence: 'srv3 999.1.1.1' },
+        { name: 'ora', type: 'database', ip: '10.1.2.4', evidence: 'ora 10.1.2.4' },
+      ],
+    });
+    assert.deepEqual(r.entities.map((e) => e.ip), ['10.1.2.3', null, null, null]);
+  });
+});

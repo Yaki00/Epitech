@@ -18,6 +18,7 @@
  */
 const { SECTIONS } = require('../perimeter/architecture');
 const { normalizeEnv } = require('../lib/environment');
+const { isIPv4 } = require('../resolve/entities');
 
 const KINDS = ['architecture', 'operations', 'install', 'incident', 'release', 'meeting', 'project', 'other'];
 const PERIODS = ['current', 'past', 'target'];
@@ -179,6 +180,7 @@ const statusRank = (st) => (st === 'active' ? 0 : st === null ? 1 : 2);
 const mergeEntities = (items) =>
   mergeItems(items, (e) => `${e.type}|${normKey(e.name)}`, (kept, e) => {
     if (!kept.env && e.env) kept.env = e.env;
+    if (!kept.ip && e.ip) kept.ip = e.ip;
     if (statusRank(e.status) > statusRank(kept.status)) kept.status = e.status;
   });
 const mergeLinks = (items) => mergeItems(items, (l) => `${normKey(l.from)}|${l.type}|${normKey(l.to)}`, () => {});
@@ -216,7 +218,8 @@ function sanitizeReading(raw) {
       const rawName = str(e.name);
       // une adresse électronique n'est jamais une entité ; une personne ou une équipe perd ses numéros
       const name = human ? cleanName(rawName, true) : rawName.replace(EMAIL, '') === rawName ? rawName : '';
-      return { name, type, env: envOf(e.env), status: pick(e.status, STATUSES, { aliases: ALIASES.status, empty: 'active', unknown: null }), evidence: cleanEvidence(e.evidence, human) };
+      const ip = type === 'server' && typeof e.ip === 'string' && isIPv4(e.ip.trim()) ? e.ip.trim() : null;
+      return { name, type, ip, env: envOf(e.env), status: pick(e.status, STATUSES, { aliases: ALIASES.status, empty: 'active', unknown: null }), evidence: cleanEvidence(e.evidence, human) };
     })
     .filter((e) => e.type && e.name && e.evidence);
 

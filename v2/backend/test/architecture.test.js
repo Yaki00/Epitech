@@ -61,9 +61,10 @@ describe("contrôle d'une page d'architecture", () => {
 
   // serveurs cités comme le rendrait la vérification d'une lecture : nom, nœud rapproché, présence à l'inventaire
   const citedOf = (...names) =>
-    names.map((name) => {
+    names.map((spec) => {
+      const [name, ip = null] = Array.isArray(spec) ? spec : [spec];
       const node = repo.resolve(name).find((n) => n.type === 'server');
-      return { nodeId: node ? node.id : null, name: node ? node.name : name, env: null, status: 'active', inInventory: Boolean(node), corroborated: false, evidence: name };
+      return { nodeId: node ? node.id : null, name: node ? node.name : name, ip, env: null, status: 'active', inInventory: Boolean(node), corroborated: false, evidence: name };
     });
 
   const page = (title, rows, text = '') => {
@@ -78,6 +79,12 @@ describe("contrôle d'une page d'architecture", () => {
     };
   };
 
+  test('ipMismatch comes from the reading ip', () => {
+    const p = page('Serveurs', []);
+    const a = auditArchitecturePage(repo, m, p, 'application:orderhub', { now: Date.parse('2026-11-18'), cited: citedOf(['ohbprd01', '10.1.0.1'], ['ohbprd02', '10.1.0.77'], 'ohbrec01'), env: null, topics: [] });
+    assert.deepEqual(a.ipMismatch, [{ server: 'ohbprd02', page: ['10.1.0.77'], inventory: ['10.1.0.2'] }]);
+  });
+
   test('confirmés, manquants, autre application, inconnus, IP différente', () => {
     const p = page('OrderHub - Serveurs de production', [
       { Serveur: 'OHBPRD01', IP: '10.1.0.1' },
@@ -85,7 +92,7 @@ describe("contrôle d'une page d'architecture", () => {
       { Serveur: 'vieuxsrv07', IP: '10.9.9.9' },
     ]);
     p.tables[0].rows.push({ Serveur: 'ohbprd02', IP: '10.1.0.99' });
-    const cited = citedOf('OHBPRD01', 'altoprd01', 'vieuxsrv07', '10.9.9.9', 'ohbprd02');
+    const cited = citedOf('OHBPRD01', 'altoprd01', 'vieuxsrv07', '10.9.9.9', ['ohbprd02', '10.1.0.99']);
     const a = auditArchitecturePage(repo, m, p, 'application:orderhub', { now: Date.parse('2026-11-18'), cited, env: 'PRD', topics: ['servers'] });
     assert.equal(a.environment, 'PRD');
     assert.equal(a.expected, 2); // le serveur de recette n'est pas attendu dans une page de production

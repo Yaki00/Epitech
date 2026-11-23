@@ -57,7 +57,7 @@ function verdictFr(problems) {
   return problems.map((p) => text[p.code](p.n)).join(' ; ');
 }
 
-// en-têtes de colonnes (mots entiers) : pas "nom" ni "adresse", trop fréquents dans les tableaux de contacts
+// utilisé seulement par architectureScore (supprimé en Tâche 6)
 const HOST_HEADERS = ['serveur', 'serveurs', 'server', 'servers', 'hostname', 'host', 'hote', 'machine', 'vm', 'fqdn'];
 const IP_HEADERS = ['ip'];
 
@@ -130,18 +130,6 @@ function auditArchitecturePage(repo, matcher, page, appId, { now = Date.now(), c
   // une page "production" n'a pas à lister les serveurs de recette (si l'inventaire donne l'environnement)
   const expected = env ? reference.filter((s) => serverEnv(s) === null || serverEnv(s) === env) : reference;
 
-  // IP lues dans les tableaux "serveur / IP" de la page, à comparer à l'inventaire pour les serveurs cités
-  const ipChecks = [];
-  for (const t of page.tables || []) {
-    const hostCol = (t.headers || []).find((h) => headerIs(h, HOST_HEADERS));
-    const ipCol = (t.headers || []).find((h) => headerIs(h, IP_HEADERS));
-    if (!hostCol || !ipCol) continue;
-    for (const row of t.rows || []) {
-      const host = String(row[hostCol] || '').trim().split(/[\s,;/]+/)[0];
-      if (host) ipChecks.push({ host, ips: String(row[ipCol] || '').split(/[\s,;/]+/).filter(isIPv4) });
-    }
-  }
-
   const cited = new Set(citedServers.filter((c) => c.nodeId && repo.getNode(c.nodeId)).map((c) => c.nodeId));
   const expectedIds = new Set(expected.map((s) => s.id));
   const name = (id) => repo.getNode(id)?.name || id;
@@ -153,16 +141,16 @@ function auditArchitecturePage(repo, matcher, page, appId, { now = Date.now(), c
     .map((id) => ({ server: name(id), applications: matcher.apps.filter((a) => a.servers.has(id)).map((a) => a.name) }))
     .filter((o) => o.applications.length);
 
+  // IP donnée par la page (lue par l'IA) différente de celle de l'inventaire
   const ipMismatch = [];
   const wrongIps = new Set();
-  for (const c of ipChecks) {
-    const [server] = repo.resolve(c.host).filter((n) => n.type === 'server');
-    if (!server || !cited.has(server.id)) continue;
-    const known = ipsOf(repo.getNode(server.id));
-    if (!known.length || !c.ips.length) continue;
-    const wrong = c.ips.filter((ip) => !known.includes(ip));
-    for (const ip of wrong) wrongIps.add(ip);
-    if (wrong.length) ipMismatch.push({ server: server.name, page: wrong, inventory: known });
+  for (const c of citedServers) {
+    if (!c.nodeId || !c.ip) continue;
+    const node = repo.getNode(c.nodeId);
+    const known = ipsOf(node);
+    if (!node || !known.length || known.includes(c.ip)) continue;
+    wrongIps.add(c.ip);
+    ipMismatch.push({ server: node.name, page: [c.ip], inventory: known });
   }
   // serveurs ou IP cités que les inventaires ne connaissent pas (une IP déjà signalée comme différente n'est pas comptée deux fois)
   const unknownNames = new Set();

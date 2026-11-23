@@ -22,7 +22,7 @@ PRINCIPES
 FORMAT
 {"page": {"kind": "architecture|operations|install|incident|release|meeting|project|other", "period": "current|past|target", "env": "PRD|STG|DEV|null", "topics": []},
  "applications": [{"name": "...", "written": "...", "role": "subject|cited", "evidence": "..."}],
- "entities": [{"name": "...", "type": "server|ip|database|url|queue|path|person|team", "env": "PRD|STG|DEV|null", "status": "active|decommissioned|planned", "evidence": "..."}],
+ "entities": [{"name": "...", "type": "server|ip|database|url|queue|path|person|team", "env": "PRD|STG|DEV|null", "ip": "...|null", "status": "active|decommissioned|planned", "evidence": "..."}],
  "links": [{"from": "...", "to": "...", "type": "runs_on|uses_db|db_on|calls|reads_from|writes_to|depends_on", "evidence": "..."}],
  "owners": [{"name": "...", "kind": "person|team", "application": "...|null", "role": "owner|support|oncall|other", "evidence": "..."}]}
 Les valeurs proposées (kind, period, env, role, type, status, kind des owners) restent en anglais, telles qu'écrites ci-dessus : ne les traduis pas. Mets une liste vide quand il n'y a rien.
@@ -60,6 +60,7 @@ ENTITIES (éléments techniques, personnes et équipes cités)
   person, team : personne ou équipe nommée.
 - name : tel qu'écrit dans la page, sans le compléter.
 - env : PRD, STG ou DEV si la page le dit pour cet élément (colonne, titre de section, convention des consignes), sinon null.
+- ip : pour un serveur, l'adresse IP que la page lui donne, sinon null.
 - status : ce que la page dit de l'élément. decommissioned : arrêté, supprimé, décommissionné, remplacé, barré, ou listé parmi les éléments anciens ou à retirer. planned : prévu, à créer, à installer, cible. active : en service. Dans une page past, un serveur est decommissioned sauf si la page le dit encore en service ; dans une page target, il est planned sauf si la page le dit déjà en service.
 
 LINKS (relations écrites ou dessinées, au sens « from dépend de to »)

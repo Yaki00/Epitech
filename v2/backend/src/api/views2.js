@@ -8,7 +8,7 @@
  * { status, source, lastOk, lastError, nextAt }.
  */
 const { serverEnv, appCriticality, normalizeEnv } = require('../lib/environment');
-const { impactOf } = require('../graph/impact');
+const { impactOf, isInactiveEdge } = require('../graph/impact');
 const { computeGaps } = require('../naemon/gaps');
 const { docScore } = require('../quality/docScore');
 const views = require('./views');
@@ -141,7 +141,7 @@ function overviewView(d) {
   const hostedBy = new Map();
   for (const a of apps) {
     for (const e of repo.edgesFrom(a.id)) {
-      if (e.type !== 'runs_on' || isRetired(e)) continue;
+      if (e.type !== 'runs_on' || isInactiveEdge(e)) continue;
       if (!hostedBy.has(e.dst)) hostedBy.set(e.dst, []);
       hostedBy.get(e.dst).push({ id: a.id, name: a.name });
     }
@@ -196,7 +196,7 @@ function serverDetail(d, id) {
   if (!n || n.type !== 'server') return null;
   const ctx = ctxOf(d);
   const st = (ctx.status && ctx.status.servers[id]) || null;
-  const applications = [...new Set(repo.edgesTo(id).filter((e) => e.type === 'runs_on' && !isRetired(e)).map((e) => e.src))]
+  const applications = [...new Set(repo.edgesTo(id).filter((e) => e.type === 'runs_on' && !isInactiveEdge(e)).map((e) => e.src))]
     .map((x) => repo.getNode(x))
     .filter(Boolean)
     .map((a) => ({ id: a.id, name: a.name, criticality: appCriticality(a), state: appStatus(ctx, a.id).state }))

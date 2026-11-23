@@ -6,6 +6,7 @@
 
 const { serverEnv, appCriticality, ENVS } = require('../lib/environment');
 const { docScore } = require('../quality/docScore');
+const { isInactiveEdge } = require('../graph/impact');
 
 const isRetired = (x) => Boolean(x && x.attrs && x.attrs.retired);
 
@@ -29,7 +30,7 @@ function appStatus(ctx, id) {
 /** Résumé d'une application : compteurs et infos de la fiche. */
 function applicationSummary(repo, app, ctx = null) {
   const out = repo.edgesFrom(app.id).filter((e) => !isRetired(e));
-  const serverIds = new Set(out.filter((e) => e.type === 'runs_on').map((e) => e.dst));
+  const serverIds = new Set(out.filter((e) => e.type === 'runs_on' && !isInactiveEdge(e)).map((e) => e.dst));
   const dbIds = new Set(out.filter((e) => e.type === 'uses_db').map((e) => e.dst));
   const envs = new Set();
   for (const id of serverIds) {
@@ -134,7 +135,7 @@ function searchServers(repo, q, limit = 30, ctx = null) {
       env: serverEnv(s),
       retired: isRetired(s),
       state: serverState(ctx, s.id),
-      applications: [...new Set(repo.edgesTo(s.id).filter((e) => e.type === 'runs_on' && !isRetired(e)).map((e) => e.src))]
+      applications: [...new Set(repo.edgesTo(s.id).filter((e) => e.type === 'runs_on' && !isInactiveEdge(e)).map((e) => e.src))]
         .map((id) => repo.getNode(id))
         .filter(Boolean)
         .map((a) => ({ id: a.id, name: a.name, criticality: appCriticality(a) })),

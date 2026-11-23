@@ -6,7 +6,7 @@
  * de chaque application (par environnement) et les applications menacées par une dépendance en panne.
  * Le relevé n'est jamais modifié.
  */
-const { traverse } = require('../graph/impact');
+const { traverse, isInactiveEdge } = require('../graph/impact');
 const { serverEnv, ENVS } = require('../lib/environment');
 
 const SERVICE_STATE = { 1: 'warning', 2: 'critical', 3: 'unknown' };
@@ -50,7 +50,7 @@ function envState(states) {
 
 /** Serveurs actifs d'une application (mêmes liens runs_on que la fiche application). */
 function appServers(repo, app) {
-  const ids = new Set(repo.edgesFrom(app.id).filter((e) => e.type === 'runs_on' && !isRetired(e)).map((e) => e.dst));
+  const ids = new Set(repo.edgesFrom(app.id).filter((e) => e.type === 'runs_on' && !isInactiveEdge(e)).map((e) => e.dst));
   return [...ids].map((id) => repo.getNode(id)).filter((n) => n && n.type === 'server' && !isRetired(n));
 }
 
