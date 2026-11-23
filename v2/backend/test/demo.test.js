@@ -91,6 +91,60 @@ describe('mode démo : jeu de données', () => {
   });
 });
 
+describe('mode démo : repérage par l\'IA', () => {
+  const { repo, demo } = build();
+  const { ownersOfApp } = require('../src/api/views');
+  const { impactOf, isInactiveEdge } = require('../src/graph/impact');
+  const perimeter = () => repo.listByType('application').filter((a) => a.attrs.perimeter);
+
+  test('every perimeter app has an owner', () => {
+    for (const a of perimeter()) {
+      const owners = ownersOfApp(repo, a);
+      assert.ok(owners.some((o) => o.kind === 'person' && o.role === 'owner' && o.period === 'current'), a.name);
+      assert.ok(owners.some((o) => o.kind === 'team'), a.name);
+    }
+    const all = perimeter().flatMap((a) => ownersOfApp(repo, a));
+    assert.ok(all.some((o) => o.period === 'past'));
+    assert.ok(all.some((o) => o.source === 'apm' && o.id === null));
+    const teamApps = {};
+    for (const e of repo.allEdges().filter((x) => x.type === 'owned_by' && x.attrs.role === 'support' && repo.getNode(x.dst).type === 'team')) (teamApps[e.dst] ||= new Set()).add(e.src);
+    assert.ok(Object.values(teamApps).some((s) => s.size >= 2));
+    assert.ok(repo.listByType('person').length >= 8);
+  });
+
+  test('demo has past and toValidate links excluded from impact', () => {
+    const llm = repo.allEdges().filter((e) => e.source === 'llm' && ['runs_on', 'uses_db', 'calls'].includes(e.type));
+    const past = llm.filter((e) => e.attrs.period === 'past');
+    const toValidate = llm.filter((e) => e.attrs.trust === 'toValidate');
+    assert.ok(past.length >= 3);
+    assert.equal(toValidate.length, 2);
+    assert.ok([...past, ...toValidate].every(isInactiveEdge));
+    for (const e of [...past, ...toValidate].filter((x) => x.type === 'runs_on')) {
+      const hit = impactOf(repo, e.dst, { maxDepth: 1 }).items.map((i) => i.id);
+      assert.ok(!hit.includes(e.src), `${e.src} ne doit pas dépendre de ${e.dst}`);
+    }
+    const added = llm.filter((e) => e.attrs.trust === 'added' && e.attrs.period === 'current');
+    assert.ok(added.length >= 1 && !added.some(isInactiveEdge));
+  });
+
+  test('out of inventory server is created by the reading and supervised', () => {
+    const ooi = repo.listByType('server').filter((s) => s.attrs.outOfInventory);
+    assert.equal(ooi.length, 1);
+    assert.equal(ooi[0].attrs.fromLlm, true);
+    const mock = createMockNaemon(repo, { seed: 42, now: () => NOW });
+    assert.ok(mock.fetchRaw(0).hosts.some((h) => h.name === ooi[0].name));
+  });
+
+  test('documented_in carries a role, documents carry pageKindAi and period', () => {
+    const docs = repo.allEdges().filter((e) => e.type === 'documented_in');
+    assert.ok(docs.every((e) => ['subject', 'cited'].includes(e.attrs.role)));
+    assert.ok(docs.some((e) => e.attrs.role === 'cited'));
+    assert.ok(repo.listByType('document').every((d) => d.attrs.pageKindAi && d.attrs.period));
+    assert.ok(repo.listByType('document').some((d) => d.attrs.period === 'past'));
+    assert.ok(demo);
+  });
+});
+
 describe('mode démo : Naemon simulé', () => {
   const { repo, demo } = build();
   const mock = createMockNaemon(repo, { seed: 42, now: () => NOW });
@@ -138,6 +192,17 @@ describe('mode démo : chat simulé', () => {
     assert.ok(r.toolTrace.some((t) => t.tool === 'dependencies'));
     const r2 = await ask({ llm, repo, question: 'bonjour' });
     assert.ok(r2.answer.startsWith('[démo]'));
+  });
+  test('chat mock routes owner questions to owners_of', async () => {
+    for (const q of ["Qui s'occupe de Atlas Paiements ?", 'Qui est responsable de Atlas Paiements ?']) {
+      const r = await ask({ llm, repo, question: q });
+      assert.deepEqual(r.toolTrace.map((t) => t.tool), ['owners_of'], q);
+      assert.ok(r.answer.startsWith('[démo]'));
+      assert.ok(/Claire Vasseur/.test(r.answer) && /owner/.test(r.answer));
+    }
+    const r = await ask({ llm, repo, question: 'Who owns Sirius Stocks?', lang: 'en', toolsMode: 'json' });
+    assert.deepEqual(r.toolTrace.map((t) => t.tool), ['owners_of']);
+    assert.ok(/Hugo Rinaldi \(person, owner, former\)/.test(r.answer));
   });
   test('sens de la question : ce dont X a besoin ou ce qui dépend de X (FR et EN)', () => {
     const deps = [

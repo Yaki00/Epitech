@@ -7,6 +7,7 @@
  * Les 3 imports d'historique passent par createHistory().recordImport puis applyRetirements, comme une vraie synchro.
  */
 const path = require('path');
+const { nodeKey } = require('../store/repo');
 const { ensurePerimeterNodes, createMatcher } = require('../perimeter/perimeter');
 const { verdictFr } = require('../perimeter/architecture');
 const { serverEnv } = require('../lib/environment');
@@ -117,6 +118,24 @@ const DOCS = {
   ZPN: { archi: [{ env: 'PRD' }], other: ['Catalogue des modèles de messages'] },
   ALC: { archi: [{ env: 'PRD' }], other: ['Guide de clôture mensuelle'] },
 };
+
+// Responsables lus dans les pages (noms inventés) : { sigle: [[nom, nature, rôle, période]] }.
+// ZPN n'a que les colonnes APM (owner, supportTeam), sans page : cas « personne sans nœud ».
+const OWNERS = {
+  ATP: [['Claire Vasseur', 'person', 'owner'], ['Mehdi Lambert', 'person', 'support'], ['Équipe Finance', 'team', 'support'], ['Astreinte Socle', 'team', 'oncall']],
+  ORC: [['Julien Marchetti', 'person', 'owner'], ['Sofia Delorme', 'person', 'support'], ['Équipe Relation Client', 'team', 'support']],
+  VGF: [['Nadia Fontaine', 'person', 'owner'], ['Équipe Finance', 'team', 'support']],
+  HLC: [['Thomas Keller', 'person', 'owner'], ['Inès Bourdin', 'person', 'support'], ['Paul Garnier', 'person', 'other'], ['Équipe Supply', 'team', 'support']],
+  NVC: [['Sofia Delorme', 'person', 'owner'], ['Équipe Relation Client', 'team', 'support']],
+  SRS: [['Marc Aubert', 'person', 'owner'], ['Hugo Rinaldi', 'person', 'owner', 'past'], ['Équipe Supply', 'team', 'support']],
+  LXL: [['Marc Aubert', 'person', 'owner'], ['Équipe Supply', 'team', 'support']],
+  CRH: [['Lucie Perrot', 'person', 'owner'], ['Équipe Données', 'team', 'support']],
+  PGR: [['Karim Besson', 'person', 'owner'], ['Lucie Perrot', 'person', 'support'], ['Équipe Données', 'team', 'support']],
+  TTP: [['Thomas Keller', 'person', 'owner'], ['Anaïs Mercier', 'person', 'oncall'], ['Équipe Socle', 'team', 'support'], ['Astreinte Socle', 'team', 'oncall']],
+  ALC: [['Nadia Fontaine', 'person', 'owner'], ['Mehdi Lambert', 'person', 'support'], ['Équipe Finance', 'team', 'support']],
+};
+const APM_OWNERS = { ZPN: { owner: 'Élodie Marchand', supportTeam: 'Équipe Notifications' } };
+const OOI_SERVER = { name: 'srv-vgf-prd9', ip: '10.13.0.99', app: 'VGF' };
 
 const fmtLocal = (ms) => new Date(ms).toISOString().replace('T', ' ').slice(0, 19);
 const slug = (s) => String(s).toLowerCase();
@@ -229,7 +248,8 @@ function generateDemo(repo, history, { seed = 42, now = Date.now(), dir = null }
   const live = (sigle, env) => servers.filter((s) => s.app.sigle === sigle && s.to === 3 && (env === undefined || s.env === env));
   let pageNo = 10000;
   const docRows = [];
-  const makeDoc = ({ title, kind, text, updatedDays, citedIds }) => {
+  const docsOf = {}; // sigle -> { archi: [{ docId, pid, env }], other: [{ docId, pid }] }
+  const makeDoc = ({ title, kind, text, updatedDays, citedIds, period = 'current' }) => {
     const pid = String(++pageNo);
     const docId = repo.upsertNode({
       type: 'document',
@@ -243,6 +263,8 @@ function generateDemo(repo, history, { seed = 42, now = Date.now(), dir = null }
         updatedAt: new Date(now - updatedDays * DAY).toISOString(),
         labels: kind === 'architecture' ? ['architecture', 'exploitation'] : ['exploitation'],
         excerpt: text,
+        pageKindAi: kind === 'architecture' ? 'architecture' : 'other',
+        period,
         ...(kind === 'architecture' ? { pageKind: 'architecture', architecture: { score: 0.9, reasons: ['titre', 'serveurs cités'] } } : {}),
       },
     });
@@ -254,6 +276,7 @@ function generateDemo(repo, history, { seed = 42, now = Date.now(), dir = null }
 
   for (const a of APPS) {
     const spec = DOCS[a.sigle];
+    docsOf[a.sigle] = { archi: [], other: [] };
     for (const p of spec.archi) {
       const expected = live(a.sigle, p.env);
       const gaps = p.gap || [];
@@ -289,9 +312,11 @@ function generateDemo(repo, history, { seed = 42, now = Date.now(), dir = null }
         text: `Architecture technique de ${a.name} en ${envLabel} : serveurs applicatifs, base de données, flux entrants et sortants, sauvegarde et supervision.`,
         updatedDays: audit.ageDays,
         // la page de production décrit aussi les autres environnements de l'application
+        period: old ? 'past' : 'current',
         citedIds: (p.env === 'PRD' ? [...cited, ...live(a.sigle).filter((s) => s.env !== 'PRD' && s.env !== null)] : cited).map((s) => s.id),
       });
-      repo.addEdge({ src: appId(a.sigle), dst: docId, type: 'documented_in', source: 'confluence', sourceRef: pid, confidence: 0.95, attrs: { reasons: ['titre (exact)', `${cited.length} serveurs de l'application`], spellings: [], audit } });
+      docsOf[a.sigle].archi.push({ docId, pid, env: p.env });
+      repo.addEdge({ src: appId(a.sigle), dst: docId, type: 'documented_in', source: 'confluence', sourceRef: pid, confidence: 0.95, attrs: { role: 'subject', written: `Architecture ${a.name}`, evidence: `Architecture ${a.name} (${envLabel})`, reasons: ['titre (exact)', `${cited.length} serveurs de l'application`], spellings: [], audit } });
     }
     for (const title of spec.other) {
       const nCite = (spec.cites || {})[title] || 0;
@@ -302,11 +327,51 @@ function generateDemo(repo, history, { seed = 42, now = Date.now(), dir = null }
         updatedDays: rng.int(10, 400),
         citedIds: live(a.sigle, 'PRD').slice(0, nCite).map((s) => s.id),
       });
-      repo.addEdge({ src: appId(a.sigle), dst: docId, type: 'documented_in', source: 'confluence', sourceRef: pid, confidence: 0.85, attrs: { reasons: ['titre (exact)'], spellings: [] } });
+      docsOf[a.sigle].other.push({ docId, pid });
+      repo.addEdge({ src: appId(a.sigle), dst: docId, type: 'documented_in', source: 'confluence', sourceRef: pid, confidence: 0.9, attrs: { role: 'subject', written: a.name, evidence: `${title} ${a.name}`, reasons: ['titre (exact)'], spellings: [] } });
     }
   }
   // page générale rattachée à aucune application
-  makeDoc({ title: 'Charte d\'architecture du système d\'information', kind: 'other', text: 'Principes généraux d\'architecture, de sécurité et d\'exploitation communs à toutes les applications.', updatedDays: 200, citedIds: [] });
+  const charte = makeDoc({ title: 'Charte d\'architecture du système d\'information', kind: 'other', text: 'Principes généraux d\'architecture, de sécurité et d\'exploitation communs à toutes les applications.', updatedDays: 200, citedIds: [] });
+
+  // ---------- repérage par l'IA : formes écrites par la chaîne de lecture (voir reading/apply.js) ----------
+  // page citée (et non sujet) : la charte mentionne deux applications
+  for (const sigle of ['ATP', 'ORC']) {
+    repo.addEdge({ src: appId(sigle), dst: charte.docId, type: 'documented_in', source: 'confluence', sourceRef: charte.pid, confidence: 0.6, attrs: { role: 'cited', written: [...APPS, ...OUT].find((x) => x.sigle === sigle).name, evidence: 'Les applications critiques (Atlas Paiements, Orion Clients) suivent cette charte.' } });
+  }
+  // responsables : une page de l'application les nomme (la page ancienne pour l'ancien responsable)
+  for (const [sigle, list] of Object.entries(OWNERS)) {
+    const pages = docsOf[sigle];
+    const current = pages.other[0] || pages.archi[0];
+    const old = pages.archi.find((p) => p.env === 'PRD') || current;
+    for (const [name, kind, role, period = 'current'] of list) {
+      const doc = period === 'past' ? old : current;
+      const id = repo.upsertNode({ type: kind, key: nodeKey(kind, name), name, source: 'llm', attrs: { fromLlm: true } });
+      repo.addEdge({
+        src: appId(sigle), dst: id, type: 'owned_by', source: 'llm', sourceRef: doc.pid, confidence: 0.8,
+        attrs: { role, period, evidence: `${kind === 'team' ? 'Équipe' : role === 'owner' ? 'Responsable' : 'Contact'} : ${name}`, docId: doc.docId },
+      });
+    }
+  }
+  for (const [sigle, a] of Object.entries(APM_OWNERS)) {
+    repo.upsertNode({ type: 'application', key: [...APPS, ...OUT].find((x) => x.sigle === sigle).name, name: [...APPS, ...OUT].find((x) => x.sigle === sigle).name, source: SOURCE, attrs: a });
+  }
+  const readLink = (src, dst, type, doc, { trust, period = 'current', evidence }) =>
+    repo.addEdge({ src, dst, type, source: 'llm', sourceRef: doc.pid, confidence: trust === 'toValidate' ? 0.5 : 0.8, attrs: { trust, period, evidence, docId: doc.docId } });
+  const serverId = (name) => servers.find((s) => s.name === name).id;
+  const prdPage = (sigle) => docsOf[sigle].archi.find((p) => p.env === 'PRD');
+  // serveur hors inventaire, lu dans la page de production de VGF et supervisé par Naemon (corroboré)
+  const ooi = repo.upsertNode({ type: 'server', key: OOI_SERVER.name, name: OOI_SERVER.name, source: 'llm', attrs: { fromLlm: true, outOfInventory: true, environment: 'PRD', ip: OOI_SERVER.ip }, aliases: [OOI_SERVER.ip] });
+  readLink(appId('VGF'), ooi, 'runs_on', prdPage('VGF'), { trust: 'added', evidence: `${OOI_SERVER.name} (${OOI_SERVER.ip}) : serveur d'édition des factures` });
+  repo.addEdge({ src: prdPage('VGF').docId, dst: ooi, type: 'mentions', source: 'confluence', sourceRef: prdPage('VGF').pid, confidence: 0.9 });
+  // liens anciens, lus dans la page d'architecture ancienne de Sirius Stocks
+  const oldPage = prdPage('SRS');
+  readLink(appId('SRS'), serverId('srv-lxl-prd1'), 'runs_on', oldPage, { trust: 'added', period: 'past', evidence: 'Hébergé sur srv-lxl-prd1 (ancienne plateforme logistique)' });
+  readLink(appId('SRS'), dbIds['Base Catalogue'], 'uses_db', oldPage, { trust: 'added', period: 'past', evidence: 'Lecture des références dans Base Catalogue' });
+  readLink(appId('SRS'), appId('NVC'), 'calls', oldPage, { trust: 'added', period: 'past', evidence: 'Interroge Nova Catalogue pour les références articles' });
+  // liens à valider : lus dans une page, pas encore confirmés par un inventaire
+  readLink(appId('HLC'), serverId('srv-lxl-prd2'), 'runs_on', prdPage('HLC'), { trust: 'toValidate', evidence: 'Le module de préparation tourne aussi sur srv-lxl-prd2' });
+  readLink(appId('TTP'), serverId('srv-zpn-prd2'), 'runs_on', prdPage('TTP'), { trust: 'toValidate', evidence: 'Relais de secours sur srv-zpn-prd2' });
 
   // ---------- résumés ----------
   for (const a of APPS) {

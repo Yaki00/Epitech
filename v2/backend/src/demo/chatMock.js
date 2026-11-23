@@ -46,6 +46,10 @@ function askedDependencies(q) {
   return DEPENDENCY_PATTERNS.some((re) => re.test(q));
 }
 
+/** « Qui s'occupe de X ? », « Qui est responsable de X ? », « Who owns X ? » : outil owners_of. */
+const OWNER_PATTERNS = [/\bqui (s'occupe|est responsable|gere|est le responsable|est la responsable|possede|pilote)\b/, /\bresponsables? (de|d')/, /\bwho (owns|is responsible|manages|runs|looks after|is in charge)\b/, /\bowners? of\b/];
+const askedOwners = (q) => OWNER_PATTERNS.some((re) => re.test(q));
+
 const question2text = (q) => norm(q).replace(/[\u2019`]/g, "'").replace(/\s+/g, ' ');
 
 function createChatMock(repo) {
@@ -77,6 +81,15 @@ function createChatMock(repo) {
       if (!result.length) return `${PREFIX} ${english ? 'Nothing found in the demo graph.' : 'Je ne trouve rien de correspondant dans le graphe de démonstration.'}`;
       const found = result.map((n) => `${n.name} (${n.type})`);
       return `${PREFIX} ${english ? 'Found' : 'Trouvé'} : ${list(found, 6)}.`;
+    }
+    if (toolName === 'owners_of') {
+      const label = (o) => `${o.name} (${o.kind === 'team' ? (english ? 'team' : 'équipe') : english ? 'person' : 'personne'}, ${o.role}${o.period && o.period !== 'current' ? `, ${o.period === 'past' ? (english ? 'former' : 'ancien') : o.period}` : ''})`;
+      if (result.owners) {
+        if (!result.owners.length) return `${PREFIX} ${english ? `No owner is known for ${result.application.name}.` : `Aucun responsable connu pour ${result.application.name}.`}`;
+        return `${PREFIX} ${english ? `${result.application.name} is looked after by` : `${result.application.name} est suivie par`} : ${list(result.owners.map(label), 8)}.`;
+      }
+      const who = result.person || result.team;
+      return `${PREFIX} ${who.name} ${english ? 'looks after' : 's\'occupe de'} : ${list((result.applications || []).map((a) => a.name), 8) || (english ? 'nothing known' : 'rien de connu')}.`;
     }
     const apps = names(result.items || [], 'application');
     const srvs = names(result.items || [], 'server');
@@ -127,6 +140,11 @@ function createChatMock(repo) {
     if (!entity) {
       const answer = HELP(english);
       return completion({ role: 'assistant', content: jsonMode ? JSON.stringify({ answer }) : answer });
+    }
+    if (askedOwners(question2text(question))) {
+      const args = { id: entity.id };
+      if (jsonMode) return completion({ role: 'assistant', content: JSON.stringify({ tool: 'owners_of', arguments: args }) });
+      return completion({ role: 'assistant', content: '', tool_calls: [{ id: 'call_demo_1', type: 'function', function: { name: 'owners_of', arguments: JSON.stringify(args) } }] });
     }
     const name = wantsDependencies(question) ? 'dependencies' : 'impact_analysis';
     const args = { id: entity.id, max_depth: 4 };
