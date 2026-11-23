@@ -170,7 +170,12 @@ function createLlmClient(cfg, deps = {}) {
         // Une seule nouvelle tentative, avec le double de place (hors essais réseau).
         log.warn(`réponse ${err.code}, nouvel essai avec max_tokens doublé`, { max_tokens: body.max_tokens * 2 });
         stats.calls++;
-        result = await callOnce({ ...body, max_tokens: body.max_tokens * 2 });
+        try {
+          result = await callOnce({ ...body, max_tokens: body.max_tokens * 2 });
+        } catch (err2) {
+          if (err2.code === 'empty' || err2.code === 'truncated') stats.errors++;
+          throw err2;
+        }
       }
       if (validate) {
         try {
@@ -201,21 +206,26 @@ function createLlmClient(cfg, deps = {}) {
     } catch (err) {
       if (err.code !== 'invalid_json') throw err;
       log.warn('JSON invalide, tentative de réparation', { erreur: err.message });
-      const repaired = await chat({
-        ...params,
-        json: true,
-        cache: false,
-        validate,
-        messages: [
-          ...params.messages,
-          { role: 'assistant', content: err.content },
-          {
-            role: 'user',
-            content: `Ta réponse n'est pas exploitable (${err.message}). Renvoie UNIQUEMENT l'objet JSON corrigé, sans texte autour.`,
-          },
-        ],
-      });
-      return validate(repaired.content);
+      try {
+        const repaired = await chat({
+          ...params,
+          json: true,
+          cache: false,
+          validate,
+          messages: [
+            ...params.messages,
+            { role: 'assistant', content: err.content },
+            {
+              role: 'user',
+              content: `Ta réponse n'est pas exploitable (${err.message}). Renvoie UNIQUEMENT l'objet JSON corrigé, sans texte autour.`,
+            },
+          ],
+        });
+        return validate(repaired.content);
+      } catch (err2) {
+        if (err2.code === 'invalid_json') stats.errors++; // empty/truncated déjà comptées dans chat()
+        throw err2;
+      }
     }
   }
 
