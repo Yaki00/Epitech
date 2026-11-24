@@ -1,7 +1,6 @@
 # Lyra v2 : assistant opérationnel sur la documentation (conception)
 
-Date : 24/11/2026. Statut : relu (7 questions du relecteur tranchées le 24/11, marquées « choix du constructeur »),
-en attente de validation.
+Date : 24/11/2026. Statut : validé le 24/11/2026 (7 questions du relecteur tranchées, marquées « choix du constructeur »).
 S'appuie sur : `docs/2026-11-23-v2-reperage-ia-conception.md` (lecture IA des pages, vérification par citation) et sur
 le banc d'essai privé (pages Confluence fictives, IA locale qwen3.8:27b, passage du 24/11 : 0 lien faux dans l'impact,
 période juste sur 149 pages sur 150).
