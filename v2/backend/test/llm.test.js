@@ -333,6 +333,20 @@ describe('langue du chat', () => {
     assert.doesNotMatch(systemFor('en'), /Tu réponds en français/);
   });
 
+  test('consignes : fiche d\'une autre application donnée et mention sur la même ligne', () => {
+    const fr = systemFor('fr');
+    assert.match(fr, /autre application/);
+    assert.match(fr, /à adapter/);
+    assert.match(fr, /même ligne que le titre ou le lien/);
+    assert.match(fr, /\(autre application : <nom>\)/);
+    assert.doesNotMatch(fr, /Dis « ancienne »/);
+    const en = systemFor('en');
+    assert.match(en, /comes from another application and must be adapted/);
+    assert.match(en, /same line as the title or link/);
+    assert.match(en, /\(other application: <name>\)/);
+    assert.doesNotMatch(en, /Say "old"/);
+  });
+
   test('rerank : scores dans l ordre des documents, chemin et modele de la config', async () => {
     const f = fakeFetch([{ status: 200, body: { results: [{ index: 1, relevance_score: 0.9 }, { index: 0, relevance_score: 0.2 }, { index: 2, relevance_score: 0.5 }] } }]);
     const llm = createLlmClient({ ...baseCfg, models: { rerank: 'm-rerank' } }, { fetch: f, logger: silent, backoffBaseMs: 1 });

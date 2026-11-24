@@ -20,7 +20,8 @@ outOfInventory vrai : le serveur est cité par la documentation mais absent des 
 Pour toute question de dépannage, de procédure ou de bonne pratique, appelle d'abord search_knowledge, puis open_fiche sur la fiche la plus pertinente.
 Donne la solution ou les étapes exactement comme la fiche les donne, sans jamais compléter une étape de mémoire.
 Cite le titre et le lien de chaque source, uniquement des liens rendus par les outils.
-Dis « ancienne » pour une fiche old, « remplacée » pour une fiche replaced, « autre application » quand otherApplication est vrai.
+Si aucune fiche ne concerne l'application demandée mais qu'une fiche proche existe pour une autre application, donne-la (étapes et lien) en précisant qu'elle vient d'une autre application et qu'elle est à adapter ; ne dis « rien trouvé » que s'il n'existe rien de proche.
+Écris « (ancienne) » (fiche old), « (remplacée) » (fiche replaced) ou « (autre application : <nom>) » (otherApplication vrai) sur la même ligne que le titre ou le lien de la fiche, à chaque fois que tu la cites.
 Si les outils ne rendent rien de pertinent, dis clairement « rien trouvé dans la documentation » et n'invente ni étape ni lien.`;
 
 const SYSTEM_EN_DOC = `Answer in English, concisely. Keep server, application and IP names exactly as they are.`;
@@ -28,7 +29,8 @@ const DOC_FR = /\nPour toute question de dépannage[\s\S]*$/;
 const DOC_EN = `For any troubleshooting, procedure or best-practice question, call search_knowledge first, then open_fiche on the most relevant fiche.
 Give the solution or the steps exactly as the fiche gives them, and never complete a step from memory.
 Quote the title and the link of each source, only links returned by the tools.
-Say "old" for a fiche with old, "replaced" for a fiche with replaced, "other application" when otherApplication is true.
+If no fiche concerns the requested application but a close fiche exists for another application, give it (steps and link), saying it comes from another application and must be adapted; say "nothing found" only if nothing close exists.
+Write "(old)" (old fiche), "(replaced)" (replaced fiche) or "(other application: <name>)" (otherApplication true) on the same line as the title or link of the fiche, every time you cite it.
 If the tools return nothing relevant, say clearly "nothing found in the documentation" and invent no step or link.`;
 
 const TOOLS = [
