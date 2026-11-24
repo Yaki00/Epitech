@@ -9,6 +9,7 @@ import { Link, useParams, useSearchParams } from 'react-router';
 import {
   Activity,
   AppWindow,
+  BookOpen,
   Database,
   ExternalLink,
   FileText,
@@ -26,7 +27,9 @@ import { useTitle } from '../lib/useTitle';
 import { useConfig, naemonLink } from '../lib/config';
 import { useLiveStatus } from '../lib/live';
 import { ENVS, envKey, isAlerting, serviceState, severity, worstState } from '../lib/status';
-import { epochSeconds, formatDateTime, relativeTime } from '../lib/format';
+import { groupKey, groupKnowledge } from '../lib/knowledge';
+import { KnowledgeBadges } from '../components/KnowledgeBadges';
+import { epochSeconds, formatDate, formatDateTime, relativeTime } from '../lib/format';
 import { auditInfo, changesTouching, flowCount, nodeLabel, sqlDate } from '../lib/applications';
 import { appHref, appMapHref, serverHref } from '../lib/links';
 import { sourceLabel } from '../lib/sources';
@@ -666,6 +669,7 @@ function DocsTab({ app }: { app: ApplicationDetail }) {
     },
   ];
   return (
+    <div className="flex flex-col gap-4">
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
       <Card title={t('common.docScore')} description={t('appDetail.docs.scoreDesc')} className="self-start">
         <div className="flex items-baseline gap-1">
@@ -704,6 +708,45 @@ function DocsTab({ app }: { app: ApplicationDetail }) {
         />
       </Card>
     </div>
+    <KnowledgeBlock items={app.knowledge} />
+    </div>
+  );
+}
+
+/** Documentation opérationnelle : fiches par genre, la plus récente d'abord. */
+function KnowledgeBlock({ items }: { items: ApplicationDetail['knowledge'] }) {
+  const { t, lang } = useI18n();
+  const groups = groupKnowledge(items);
+  return (
+    <Card title={t('knowledge.title')} description={t('knowledge.desc')} padded={groups.length === 0}>
+      {groups.length === 0 ? (
+        <EmptyState compact icon={BookOpen} title={t('knowledge.empty')} text={t('knowledge.emptyText')} />
+      ) : (
+        <div className="flex flex-col gap-4">
+          {groups.map((g) => (
+            <section key={g.kind} aria-label={t(groupKey(g.kind))}>
+              <h4 className="text-xs font-semibold text-ink-2">{t(groupKey(g.kind))}</h4>
+              <ul className="mt-1 divide-y divide-line">
+                {g.items.map((i) => (
+                  <li key={i.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 py-2 text-[13px]">
+                    {i.url ? (
+                      <a href={i.url} target="_blank" rel="noopener noreferrer" className="link inline-flex items-center gap-1 font-medium">
+                        {i.title}
+                        <ExternalLink aria-hidden size={12} />
+                      </a>
+                    ) : (
+                      <span className="font-medium text-ink">{i.title}</span>
+                    )}
+                    <KnowledgeBadges flags={i} />
+                    {i.updatedAt && <span className="ml-auto text-2xs text-ink-3">{formatDate(i.updatedAt, lang)}</span>}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
+        </div>
+      )}
+    </Card>
   );
 }
 

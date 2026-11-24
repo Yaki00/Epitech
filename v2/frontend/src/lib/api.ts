@@ -4,6 +4,10 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { t } from './i18n';
+import type { KnowledgeItem, SourceItem } from './knowledge';
+
+export type { KnowledgeItem, SourceItem };
+export type KnowledgeHit = KnowledgeItem;
 
 // ---------- types communs ----------
 
@@ -194,6 +198,8 @@ export interface ApplicationDetail extends ApplicationSummary {
   documents: AppDocument[];
   /** actuels d'abord, puis anciens */
   owners?: AppOwner[];
+  /** fiches de documentation opérationnelle, la plus récente d'abord */
+  knowledge?: KnowledgeItem[];
 }
 
 // ---------- /api/teams ----------
@@ -472,6 +478,10 @@ export interface AskResult {
   answer: string;
   toolTrace: unknown[];
   toolsMode: 'native' | 'json';
+  /** fiches et sections ouvertes ou citées par la réponse */
+  sources?: SourceItem[];
+  /** liens retirés de la réponse (mesure seulement, jamais affichés) */
+  removedLinks?: string[];
 }
 
 // ---------- appels ----------

@@ -7,7 +7,7 @@
  */
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { Link } from 'react-router';
-import { AppWindow, FlaskConical, MessageSquare, RotateCcw, SendHorizontal, Server, X } from 'lucide-react';
+import { AppWindow, ExternalLink, FlaskConical, MessageSquare, RotateCcw, SendHorizontal, Server, X } from 'lucide-react';
 import { ApiError, api, type AskResult } from '../lib/api';
 import { useI18n, type Key } from '../lib/i18n';
 import { useConfig } from '../lib/config';
@@ -16,9 +16,13 @@ import { nodeLabel } from '../lib/applications';
 import { appHref, serverHref } from '../lib/links';
 import { cn } from '../lib/cn';
 import { Badge } from './ui';
+import { KnowledgeBadges } from './KnowledgeBadges';
+import { sourceView, type SourceItem } from '../lib/knowledge';
+import { formatDate } from '../lib/format';
 
 interface Message extends ChatMessage {
   toolTrace?: AskResult['toolTrace'];
+  sources?: SourceItem[];
 }
 
 interface Examples {
@@ -82,7 +86,7 @@ export function Chat() {
     try {
       const r = await api.ask(question, history, lang);
       if (gen !== generation.current) return;
-      setMessages((m) => [...m, { role: 'assistant', content: r.answer, toolTrace: r.toolTrace }]);
+      setMessages((m) => [...m, { role: 'assistant', content: r.answer, toolTrace: r.toolTrace, sources: Array.isArray(r.sources) ? r.sources : [] }]);
     } catch (err) {
       if (gen !== generation.current) return;
       const msg = err instanceof Error ? err.message : String(err);
@@ -231,7 +235,7 @@ export function Chat() {
 }
 
 function MessageItem({ message: m, appNames }: { message: Message; appNames: Map<string, string> }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   if (m.role === 'user') {
     return (
       <li className="flex justify-end">
@@ -253,6 +257,7 @@ function MessageItem({ message: m, appNames }: { message: Message; appNames: Map
   }
   const { demo, text } = parseAnswer(m.content);
   const entities = traceEntities(m.toolTrace);
+  const sources = m.sources ?? [];
   const tools = traceTools(m.toolTrace);
   const known = [...appNames].map(([id, name]) => ({ id, name }));
   return (
@@ -281,6 +286,43 @@ function MessageItem({ message: m, appNames }: { message: Message; appNames: Map
             ),
           )}
         </p>
+        {sources.length > 0 && (
+          <div className="mt-2 border-t border-line pt-1.5">
+            <p className="text-2xs text-ink-3">{t('knowledge.sources')}</p>
+            <ul className="mt-1 flex flex-col gap-1.5">
+              {sources.map((s) => {
+                const v = sourceView(s);
+                const body = (
+                  <>
+                    <span className="flex flex-wrap items-center gap-1.5">
+                      <Badge>{t(v.kindKey)}</Badge>
+                      <KnowledgeBadges flags={s} />
+                    </span>
+                    <span className="mt-0.5 flex items-start gap-1 font-medium">
+                      <span className="min-w-0 break-words">{v.title}</span>
+                      {v.url && <ExternalLink aria-hidden size={12} className="mt-0.5 shrink-0" />}
+                    </span>
+                    {(v.apps.length > 0 || v.date) && (
+                      <span className="mt-0.5 block text-2xs text-ink-3">{[v.apps.join(t('common.listSep')), v.date ? formatDate(v.date, lang) : ''].filter(Boolean).join(' · ')}</span>
+                    )}
+                  </>
+                );
+                const cls = 'block rounded-md border border-line bg-surface px-2 py-1.5 text-xs';
+                return (
+                  <li key={s.id || v.url || v.title}>
+                    {v.url ? (
+                      <a href={v.url} target="_blank" rel="noopener noreferrer" className={cn(cls, 'text-accent hover:border-accent/50')}>
+                        {body}
+                      </a>
+                    ) : (
+                      <div className={cn(cls, 'text-ink')}>{body}</div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
         {entities.length > 0 && (
           <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-line pt-1.5">
             <span className="text-2xs text-ink-3">{t('chat.entities')}</span>
