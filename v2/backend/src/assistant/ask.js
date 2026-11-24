@@ -251,7 +251,7 @@ function urlsOf(value, out = new Set()) {
 }
 
 // Lien markdown entier, URL entre chevrons, ou URL nue : une seule passe, dans cet ordre.
-const LINK_RE = new RegExp(`\\[([^\\]]*)\\]\\(<?(${URL_SRC.replace('\\]\\[', '\\]')})>?\\)|<(${URL_SRC})>|(${URL_SRC})`, 'gi');
+const LINK_RE = new RegExp(`\\[([^\\]]*)\\]\\(<?(${URL_SRC.replace('\\]\\[', '\\]')})>?\\)|<(${URL_SRC})>|(?<![\\w])_(${URL_SRC})_(?![\\w])|(${URL_SRC})`, 'gi');
 
 /** Retire de la réponse toute URL absente des résultats d'outils ; un lien markdown garde son libellé. */
 function controlLinks(answer, allowed) {
@@ -265,7 +265,7 @@ function controlLinks(answer, allowed) {
     const url = trimUrl(m);
     return keep(url) ? m : m.slice(url.length);
   });
-  let text = String(answer || '').replace(LINK_RE, (all, label, mdUrl, angled, plain) => {
+  let text = String(answer || '').replace(LINK_RE, (all, label, mdUrl, angled, under, plain) => {
     if (mdUrl !== undefined) {
       const url = trimUrl(mdUrl);
       if (!keep(url)) return bare(label);
@@ -273,6 +273,7 @@ function controlLinks(answer, allowed) {
       return clean ? `[${clean}](${mdUrl})` : mdUrl;
     }
     if (angled !== undefined) return keep(trimUrl(angled)) ? all : '';
+    if (under !== undefined) return keep(trimUrl(under)) ? all : '';
     const url = trimUrl(plain);
     return keep(url) ? all : all.slice(url.length);
   });

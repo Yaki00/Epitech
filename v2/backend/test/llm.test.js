@@ -357,14 +357,14 @@ describe('assistant ask (documentation)', () => {
   const PERIMETER = { applications: [{ name: 'OrderHub', aliases: [], auid: null }], ignoreOtherApplications: true };
   const toolCall = (id, name, args) => ({ id, type: 'function', function: { name, arguments: JSON.stringify(args) } });
 
-  function world({ withFiche = true } = {}) {
+  function world({ withFiche = true, url = 'https://wiki.example.local/7001' } = {}) {
     const repo = createRepo(openStore(':memory:'));
     ensurePerimeterNodes(repo, PERIMETER);
     let ficheId = null;
     if (withFiche) {
       const doc = repo.upsertNode({ type: 'document', key: 'confluence-7001', name: 'Page 7001', source: 'confluence' });
       const f = { kind: 'incident', title: item('File pleine'), section: null, date: null, fields: { symptoms: item('la file Q.MRL.EVT est saturee') }, lists: {}, appIds: ['application:orderhub'], serverIds: [], unresolved: [], tickets: [], keywords: [], replaces: null, fixes: null };
-      ficheId = applyFiches(repo, { fiches: [f], rejected: [] }, { pageId: '7001', docNodeId: doc, page: { title: 'Page 7001', url: 'https://wiki.example.local/7001', updatedAt: '2026-10-01T10:00:00.000Z' }, period: 'current' }).fiches[0];
+      ficheId = applyFiches(repo, { fiches: [f], rejected: [] }, { pageId: '7001', docNodeId: doc, page: { title: 'Page 7001', url, updatedAt: '2026-10-01T10:00:00.000Z' }, period: 'current' }).fiches[0];
     }
     const knowledge = { index: buildKnowledgeIndex(repo, { sections: [] }), matcher: createMatcher(PERIMETER, repo) };
     return { repo, knowledge, ficheId };
@@ -447,8 +447,9 @@ describe('assistant ask (documentation)', () => {
 
   test('scheme and host compare case-insensitively', async () => {
     const w = world();
-    const { r } = await run(w, [...calls(w), { status: 200, body: reply('HTTPS://WIKI.EXAMPLE.LOCAL/7001 ok') }]);
-    assert.deepEqual(r.removedLinks, []);
+    const { r } = await run(w, [...calls(w), { status: 200, body: reply('HTTPS://WIKI.EXAMPLE.LOCAL/7001 ok HTTPS://EVIL.EXAMPLE.COM/x') }]);
+    assert.deepEqual(r.removedLinks, ['HTTPS://EVIL.EXAMPLE.COM/x']);
+    assert.ok(!/EVIL/i.test(r.answer));
   });
 
   test('a failing search tool does not break the chat', async () => {
@@ -489,6 +490,36 @@ describe('assistant ask (documentation)', () => {
       { status: 200, body: reply('Introuvable.') },
     ]);
     assert.match(JSON.parse(f.calls[1].body.messages.at(-1).content).error, /fiche inconnue/);
+    assert.deepEqual(r.sources, []);
+  });
+
+  test('underscore inside an allowed url is kept, with or without bold', async () => {
+    const u = 'https://wiki.example.local/display/EXPL/Page_name';
+    const w = world({ url: u });
+    const text = `${u} puis **${u}** et _${u}_ fin`;
+    const { r } = await run(w, [...calls(w), { status: 200, body: reply(text) }]);
+    assert.deepEqual(r.removedLinks, []);
+    assert.equal(r.answer, text);
+  });
+
+  test('a disallowed url in underscores leaves no doubled underscores', async () => {
+    const w = world();
+    const { r } = await run(w, [...calls(w), { status: 200, body: reply('Avant _https://evil.example.com/p_ apres') }]);
+    assert.equal(r.answer, 'Avant apres');
+    assert.deepEqual(r.removedLinks, ['https://evil.example.com/p']);
+  });
+
+  test('open_fiche throwing does not break the chat', async () => {
+    const w = world();
+    w.repo.getNode = () => {
+      throw new Error('base illisible');
+    };
+    const { r, f } = await run(w, [
+      { status: 200, body: reply('', { tool_calls: [toolCall('1', 'open_fiche', { id: 'x' })] }) },
+      { status: 200, body: reply('Je ne peux pas ouvrir la fiche.') },
+    ]);
+    assert.deepEqual(JSON.parse(f.calls[1].body.messages.at(-1).content), { error: 'recherche indisponible' });
+    assert.match(r.answer, /ne peux pas/);
     assert.deepEqual(r.sources, []);
   });
 
