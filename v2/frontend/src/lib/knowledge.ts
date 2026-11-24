@@ -47,6 +47,20 @@ export interface KnowledgeItem {
   replaced: boolean;
 }
 
+/** Adresse affichable en lien : http ou https seulement (jamais javascript:, data:, relative...). */
+export function safeUrl(u: string | null | undefined): string | null {
+  if (typeof u !== 'string' || !u.trim()) return null;
+  try {
+    const p = new URL(u.trim()).protocol;
+    return p === 'http:' || p === 'https:' ? u.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Date lisible telle quelle, ou null (absente ou illisible : rien n'est affiché). */
+export const validDate = (v: string | null | undefined): string | null => (v && toDate(v) ? v : null);
+
 export interface SourceBadge {
   key: Key;
   tone: BadgeTone;
@@ -75,8 +89,8 @@ export function sourceView(s: SourceItem): SourceView {
     kindKey: kindKey(s.kind),
     title: s.title,
     apps: Array.isArray(s.appNames) ? s.appNames : [],
-    date: s.updatedAt || null,
-    url: s.url || null,
+    date: validDate(s.updatedAt),
+    url: safeUrl(s.url),
   };
 }
 

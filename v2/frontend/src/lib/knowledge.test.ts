@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { groupKnowledge, kindKey, sourceBadges, sourceView, type KnowledgeItem, type SourceItem } from './knowledge';
+import { groupKnowledge, kindKey, safeUrl, sourceBadges, sourceView, validDate, type KnowledgeItem, type SourceItem } from './knowledge';
 
 const src = (o: Partial<SourceItem> = {}): SourceItem => ({
   id: 'fiche:1',
@@ -70,5 +70,23 @@ describe('knowledge', () => {
   it('no knowledge shows an empty state', () => {
     expect(groupKnowledge([])).toEqual([]);
     expect(groupKnowledge(undefined)).toEqual([]);
+  });
+
+  it('safeUrl keeps only http and https', () => {
+    expect(safeUrl('javascript:alert(1)')).toBeNull();
+    expect(safeUrl('JAVASCRIPT:alert(1)')).toBeNull();
+    expect(safeUrl('data:text/html,x')).toBeNull();
+    expect(safeUrl('/relative/page')).toBeNull();
+    expect(safeUrl('pas une adresse')).toBeNull();
+    expect(safeUrl(null)).toBeNull();
+    expect(safeUrl('http://wiki.example/a')).toBe('http://wiki.example/a');
+    expect(safeUrl('HTTPS://wiki.example/a')).toBe('HTTPS://wiki.example/a');
+    expect(sourceView(src({ url: 'javascript:alert(1)' })).url).toBeNull();
+  });
+
+  it('unparseable date is not shown', () => {
+    expect(validDate('pas une date')).toBeNull();
+    expect(validDate('2026-03-02')).toBe('2026-03-02');
+    expect(sourceView(src({ updatedAt: 'n importe quoi' })).date).toBeNull();
   });
 });

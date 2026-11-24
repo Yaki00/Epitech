@@ -27,7 +27,7 @@ import { useTitle } from '../lib/useTitle';
 import { useConfig, naemonLink } from '../lib/config';
 import { useLiveStatus } from '../lib/live';
 import { ENVS, envKey, isAlerting, serviceState, severity, worstState } from '../lib/status';
-import { groupKey, groupKnowledge } from '../lib/knowledge';
+import { groupKey, groupKnowledge, safeUrl, validDate } from '../lib/knowledge';
 import { KnowledgeBadges } from '../components/KnowledgeBadges';
 import { epochSeconds, formatDate, formatDateTime, relativeTime } from '../lib/format';
 import { auditInfo, changesTouching, flowCount, nodeLabel, sqlDate } from '../lib/applications';
@@ -727,10 +727,13 @@ function KnowledgeBlock({ items }: { items: ApplicationDetail['knowledge'] }) {
             <section key={g.kind} aria-label={t(groupKey(g.kind))}>
               <h4 className="text-xs font-semibold text-ink-2">{t(groupKey(g.kind))}</h4>
               <ul className="mt-1 divide-y divide-line">
-                {g.items.map((i) => (
+                {g.items.map((i) => {
+                  const url = safeUrl(i.url);
+                  const date = validDate(i.updatedAt);
+                  return (
                   <li key={i.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 py-2 text-[13px]">
-                    {i.url ? (
-                      <a href={i.url} target="_blank" rel="noopener noreferrer" className="link inline-flex items-center gap-1 font-medium">
+                    {url ? (
+                      <a href={url} target="_blank" rel="noopener noreferrer" className="link inline-flex items-center gap-1 font-medium">
                         {i.title}
                         <ExternalLink aria-hidden size={12} />
                       </a>
@@ -738,9 +741,10 @@ function KnowledgeBlock({ items }: { items: ApplicationDetail['knowledge'] }) {
                       <span className="font-medium text-ink">{i.title}</span>
                     )}
                     <KnowledgeBadges flags={i} />
-                    {i.updatedAt && <span className="ml-auto text-2xs text-ink-3">{formatDate(i.updatedAt, lang)}</span>}
+                    {date && <span className="ml-auto text-2xs text-ink-3">{formatDate(date, lang)}</span>}
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             </section>
           ))}

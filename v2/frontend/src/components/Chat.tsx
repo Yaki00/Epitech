@@ -290,7 +290,7 @@ function MessageItem({ message: m, appNames }: { message: Message; appNames: Map
           <div className="mt-2 border-t border-line pt-1.5">
             <p className="text-2xs text-ink-3">{t('knowledge.sources')}</p>
             <ul className="mt-1 flex flex-col gap-1.5">
-              {sources.map((s) => {
+              {sources.map((s, idx) => {
                 const v = sourceView(s);
                 const body = (
                   <>
@@ -309,7 +309,7 @@ function MessageItem({ message: m, appNames }: { message: Message; appNames: Map
                 );
                 const cls = 'block rounded-md border border-line bg-surface px-2 py-1.5 text-xs';
                 return (
-                  <li key={s.id || v.url || v.title}>
+                  <li key={s.id ? `${s.id}:${idx}` : idx}>
                     {v.url ? (
                       <a href={v.url} target="_blank" rel="noopener noreferrer" className={cn(cls, 'text-accent hover:border-accent/50')}>
                         {body}
