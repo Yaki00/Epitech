@@ -12,6 +12,7 @@ const { ensurePerimeterNodes, createMatcher } = require('../perimeter/perimeter'
 const { verdictFr } = require('../perimeter/architecture');
 const { serverEnv } = require('../lib/environment');
 const { readJson, writeJsonAtomic } = require('../store/store');
+const { applyFiches, linkFiches } = require('../knowledge/apply');
 
 const DAY = 86400000;
 const SOURCE = 'apm';
@@ -372,6 +373,31 @@ function generateDemo(repo, history, { seed = 42, now = Date.now(), dir = null }
   // liens à valider : lus dans une page, pas encore confirmés par un inventaire
   readLink(appId('HLC'), serverId('srv-lxl-prd2'), 'runs_on', prdPage('HLC'), { trust: 'toValidate', evidence: 'Le module de préparation tourne aussi sur srv-lxl-prd2' });
   readLink(appId('TTP'), serverId('srv-zpn-prd2'), 'runs_on', prdPage('TTP'), { trust: 'toValidate', evidence: 'Relais de secours sur srv-zpn-prd2' });
+
+  // ---------- fiches opérationnelles (écrites comme par la chaîne de lecture, par applyFiches et linkFiches) ----------
+  const it = (text, evidence = text) => ({ text, evidence });
+  const base = { section: null, date: null, fields: {}, lists: {}, unresolved: [], tickets: [], keywords: [], replaces: null, fixes: null, serverIds: [] };
+  const demoFiches = [
+    // procédure ancienne (page ancienne), remplacée par la procédure récente de la page voisine
+    { app: 'ATP', page: ['other', 1], daysAgo: 900, period: 'past', fiche: { kind: 'procedure', title: it('Relancer le service d\'encaissement (ancienne méthode)'), keywords: ['relance', 'encaissement'], fields: { goal: it('Relancer le service d\'encaissement après un arrêt'), when: it('Après un arrêt du service') }, lists: { steps: [it('Arrêter le service avec le script stop-encaissement'), it('Vider le dossier de travail'), it('Démarrer le service avec le script start-encaissement')] } } },
+    { app: 'ATP', page: ['other', 0], daysAgo: 40, period: 'current', fiche: { kind: 'procedure', title: it('Relancer le service d\'encaissement'), keywords: ['relance', 'redémarrage', 'encaissement'], replaces: it('Relancer le service d\'encaissement (ancienne méthode)'), fields: { goal: it('Relancer le service d\'encaissement sans perdre de paiement'), when: it('Quand les paiements restent en attente plus de 10 minutes'), cautions: it('Ne jamais relancer pendant la clôture de 23 h') }, lists: { steps: [it('Vérifier que la file des paiements est vide'), it('Arrêter le service avec la commande systemctl stop encaissement'), it('Démarrer le service avec la commande systemctl start encaissement'), it('Contrôler le tableau de bord des paiements pendant 5 minutes')] } } },
+    { app: 'ORC', page: ['other', 0], daysAgo: 60, period: 'current', fiche: { kind: 'procedure', title: it('Purger le cache des clients'), keywords: ['purge', 'cache', 'référentiel'], fields: { goal: it('Purger le cache du référentiel clients après une mise à jour massive'), when: it('Quand des fiches clients affichent d\'anciennes valeurs') }, lists: { steps: [it('Se connecter à la console d\'administration d\'Orion Clients'), it('Ouvrir le menu Maintenance puis Purge du cache'), it('Lancer la purge et attendre le message de fin')] } } },
+    { app: 'VGF', page: ['other', 0], daysAgo: 25, period: 'current', fiche: { kind: 'incident', title: it('Factures non envoyées, erreur SMTP-451'), keywords: ['facture', 'envoi', 'messagerie'], tickets: ['TCK-2087'], fields: { symptoms: it('Les factures restent en file d\'envoi et le journal affiche SMTP-451'), cause: it('La file d\'envoi sature quand le relais de messagerie répond trop lentement'), solution: it('Vider la file bloquée puis relancer l\'envoi des factures') }, lists: { errors: [it('SMTP-451 temporary local problem')], actions: [it('Vider la file bloquée depuis l\'écran Envois'), it('Relancer l\'envoi des factures du jour')], tickets: [it('TCK-2087')] } } },
+    { app: 'VGF', page: ['other', 1], daysAgo: 10, period: 'current', fiche: { kind: 'correctif', title: it('Version 4.2.1 de Vega Facturation'), keywords: ['version', 'file d\'envoi'], tickets: ['TCK-2087'], fields: { version: it('4.2.1') }, lists: { tickets: [it('TCK-2087')] } } },
+    { app: 'HLC', page: ['other', 0], daysAgo: 15, period: 'current', fiche: { kind: 'incident', title: it('Commandes bloquées au statut En préparation'), keywords: ['commande', 'blocage', 'statut'], tickets: ['TCK-3310'], fields: { symptoms: it('Des commandes restent au statut En préparation et le journal affiche ERR-ORD-017'), cause: it('Une réservation de stock reste verrouillée après un délai dépassé'), solution: it('Libérer la réservation verrouillée puis relancer la commande') }, lists: { errors: [it('ERR-ORD-017 reservation locked')], actions: [it('Libérer la réservation depuis l\'écran Stocks réservés'), it('Relancer la commande concernée')], tickets: [it('TCK-3310')] } } },
+    { app: 'HLC', page: ['other', 0], daysAgo: 15, period: 'current', fiche: { kind: 'pratique', title: it('Bonnes pratiques de déploiement de Helios Commandes'), keywords: ['déploiement', 'mise en production'], lists: { rules: [it('Déployer en dehors des heures de pointe, de 10 h à 12 h et de 15 h à 17 h'), it('Vérifier la recette sur le serveur de préproduction avant la production'), it('Garder la version précédente pour un retour arrière rapide')] } } },
+  ];
+  // une page à la fois : applyFiches remplace tout ce que la page avait produit
+  const byPage = new Map();
+  for (const d of demoFiches) {
+    const page = docsOf[d.app][d.page[0]][d.page[1]];
+    if (!byPage.has(page.pid)) byPage.set(page.pid, { page, daysAgo: d.daysAgo, period: d.period, list: [] });
+    byPage.get(page.pid).list.push({ ...base, ...d.fiche, appIds: [appId(d.app)] });
+  }
+  for (const { page, daysAgo, period, list } of byPage.values()) {
+    applyFiches(repo, list, { pageId: page.pid, docNodeId: page.docId, page: { title: repo.getNode(page.docId).name, url: `${WIKI}/${page.pid}`, updatedAt: new Date(now - daysAgo * DAY).toISOString() }, period });
+  }
+  linkFiches(repo);
 
   // ---------- résumés ----------
   for (const a of APPS) {

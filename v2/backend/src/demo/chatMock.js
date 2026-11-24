@@ -50,6 +50,10 @@ function askedDependencies(q) {
 const OWNER_PATTERNS = [/\bqui (s'occupe|est responsable|gere|est le responsable|est la responsable|possede|pilote)\b/, /\bresponsables? (de|d')/, /\bwho (owns|is responsible|manages|runs|looks after|is in charge)\b/, /\bowners? of\b/];
 const askedOwners = (q) => OWNER_PATTERNS.some((re) => re.test(q));
 
+/** « Comment… », « Erreur… », « Incident… » : question de dépannage ou de procédure, réponse tirée des fiches. */
+const DOC_PATTERNS = [/^(comment|how)\b/, /\b(erreur|error)\b/, /\bincident\b/, /\bprocedure\b/];
+const askedDocumentation = (q) => DOC_PATTERNS.some((re) => re.test(q));
+
 const question2text = (q) => norm(q).replace(/[\u2019`]/g, "'").replace(/\s+/g, ' ');
 
 function createChatMock(repo) {
@@ -77,6 +81,13 @@ function createChatMock(repo) {
 
   function compose(toolName, result, english) {
     if (!result || result.error) return `${PREFIX} ${result && result.error ? result.error : english ? 'No result.' : 'Aucun résultat.'}`;
+    if (toolName === 'search_knowledge') {
+      const top = (result.fiches || [])[0] || null;
+      if (!top) return `${PREFIX} ${english ? 'Nothing found in the documentation.' : 'Je n\'ai rien trouvé dans la documentation.'}`;
+      const flags = `${top.old ? (english ? ' (old)' : ' (ancienne)') : ''}${top.replaced ? (english ? ' (replaced)' : ' (remplacée)') : ''}`;
+      const apps = top.appNames && top.appNames.length ? ` ${english ? 'for' : 'pour'} ${top.appNames.join(', ')}` : '';
+      return `${PREFIX} ${english ? 'The most relevant fiche is' : 'La fiche la plus pertinente est'} « ${top.title} »${flags}${apps}. ${english ? 'Link' : 'Lien'} : ${top.url}`;
+    }
     if (toolName === 'search_entities') {
       if (!result.length) return `${PREFIX} ${english ? 'Nothing found in the demo graph.' : 'Je ne trouve rien de correspondant dans le graphe de démonstration.'}`;
       const found = result.map((n) => `${n.name} (${n.type})`);
@@ -136,6 +147,11 @@ function createChatMock(repo) {
 
     // 1er temps : choix de l'outil
     const question = String(last.content || '');
+    if (askedDocumentation(question2text(question))) {
+      const args = { query: question };
+      if (jsonMode) return completion({ role: 'assistant', content: JSON.stringify({ tool: 'search_knowledge', arguments: args }) });
+      return completion({ role: 'assistant', content: '', tool_calls: [{ id: 'call_demo_1', type: 'function', function: { name: 'search_knowledge', arguments: JSON.stringify(args) } }] });
+    }
     const entity = findEntity(question);
     if (!entity) {
       const answer = HELP(english);

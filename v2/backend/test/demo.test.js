@@ -14,6 +14,7 @@ const { ask } = require('../src/assistant/ask');
 const { computeStatus } = require('../src/naemon/status');
 const { docScore } = require('../src/quality/docScore');
 const { serverEnv } = require('../src/lib/environment');
+const { buildKnowledgeIndex } = require('../src/knowledge/search');
 
 const NOW = Date.parse('2026-11-20T10:00:00Z');
 const tmpDirs = [];
@@ -240,6 +241,42 @@ describe('mode démo : chat simulé', () => {
     assert.ok(/Helios Commandes/.test(r.answer));
     const r2 = await ask({ llm, repo, question: 'What does Atlas Paiements depend on?', lang: 'en' });
     assert.deepEqual(r2.toolTrace.map((t) => t.tool), ['dependencies']);
+  });
+});
+
+describe('mode démo : fiches', () => {
+  const { repo, demo } = build();
+  const fiches = repo.listByType('fiche');
+  const llm = createLlmClient({ mock: true, models: {}, concurrency: 2, maxRetries: 0 }, { mockHandler: createChatMock(repo), logger: { debug() {}, info() {}, warn() {}, error() {} } });
+  const knowledge = { index: buildKnowledgeIndex(repo), matcher: demo.matcher };
+
+  test('demo has fiches of each kind linked to applications', () => {
+    for (const kind of ['incident', 'correctif', 'procedure', 'pratique']) {
+      const of = fiches.filter((f) => f.attrs.kind === kind);
+      assert.ok(of.length >= 1 && of.length <= 3, kind);
+      for (const f of of) {
+        assert.ok(repo.edgesFrom(f.id).some((e) => e.type === 'concerne' && e.dst.startsWith('application:')), f.id);
+        assert.ok(repo.edgesFrom(f.id).some((e) => e.type === 'vient_de'), f.id);
+        assert.ok(/^https:\/\/wiki\.example\.local\//.test(f.attrs.url));
+      }
+    }
+    // une procédure remplacée par une plus récente, un correctif qui corrige un incident
+    const old = fiches.find((f) => f.attrs.kind === 'procedure' && f.attrs.replacedBy);
+    assert.ok(old && repo.getNode(old.attrs.replacedBy).attrs.kind === 'procedure');
+    assert.ok(fiches.some((f) => repo.edgesFrom(f.id).some((e) => e.type === 'corrige')));
+  });
+
+  test('demo chat answers a procedure question with sources', async () => {
+    for (const q of ["Comment relancer l'encaissement d'Atlas Paiements ?", 'Erreur SMTP-451 sur Vega Facturation', 'Incident sur les commandes bloquées']) {
+      const r = await ask({ llm, repo, question: q, knowledge });
+      assert.ok(r.toolTrace.some((t) => t.tool === 'search_knowledge'), q);
+      assert.ok(r.answer.startsWith('[démo]'));
+      assert.ok(r.sources.length >= 1, q);
+      assert.ok(r.answer.includes(r.sources[0].url), q);
+    }
+    const none = await ask({ llm, repo, question: 'Comment zzzqqq ?', knowledge });
+    assert.equal(none.sources.length, 0);
+    assert.ok(/rien trouvé/.test(none.answer));
   });
 });
 
