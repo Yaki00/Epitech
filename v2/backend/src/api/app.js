@@ -11,6 +11,8 @@ const v2 = require('./views2');
 const { writeGapsReport } = require('../naemon/gaps');
 const path = require('path');
 const fs = require('fs');
+const { loadPerimeter, createMatcher } = require('../perimeter/perimeter');
+const { buildKnowledgeIndex, searchKnowledge, getFiche, ficheSummariesOf } = require('../knowledge/search');
 
 /**
  * @param {object} deps { repo, llm, logger, frontendDist, toolsMode, jobs, poller, history, config }
@@ -18,7 +20,7 @@ const fs = require('fs');
  *   poller : relève Naemon (snapshot()) ; absent = supervision désactivée (états « unknown », source « off »)
  *   history : historique des imports ; absent = aucun changement listé
  */
-function createApp({ repo, llm, logger, frontendDist, toolsMode = 'native', jobs = null, poller = null, history = null, config = null }) {
+function createApp({ repo, llm, logger, frontendDist, toolsMode = 'native', jobs = null, poller = null, history = null, config = null, matcher: givenMatcher = null }) {
   const d = { repo, poller, history, config, jobs };
   let version = null;
   try {
@@ -26,6 +28,47 @@ function createApp({ repo, llm, logger, frontendDist, toolsMode = 'native', jobs
   } catch (err) {
     version = null;
   }
+
+  // recherche dans les fiches : index en mémoire, refait à chaque rechargement du store
+  let warnedSections = false;
+  const readSections = () => {
+    if (!config || !config.dataDir) return [];
+    const file = path.join(config.dataDir, 'knowledge-sections.json');
+    try {
+      if (!fs.existsSync(file)) return [];
+      const list = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
+      return Array.isArray(list) ? list : [];
+    } catch (err) {
+      if (!warnedSections) logger?.warn('sections de pages illisibles, recherche dans les fiches seules', { erreur: err.message });
+      warnedSections = true;
+      return [];
+    }
+  };
+  // reconnaissance des applications dans une question : périmètre, sinon les applications du graphe
+  const makeMatcher = () => {
+    if (givenMatcher) return givenMatcher;
+    try {
+      const perimeter = (config && config.perimeterFile && loadPerimeter(config.perimeterFile)) || {
+        applications: repo.listByType('application').map((a) => ({ name: a.name, aliases: [], auid: null, naemonHostgroups: [] })),
+        ignoreOtherApplications: true,
+      };
+      return perimeter.applications.length ? createMatcher(perimeter, repo) : null;
+    } catch (err) {
+      logger?.warn('périmètre illisible, applications de la question non reconnues', { erreur: err.message });
+      return null;
+    }
+  };
+  let knowledge = null;
+  const rebuildKnowledge = () => {
+    try {
+      knowledge = { index: buildKnowledgeIndex(repo, { sections: readSections() }), matcher: makeMatcher() };
+    } catch (err) {
+      logger?.warn('index des fiches non construit', { erreur: err.message });
+      knowledge = null;
+    }
+  };
+  rebuildKnowledge();
+
   const app = express();
   app.use(express.json({ limit: '1mb' }));
   app.use((req, res, next) => {
@@ -39,7 +82,10 @@ function createApp({ repo, llm, logger, frontendDist, toolsMode = 'native', jobs
   // une synchro (autre processus) a pu réécrire les données : on recharge avant de répondre
   app.use('/api', (req, res, next) => {
     try {
-      if (repo.reloadIfChanged && repo.reloadIfChanged()) logger?.info('données rechargées après une synchro');
+      if (repo.reloadIfChanged && repo.reloadIfChanged()) {
+        logger?.info('données rechargées après une synchro');
+        rebuildKnowledge();
+      }
     } catch (err) {
       logger?.warn('rechargement impossible, données précédentes conservées', { erreur: err.message });
     }
@@ -65,7 +111,18 @@ function createApp({ repo, llm, logger, frontendDist, toolsMode = 'native', jobs
   app.get('/api/applications', (req, res) => res.json(views.listApplications(repo, v2.ctxOf(d))));
   app.get('/api/applications/:id', (req, res) => {
     const r = views.applicationDetail(repo, req.params.id, v2.ctxOf(d));
+    if (r) r.knowledge = ficheSummariesOf(repo, req.params.id);
     return r ? res.json(r) : res.status(404).json({ error: 'introuvable' });
+  });
+  app.get('/api/knowledge/search', (req, res) => {
+    const none = { fiches: [], sections: [], apps: [] };
+    if (!knowledge) return res.json(none);
+    const out = searchKnowledge(knowledge.index, repo, knowledge.matcher, { query: String(req.query.q || ''), application: req.query.app ? String(req.query.app) : undefined, limit: intOr(req.query.limit, 10) });
+    res.json(out);
+  });
+  app.get('/api/knowledge/:id', (req, res) => {
+    const f = getFiche(repo, req.params.id);
+    return f ? res.json(f) : res.status(404).json({ error: 'introuvable' });
   });
   app.get('/api/servers', (req, res) => res.json(views.searchServers(repo, req.query.q, intOr(req.query.limit, 30), v2.ctxOf(d))));
 
