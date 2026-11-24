@@ -8,7 +8,7 @@
  */
 
 /** Version de la lecture : à augmenter quand les consignes ou la forme de la réponse changent. */
-const READING_VERSION = 4;
+const READING_VERSION = 5;
 
 const SYSTEM = `Tu lis une page de documentation technique interne (Confluence) pour cartographier des applications et leur infrastructure. Réponds uniquement par un objet JSON, sans texte autour.
 
@@ -21,10 +21,10 @@ PRINCIPES
 6. L'en-tête donne la date du jour : elle sert à juger la période, ce n'est pas du texte de la page (ne la cite jamais).
 
 FORMAT
-{"page": {"kind": "architecture|operations|install|incident|release|meeting|project|other", "period": "current|past|target", "env": "PRD|STG|DEV|null", "envEvidence": "...|null", "topics": []},
+{"page": {"kind": "architecture|operations|install|incident|release|meeting|project|other", "period": "current|past|target", "periodEvidence": "...|null", "env": "PRD|STG|DEV|null", "envEvidence": "...|null", "topics": []},
  "applications": [{"name": "...", "written": "...", "role": "subject|cited", "evidence": "..."}],
  "entities": [{"name": "...", "type": "server|ip|database|url|queue|path|person|team", "env": "PRD|STG|DEV|null", "ip": "...|null", "status": "active|decommissioned|planned", "evidence": "..."}],
- "links": [{"from": "...", "to": "...", "type": "runs_on|uses_db|db_on|calls|reads_from|writes_to|depends_on", "period": "current|past|target|null", "evidence": "..."}],
+ "links": [{"from": "...", "to": "...", "type": "runs_on|uses_db|db_on|calls|reads_from|writes_to|depends_on", "period": "current|past|target|null", "periodEvidence": "...|null", "evidence": "..."}],
  "owners": [{"name": "...", "kind": "person|team", "application": "...|null", "role": "owner|support|oncall|other", "evidence": "..."}]}
 Les valeurs proposées (kind, period, env, role, type, status, kind des owners, period des liens) restent en anglais, telles qu'écrites ci-dessus : ne les traduis pas. Mets une liste vide quand il n'y a rien.
 
@@ -43,6 +43,8 @@ period : le moment que décrit la page, jugé par rapport à la date du jour don
 - past : historique, page marquée obsolète ou archivée, ancien document d'architecture d'une version remplacée, migration terminée, année ancienne présentée comme l'état d'alors.
 - target : architecture cible, projet, état prévu qui n'existe pas encore à la date du jour.
 Une année dans le titre ne suffit pas : past seulement si la page décrit un état qui n'existe plus, target seulement si elle décrit un état qui n'existe pas encore.
+Une note de version, un compte rendu, un bilan ou un plan de migration dont les dates sont passées décrivent l'existant : current. Un avertissement (« certaines lignes peuvent être périmées », « à vérifier ») ne rend pas la page ancienne : elle reste current, seules les lignes dites périmées sont past.
+periodEvidence : pour past ou target, la citation (titre, bandeau, phrase) qui dit que la page est ancienne ou prévue : un mot comme obsolète, archivée, historique, remplacée, cible, prévue, projet. Une date ou une année seule ne prouve rien. Sans cette citation, period vaut current. null pour current.
 env : environnement de toute la page (PRD production, STG recette ou préproduction, DEV développement), seulement si le titre ou les pages parentes le disent. Une section « Production », une phrase sur quelques serveurs, les noms, les adresses ou l'environnement des serveurs cités ne suffisent pas : jamais déduit. Une page qui décrit plusieurs environnements : null.
 envEvidence : le titre (ou la ligne des pages parentes) recopié, qui contient le mot de l'environnement ; null si env est null. Sans cette citation, env vaut null.
 topics : ce que la page couvre vraiment, parmi servers, databases, flows, backup, monitoring, redundancy, contacts.
@@ -76,6 +78,7 @@ LINKS (relations écrites ou dessinées, au sens « from dépend de to »)
 - depends_on : autre dépendance écrite.
 from et to reprennent des noms rendus dans applications ou entities. Pour une flèche de schéma, la citation est la ligne du schéma.
 - period : période de ce lien, par défaut celle de la page (mets null). Une page peut décrire l'existant et une cible (plan de migration : tableau de l'existant puis de la cible), ou un historique qui va jusqu'à aujourd'hui : marque chaque lien avec sa propre période (current pour l'existant, past pour ce qui n'existe plus, target pour ce qui est prévu). Un lien current dans une page past ou target doit citer la ligne qui décrit l'existant ; ne marque jamais current ce que la page présente comme ancien ou prévu.
+- periodEvidence : quand la période du lien est past ou target et diffère de celle de la page, la citation qui le dit (le titre de la section « Architecture cible », la phrase « flux supprimé en 2025 »...). Une date seule ne prouve rien. null sinon.
 Dans une page d'architecture, un tableau qui liste les serveurs (ou les bases) de l'application donne ces liens même si aucune phrase ne les écrit : runs_on (application vers chaque serveur du tableau), uses_db (application vers chaque base), db_on (base vers son serveur si la ligne le donne). La citation est la ligne du tableau, recopiée avec ses cellules séparées par « | » (exemple : « srvapp01 | PRD | 10.0.0.1 »).
 
 OWNERS (personnes et équipes qui s'occupent d'une application, souvent dans un tableau « Contacts »)

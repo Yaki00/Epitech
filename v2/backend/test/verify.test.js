@@ -143,9 +143,9 @@ describe('verifyReading', () => {
       page: { kind: 'architecture', period: 'target', env: null, topics: [] },
       links: [runsOn('srvorh01', 'srvorh01'), { from: 'OrderHub', to: 'Billing Engine', type: 'calls', evidence: 'appelle Billing Engine' }],
     });
-    const v = verifyReading(r, ctxOf(env, { pageText: 'srvorh01 appelle Billing Engine' }));
+    const v = verifyReading(r, ctxOf(env, { pageText: 'srvorh01 appelle Billing Engine', headerText: 'Titre : OrderHub : architecture cible' }));
     assert.deepEqual(v.links.map((l) => l.period), ['target', 'target']);
-    const past = verifyReading({ ...r, page: { ...r.page, period: 'past' } }, ctxOf(env, { pageText: 'srvorh01 appelle Billing Engine' }));
+    const past = verifyReading({ ...r, page: { ...r.page, period: 'past' } }, ctxOf(env, { pageText: 'srvorh01 appelle Billing Engine', headerText: 'Titre : DAT OrderHub (obsolète)' }));
     assert.deepEqual(past.links.map((l) => l.period), ['past', 'past']);
   });
 
@@ -190,7 +190,7 @@ describe('verifyReading', () => {
         { name: 'Sans', kind: 'person', application: null, role: 'owner', evidence: 'Sans' },
       ],
     });
-    const v = verifyReading(r, ctxOf(env, { pageText: 'Awa Diallo astreinte. Equipe X. Sans' }));
+    const v = verifyReading(r, ctxOf(env, { pageText: 'Awa Diallo astreinte. Equipe X. Sans', headerText: 'Titre : Astreintes (archivée)' }));
     assert.deepEqual(v.owners, [{ appId: 'application:orderhub', name: 'Awa Diallo', kind: 'person', role: 'oncall', period: 'past', evidence: 'Awa Diallo astreinte' }]);
     assert.deepEqual(v.rejected.map((x) => x.reason), ['unknown_application', 'unknown_application']);
   });
@@ -269,7 +269,7 @@ describe('période propre d\'un lien', () => {
         { from: 'OrderHub', to: 'Billing Engine', type: 'depends_on', evidence: 'Billing Engine appelle OrderHub depuis 2020' },
       ],
     });
-    const v = verifyReading(r, ctxOf(env, { pageText: text }));
+    const v = verifyReading(r, ctxOf(env, { pageText: text, headerText: 'Titre : OrderHub : architecture cible' }));
     assert.deepEqual(v.links.map((l) => [l.dstName, l.type, l.period, l.trust]), [
       ['srvorh01', 'runs_on', 'current', 'confirmed'],
       ['srvnew77', 'runs_on', 'target', 'toValidate'],
@@ -291,8 +291,9 @@ describe('période propre d\'un lien', () => {
 
   test('a link marked past in a current page is past ; unreadable page keeps links to validate', () => {
     const env = setup();
-    const links = [{ from: 'Billing Engine', to: 'OrderHub', type: 'calls', period: 'past', evidence: 'Billing Engine appelle OrderHub depuis 2020' }];
-    assert.equal(verifyReading(reading({ page: page('current'), links }), ctxOf(env, { pageText: text })).links[0].period, 'past');
+    const links = [{ from: 'Billing Engine', to: 'OrderHub', type: 'calls', period: 'past', periodEvidence: 'Flux de Billing Engine vers OrderHub supprimé en 2024', evidence: 'Billing Engine appelle OrderHub depuis 2020' }];
+    const withStop = `${text}\nFlux de Billing Engine vers OrderHub supprimé en 2024`;
+    assert.equal(verifyReading(reading({ page: page('current'), links }), ctxOf(env, { pageText: withStop })).links[0].period, 'past');
     const unreadable = verifyReading(reading({ page: page(null), links: [{ ...links[0], period: null }] }), ctxOf(env, { pageText: text })).links[0];
     assert.deepEqual([unreadable.period, unreadable.trust], ['current', 'toValidate']);
   });
@@ -402,9 +403,86 @@ describe('serveur hors inventaire corroboré par une autre page', () => {
     env.repo.addEdge({ src: doc('confluence-3', RECENT), dst: 'server:srvora01', type: 'mentions', source: 'confluence', sourceRef: '3', attrs: { status: 'decommissioned', period: 'current' } });
     assert.equal(verifyReading(r, ctx).links[0].trust, 'toValidate');
     env.repo.addEdge({ src: doc('confluence-4', RECENT), dst: 'server:srvora01', type: 'mentions', source: 'confluence', sourceRef: '4', attrs: { status: 'active', period: 'current' } });
+    // confluence-3, actuelle, le dit arrêté : contesté, une autre page active ne suffit plus
+    const disputed = verifyReading(r, ctx);
+    assert.deepEqual([disputed.servers[0].disputed, disputed.servers[0].corroborated, disputed.links[0].trust], [true, false, 'toValidate']);
+    env.repo.patchNodeAttrs('document:confluence-3', { retired: true });
     const v = verifyReading(r, ctx);
     assert.equal(v.servers[0].corroborated, true);
     assert.equal(v.links[0].trust, 'added');
+  });
+});
+
+describe('serveur hors inventaire dit arrêté par une autre page', () => {
+  const setupOra = () => {
+    const env = setup();
+    env.repo.upsertNode({ type: 'server', key: 'srvora01', name: 'srvora01', source: 'llm', attrs: { fromLlm: true, outOfInventory: true } });
+    const doc = (key, updatedAt) => env.repo.upsertNode({ type: 'document', key, name: key, source: 'confluence', attrs: { updatedAt } });
+    const stop = (key, updatedAt, period) => env.repo.addEdge({ src: doc(key, updatedAt), dst: 'server:srvora01', type: 'mentions', source: 'confluence', sourceRef: key, attrs: { status: 'decommissioned', period } });
+    return { env, stop };
+  };
+  const r = reading({ applications: [{ name: 'OrderHub', written: 'OrderHub', role: 'subject', evidence: 'OrderHub tourne sur srvora01' }], entities: [server('srvora01', 'OrderHub tourne sur srvora01')], links: [runsOn('srvora01', 'OrderHub tourne sur srvora01')] });
+  const ctx = (env) => ctxOf(env, { pageText: 'OrderHub tourne sur srvora01', pageUpdatedAt: RECENT, naemonHosts: new Set(['srvora01']) });
+
+  test('supervised and cited active in this recent page: added, unless another current page says it is stopped', () => {
+    const { env, stop } = setupOra();
+    assert.equal(verifyReading(r, ctx(env)).links[0].trust, 'added');
+    stop('confluence-20', OLD, 'current');
+    const v = verifyReading(r, ctx(env));
+    assert.deepEqual([v.servers[0].disputed, v.servers[0].corroborated, v.links[0].trust], [true, false, 'toValidate']);
+  });
+
+  test('an old page that says it is stopped counts only if it is more recent than this page', () => {
+    const { env, stop } = setupOra();
+    stop('confluence-21', OLD, 'past');
+    assert.equal(verifyReading(r, ctx(env)).links[0].trust, 'added');
+    stop('confluence-22', new Date(NOW - DAY).toISOString(), 'past');
+    assert.equal(verifyReading(r, ctx(env)).links[0].trust, 'toValidate');
+  });
+
+  test('a server of the inventory is never disputed by a page', () => {
+    const env = setup();
+    const d = env.repo.upsertNode({ type: 'document', key: 'confluence-23', name: 'x', source: 'confluence', attrs: { updatedAt: RECENT } });
+    env.repo.addEdge({ src: d, dst: env.s1, type: 'mentions', source: 'confluence', sourceRef: '23', attrs: { status: 'decommissioned', period: 'current' } });
+    const v = verifyReading(reading({ entities: [server('srvorh01', 'OrderHub tourne sur srvorh01')], links: [runsOn('srvorh01', 'OrderHub tourne sur srvorh01')] }), ctxOf(env, { pageText: 'OrderHub tourne sur srvorh01' }));
+    assert.deepEqual([v.servers[0].disputed, v.links[0].trust], [false, 'confirmed']);
+  });
+});
+
+describe('période ancienne ou cible : seulement si une citation la prouve', () => {
+  const body = 'Cartographie établie lors de l\'audit de 2024.\nOrderHub tourne sur srvorh01\nCette page est obsolète.';
+  const pageOf = (period, periodEvidence) => reading({ page: { kind: 'architecture', period, periodEvidence, env: null, topics: [] }, links: [runsOn('srvorh01', 'OrderHub tourne sur srvorh01')] });
+  const ctx = (env, title = 'Cartographie des flux (2024)') => ctxOf(env, { headerText: `Titre : ${title}\nPages parentes : Accueil`, pageText: `Titre : ${title}\n${body}` });
+
+  test('a year alone (title or quote) does not make a page past: current, rejection recorded', () => {
+    const env = setup();
+    for (const quote of [undefined, 'Cartographie des flux (2024)', "Cartographie établie lors de l'audit de 2024"]) {
+      const v = verifyReading(pageOf('past', quote), ctx(env));
+      assert.equal(v.period, 'current');
+      assert.equal(v.links[0].period, 'current');
+      assert.ok(v.rejected.some((x) => x.what === 'période de la page (past)'));
+    }
+  });
+
+  test('a quote of the page with a word of the period keeps it ; a marked title suffices ; an invented quote does not', () => {
+    const env = setup();
+    assert.equal(verifyReading(pageOf('past', 'Cette page est obsolète'), ctx(env)).period, 'past');
+    assert.equal(verifyReading(pageOf('past', null), ctx(env, 'DAT OrderHub 2019 (archivée)')).period, 'past');
+    assert.equal(verifyReading(pageOf('target', null), ctx(env, 'OrderHub : architecture cible')).period, 'target');
+    const invented = verifyReading(pageOf('past', 'Page archivée'), ctx(env));
+    assert.deepEqual([invented.period, invented.rejected.find((x) => x.what === 'période de la page (past)').reason], ['current', 'no_evidence']);
+    // le mot doit être de la bonne période
+    assert.equal(verifyReading(pageOf('target', 'Cette page est obsolète'), ctx(env)).period, 'current');
+  });
+
+  test('a link period other than the page one needs a quote that proves it', () => {
+    const env = setup();
+    const text = 'Billing Engine appelle OrderHub depuis 2020\nFlux supprimé en 2025 : Billing Engine vers OrderHub';
+    const link = (over) => reading({ links: [{ from: 'Billing Engine', to: 'OrderHub', type: 'calls', period: 'past', evidence: 'Billing Engine appelle OrderHub depuis 2020', ...over }] });
+    const c = ctxOf(env, { pageText: text });
+    assert.equal(verifyReading(link({}), c).links[0].period, 'current');
+    assert.equal(verifyReading(link({ periodEvidence: 'Flux supprimé en 2025 : Billing Engine vers OrderHub' }), c).links[0].period, 'past');
+    assert.equal(verifyReading(link({ periodEvidence: 'Flux supprimé en 2026' }), c).links[0].period, 'current');
   });
 });
 
@@ -432,7 +510,7 @@ describe('relecture round 1 : page elle-même, utilisateurs actuels, lien actuel
 
   test('in the page, only current uses_db links make an application a user of the database', () => {
     const env = setup();
-    const text = 'BILREF | srvbil01\nBilling Engine utilise BILREF\nBilling Engine lit BILREF';
+    const text = 'BILREF | srvbil01\nBilling Engine utilise BILREF (ancien usage)\nBilling Engine lit BILREF';
     const r = (links) =>
       reading({
         applications: [{ name: 'OrderHub', written: 'OrderHub', role: 'subject', evidence: 'OrderHub' }],
@@ -441,7 +519,7 @@ describe('relecture round 1 : page elle-même, utilisateurs actuels, lien actuel
       });
     const ctx = ctxOf(env, { pageText: `OrderHub\n${text}` });
     const trustOf = (links) => verifyReading(r(links), ctx).links.find((l) => l.type === 'db_on').trust;
-    assert.equal(trustOf([{ from: 'Billing Engine', to: 'BILREF', type: 'uses_db', period: 'past', evidence: 'Billing Engine utilise BILREF' }]), 'toValidate');
+    assert.equal(trustOf([{ from: 'Billing Engine', to: 'BILREF', type: 'uses_db', period: 'past', evidence: 'Billing Engine utilise BILREF (ancien usage)' }]), 'toValidate');
     assert.equal(trustOf([{ from: 'Billing Engine', to: 'BILREF', type: 'reads_from', evidence: 'Billing Engine lit BILREF' }]), 'toValidate');
     assert.equal(trustOf([{ from: 'Billing Engine', to: 'BILREF', type: 'uses_db', evidence: 'Billing Engine utilise BILREF' }]), 'added');
   });
@@ -459,13 +537,13 @@ describe('relecture round 1 : page elle-même, utilisateurs actuels, lien actuel
           runsOn('srvnew88', 'OrderHub sur srvnew88', { period: 'current' }),
         ],
       });
-    const past = verifyReading(r('past'), ctxOf(env, { pageText: text, naemonHosts: new Set(['srvnew88']) }));
+    const past = verifyReading(r('past'), ctxOf(env, { pageText: text, headerText: 'Titre : DAT OrderHub (obsolète)', naemonHosts: new Set(['srvnew88']) }));
     assert.deepEqual(past.links.map((l) => [l.dstName, l.period, l.trust]), [
       ['srvorh01', 'current', 'confirmed'],
       ['OrderHub', 'current', 'toValidate'],
       ['srvnew88', 'current', 'toValidate'],
     ]);
-    const target = verifyReading(r('target'), ctxOf(env, { pageText: text, naemonHosts: new Set(['srvnew88']) }));
+    const target = verifyReading(r('target'), ctxOf(env, { pageText: text, headerText: 'Titre : OrderHub : architecture cible', naemonHosts: new Set(['srvnew88']) }));
     assert.deepEqual(target.links.map((l) => l.trust), ['confirmed', 'added', 'added']);
   });
 });

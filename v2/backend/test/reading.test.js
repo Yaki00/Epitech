@@ -39,8 +39,8 @@ const userText = (call) => call.messages.filter((m) => m.role === 'user').map((m
 const systemText = (call) => call.messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n');
 
 describe('lecture IA d\'une page', () => {
-  test('READING_VERSION is 4 (date du jour, période par lien, environnement du titre, définition de architecture)', () => {
-    assert.equal(READING_VERSION, 4);
+  test('READING_VERSION is 5 (citation de la période, date du jour, période par lien, environnement du titre, définition de architecture)', () => {
+    assert.equal(READING_VERSION, 5);
   });
 
   test('sanitize keeps only allowed values', () => {
@@ -64,7 +64,7 @@ describe('lecture IA d\'une page', () => {
         { name: 'Alice Martin', kind: 'robot', application: null, role: 'owner', evidence: 'Alice Martin' },
       ],
     });
-    assert.deepEqual(r.page, { kind: 'other', period: null, env: 'PRD', envEvidence: null, topics: ['servers', 'contacts'] });
+    assert.deepEqual(r.page, { kind: 'other', period: null, periodEvidence: null, env: 'PRD', envEvidence: null, topics: ['servers', 'contacts'] });
     assert.deepEqual(
       r.applications.map((a) => [a.name, a.written, a.role]),
       [
@@ -85,7 +85,7 @@ describe('lecture IA d\'une page', () => {
 
   test('sanitize tolerates missing or broken parts', () => {
     const r = sanitizeReading({ page: null, applications: 'x', entities: [null, 3], links: undefined });
-    assert.deepEqual(r, emptyReading({ page: { kind: 'other', period: 'current', env: null, envEvidence: null, topics: [] } }));
+    assert.deepEqual(r, emptyReading({ page: { kind: 'other', period: 'current', periodEvidence: null, env: null, envEvidence: null, topics: [] } }));
     assert.deepEqual(sanitizeReading(null).applications, []);
     const o = sanitizeReading({ page: {}, owners: [{ name: 'Équipe Socle', kind: 'team', application: 'null', role: 'support', evidence: 'Équipe Socle' }] });
     assert.equal(o.owners[0].application, null);
@@ -144,7 +144,7 @@ describe('lecture IA d\'une page', () => {
       owners: [{ name: 'Alice Martin', kind: 'person', application: null, role: 'Responsable', evidence: 'Alice Martin' }],
     });
     // « recette » et « UAT » : vocabulaire maison, sans synonyme réglé ils ne donnent aucun environnement
-    assert.deepEqual(r.page, { kind: 'meeting', period: 'past', env: null, envEvidence: null, topics: [] });
+    assert.deepEqual(r.page, { kind: 'meeting', period: 'past', periodEvidence: null, env: null, envEvidence: null, topics: [] });
     assert.deepEqual(r.applications.map((a) => a.role), ['subject', 'cited']);
     assert.deepEqual(
       r.entities.map((e) => [e.name, e.env, e.status]),
@@ -549,5 +549,25 @@ describe('banc 1 : date du jour, période par lien, environnement de page, natur
     assert.equal(sanitizeReading({ page: { env: 'PRD', envEvidence: 'null' } }).page.envEvidence, null);
     const m = mergeReadings([sanitizeReading({ page: { env: 'PRD' } }), sanitizeReading({ page: { env: 'STG', envEvidence: 'Infra : recette STG' } })]);
     assert.deepEqual([m.page.env, m.page.envEvidence], ['STG', 'Infra : recette STG']);
+  });
+
+  test('period quotes: kept only for past or target, merged with the period they prove', () => {
+    assert.equal(sanitizeReading({ page: { period: 'past', periodEvidence: 'Page obsolète' } }).page.periodEvidence, 'Page obsolète');
+    assert.equal(sanitizeReading({ page: { period: 'current', periodEvidence: 'Page obsolète' } }).page.periodEvidence, null);
+    assert.equal(sanitizeReading({ page: { period: 'target', periodEvidence: 'null' } }).page.periodEvidence, null);
+    const link = (period, periodEvidence) => sanitizeReading({ links: [{ from: 'A', to: 'B', type: 'calls', period, periodEvidence, evidence: 'A appelle B' }] }).links[0].periodEvidence;
+    assert.deepEqual([link('past', 'flux supprimé'), link('current', 'flux supprimé'), link(null, 'flux supprimé')], ['flux supprimé', null, null]);
+    // morceau 1 illisible : la période et sa citation viennent du même morceau
+    const m = mergeReadings([sanitizeReading({ page: { period: 'bof' } }), sanitizeReading({ page: { period: 'past', periodEvidence: 'Archivée' } })]);
+    assert.deepEqual([m.page.period, m.page.periodEvidence], ['past', 'Archivée']);
+    const first = mergeReadings([sanitizeReading({ page: { period: 'current' } }), sanitizeReading({ page: { period: 'past', periodEvidence: 'Archivée' } })]);
+    assert.deepEqual([first.page.period, first.page.periodEvidence], ['current', null]);
+    // une occurrence actuelle d'un lien l'emporte et perd la citation de période
+    const merged = mergeReadings([
+      sanitizeReading({ links: [{ from: 'A', to: 'B', type: 'calls', period: 'past', periodEvidence: 'flux supprimé', evidence: 'A appelle B' }] }),
+      sanitizeReading({ links: [{ from: 'A', to: 'B', type: 'calls', period: 'current', evidence: 'A appelle toujours B' }] }),
+    ]);
+    assert.deepEqual([merged.links[0].period, merged.links[0].periodEvidence], ['current', null]);
+    assert.ok(SYSTEM.includes('"periodEvidence"'));
   });
 });

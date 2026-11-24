@@ -6,10 +6,10 @@
  * téléphone (les personnes ne sont gardées qu'avec leur nom, leur rôle et leur application).
  *
  * Reading = {
- *   page: { kind, period, env, envEvidence, topics[] },
+ *   page: { kind, period, periodEvidence, env, envEvidence, topics[] },
  *   applications: [{ name, written, role, evidence }],
  *   entities: [{ name, type, env, status, evidence }],
- *   links: [{ from, to, type, period, evidence }],
+ *   links: [{ from, to, type, period, periodEvidence, evidence }],
  *   owners: [{ name, kind, application, role, evidence }],
  * }
  * `page.period` et `entities[].status` valent null quand le modèle a rendu une valeur non vide
@@ -17,6 +17,8 @@
  * impact). Absents ou vides, ils valent `current` et `active`.
  * `links[].period` vaut null quand le lien n'a pas de période propre (absente ou méconnaissable) :
  * c'est alors celle de la page. `page.envEvidence` est la citation qui justifie `page.env` (null sans env).
+ * `page.periodEvidence` et `links[].periodEvidence` sont les citations qui justifient une période ancienne
+ * ou cible (null sinon) : verify ne garde cette période que si la citation la prouve.
  */
 const { SECTION_KEYS } = require('../perimeter/architecture');
 const { normalizeEnv } = require('../lib/environment');
@@ -195,6 +197,7 @@ const mergeLinks = (items) =>
   mergeItems(items, (l) => `${normKey(l.from)}|${l.type}|${normKey(l.to)}`, (kept, l) => {
     if (l.period === 'current' && kept.period !== 'current') {
       kept.period = l.period;
+      kept.periodEvidence = null;
       kept.evidence = l.evidence;
     }
   });
@@ -208,9 +211,12 @@ function sanitizePage(p) {
   const page = p && typeof p === 'object' && !Array.isArray(p) ? p : {};
   const topics = Array.isArray(page.topics) ? page.topics.map((t) => pick(t, TOPICS)).filter(Boolean) : [];
   const env = envOf(page.env);
+  const period = pick(page.period, PERIODS, { aliases: ALIASES.period, empty: 'current', unknown: null });
   return {
     kind: pick(page.kind, KINDS, { aliases: ALIASES.kind, empty: 'other' }),
-    period: pick(page.period, PERIODS, { aliases: ALIASES.period, empty: 'current', unknown: null }),
+    period,
+    // citation qui prouve une période ancienne ou cible (contrôlée par verify : sans preuve, la page est actuelle)
+    periodEvidence: period === 'past' || period === 'target' ? cleanEvidence(opt(page.periodEvidence), false) || null : null,
     env,
     // citation de l'environnement de la page (contrôlée par verify : sans elle, l'environnement n'est pas retenu)
     envEvidence: env ? cleanEvidence(opt(page.envEvidence), false) || null : null,
@@ -241,14 +247,18 @@ function sanitizeReading(raw) {
     .filter((e) => e.type && e.name && e.evidence);
 
   const links = list(r.links)
-    .map((l) => ({
-      from: str(l.from),
-      to: str(l.to),
-      type: pick(l.type, LINK_TYPES),
+    .map((l) => {
       // période propre du lien ; absente ou méconnaissable : celle de la page (null)
-      period: pick(l.period, PERIODS, { aliases: ALIASES.period, empty: null, unknown: null }),
-      evidence: cleanEvidence(l.evidence, false),
-    }))
+      const period = pick(l.period, PERIODS, { aliases: ALIASES.period, empty: null, unknown: null });
+      return {
+        from: str(l.from),
+        to: str(l.to),
+        type: pick(l.type, LINK_TYPES),
+        period,
+        periodEvidence: period === 'past' || period === 'target' ? cleanEvidence(opt(l.periodEvidence), false) || null : null,
+        evidence: cleanEvidence(l.evidence, false),
+      };
+    })
     .filter((l) => l.from && l.to && l.type && l.evidence && normKey(l.from) !== normKey(l.to));
 
   const owners = list(r.owners)
@@ -277,13 +287,14 @@ function sanitizeReading(raw) {
  * l'introduction où une page se dit cible, obsolète ou historique (une section « Historique »
  * plus bas ne rend pas la page ancienne : le statut de chaque serveur le dit) ; si elle y est non
  * fiable (null), une période `past` ou `target` d'un morceau suivant est reprise, sinon elle reste
- * null (jamais `current` par défaut) ; l'environnement
+ * null (jamais `current` par défaut), avec la citation du morceau qui la donne ; l'environnement
  * est le premier connu, avec sa citation ; les sujets sont réunis.
  */
-/** Premier morceau non fiable : une période ancienne ou cible dite plus loin est reprise, sinon null. */
-function periodAfterUnreliable(all) {
+/** Morceau qui donne la période : le premier, sauf s'il est non fiable (un morceau ancien ou cible plus loin, sinon aucun). */
+function periodSource(all) {
+  if (all[0].page.period !== null) return all[0].page;
   const later = all.find((r) => r.page.period === 'past' || r.page.period === 'target');
-  return later ? later.page.period : null;
+  return later ? later.page : null;
 }
 
 function mergeReadings(readings) {
@@ -293,10 +304,12 @@ function mergeReadings(readings) {
   const precise = all.find((r) => r.page.kind !== 'other');
   // environnement : le premier qui a sa citation, sinon le premier connu (écarté ensuite par verify)
   const withEnv = all.find((r) => r.page.env && r.page.envEvidence) || all.find((r) => r.page.env);
+  const periodPage = periodSource(all);
   return {
     page: {
       kind: precise ? precise.page.kind : first.kind,
-      period: first.period !== null ? first.period : periodAfterUnreliable(all),
+      period: periodPage ? periodPage.period : null,
+      periodEvidence: periodPage ? periodPage.periodEvidence || null : null,
       env: withEnv ? withEnv.page.env : null,
       envEvidence: withEnv ? withEnv.page.envEvidence || null : null,
       topics: [...new Set(all.flatMap((r) => r.page.topics))],

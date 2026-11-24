@@ -16,7 +16,7 @@
     "owners": [{ "name": "Alice Martin", "kind": "person", "application": "OrderHub", "role": "owner", "evidence": "Responsable : Alice Martin" }]
   },
   "OrderHub - Architecture 2018": {
-    "page": { "kind": "architecture", "period": "past", "env": null, "topics": ["servers"] },
+    "page": { "kind": "architecture", "period": "past", "periodEvidence": "Ancienne architecture (archivée)", "env": null, "topics": ["servers"] },
     "applications": [{ "name": "OrderHub", "written": "OrderHub", "role": "subject", "evidence": "OrderHub tournait sur srvold01" }],
     "entities": [{ "name": "srvold01", "type": "server", "env": null, "ip": null, "status": "decommissioned", "evidence": "srvold01, arrêté depuis la migration" }],
     "links": [{ "from": "OrderHub", "to": "srvold01", "type": "runs_on", "evidence": "OrderHub tournait sur srvold01" }],

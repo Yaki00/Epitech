@@ -419,3 +419,73 @@ describe('fin de passage : pages dont un lien est resté à valider revues sans 
     assert.ok(impactOf(repo, 'server:srvbil01').items.some((i) => i.id === 'application:orderhub'));
   });
 });
+
+describe('serveur hors inventaire dit arrêté par une autre page', () => {
+  const SRV = 'server:srvold77';
+  const pages = {
+    'OrderHub - Serveurs': { id: '8001', updatedAt: '2026-06-01T09:00:00.000+02:00', html: '<p>OrderHub tourne sur srvold77.</p>' },
+    'CR atelier supervision': { id: '8002', updatedAt: '2026-10-01T09:00:00.000+02:00', html: '<p>Le serveur srvold77 est arrêté depuis mars.</p>' },
+  };
+  const readings = {
+    'OrderHub - Serveurs': {
+      page: { kind: 'architecture', period: 'current', topics: ['servers'] },
+      applications: [{ name: 'OrderHub', written: 'OrderHub', role: 'subject', evidence: 'OrderHub tourne sur srvold77' }],
+      entities: [{ name: 'srvold77', type: 'server', status: 'active', evidence: 'OrderHub tourne sur srvold77' }],
+      links: [{ from: 'OrderHub', to: 'srvold77', type: 'runs_on', evidence: 'OrderHub tourne sur srvold77' }],
+      owners: [],
+    },
+    'CR atelier supervision': {
+      page: { kind: 'meeting', period: 'current', topics: [] },
+      applications: [],
+      entities: [{ name: 'srvold77', type: 'server', status: 'decommissioned', evidence: 'Le serveur srvold77 est arrêté depuis mars' }],
+      links: [],
+      owners: [],
+    },
+  };
+  function writePage(dir, title) {
+    const p = pages[title];
+    const d = path.join(dir, 'ESP', `${p.id} - ${title}`);
+    fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, 'metadata.json'), JSON.stringify({ pageId: p.id, title, url: `https://wiki.example.local/pages/${p.id}`, spaceKey: 'ESP', updatedAt: p.updatedAt, version: 1, ancestors: [{ id: '1', title: 'Accueil' }] }));
+    fs.writeFileSync(path.join(d, 'page.html'), p.html);
+  }
+  let repo;
+  let perimeter;
+  let fake;
+  beforeEach(() => {
+    repo = createRepo(openStore(':memory:'));
+    const dir = tmp();
+    fs.writeFileSync(path.join(dir, 'perimeter.json'), JSON.stringify({ applications: [{ name: 'OrderHub' }] }));
+    perimeter = loadPerimeter(path.join(dir, 'perimeter.json'));
+    inventory(repo, ['srvorh01']);
+    fake = fakeLlm();
+    fake.state.answer = (title) => readings[title];
+  });
+  const run = (exportDir) => runConfluenceSync({ repo, exportDir, llm: fake.llm, perimeter, naemonHosts: ['srvold77'], reportsDir: null, now: NOW, log: silent });
+  const trust = () => repo.edgesTo(SRV).find((e) => e.type === 'runs_on').attrs.trust;
+
+  test('a page read later in the same pass that says the server is stopped: the link goes to validate', async () => {
+    const dir = tmp();
+    writePage(dir, 'OrderHub - Serveurs');
+    writePage(dir, 'CR atelier supervision');
+    await run(dir);
+    assert.equal(trust(), 'toValidate');
+    // passage suivant sans changement : rien n'est relu ni revérifié
+    const again = await run(dir);
+    assert.deepEqual([again.stats.skipped, again.stats.reverified, again.stats.read], [2, 0, 0]);
+  });
+
+  test('a page added later: the other pages are verified again, without AI, at the next pass', async () => {
+    const dir = tmp();
+    writePage(dir, 'OrderHub - Serveurs');
+    await run(dir);
+    assert.equal(trust(), 'added');
+    writePage(dir, 'CR atelier supervision');
+    await run(dir);
+    const calls = fake.state.calls.length;
+    const third = await run(dir);
+    assert.equal(fake.state.calls.length, calls);
+    assert.equal(third.stats.reverified, 1);
+    assert.equal(trust(), 'toValidate');
+  });
+});

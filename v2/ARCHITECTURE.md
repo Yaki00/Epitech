@@ -114,15 +114,15 @@ reconnaissance d'application. Tout ce qui dépend des conventions va dans les co
 ### Formes
 
 ```
-Reading  = { page: { kind, period, env, envEvidence, topics[] },
+Reading  = { page: { kind, period, periodEvidence, env, envEvidence, topics[] },
              applications: [{ name, written, role: subject|cited, evidence }],
              entities:     [{ name, type, env, status: active|decommissioned|planned, ip?, evidence }],
-             links:        [{ from, to, type, period|null, evidence }],
+             links:        [{ from, to, type, period|null, periodEvidence, evidence }],
              owners:       [{ name, kind: person|team, application, role: owner|support|oncall|other, evidence }] }
 
 Verified = { kind, period, env, topics,
              apps:    [{ appId, role, written, evidence }],
-             servers: [{ nodeId|null, name, ip, env, status, inInventory, corroborated, evidence }],
+             servers: [{ nodeId|null, name, ip, env, status, inInventory, corroborated, disputed, evidence }],
              links:   [{ src, dst, type, trust, period, evidence }],
              owners:  [{ appId, name, kind, role, period, evidence }],
              rejected: [{ what, reason: no_evidence|evidence_mismatch|not_in_header|unknown_application|out_of_scope }] }
@@ -130,7 +130,12 @@ Verified = { kind, period, env, topics,
 
 L'en-tête envoyé à l'IA porte la date du jour (`Date du jour : AAAA-MM-JJ`, heure locale du serveur) pour juger la période (« Plan
 2026 » est actuel en 2026) ; elle n'entre pas dans le texte où les citations sont cherchées. Chaque lien peut porter sa propre période
-(page qui mêle l'existant et une cible, historique qui va jusqu'à aujourd'hui) ; sans période propre, il prend celle de la page. Un lien
+(page qui mêle l'existant et une cible, historique qui va jusqu'à aujourd'hui) ; sans période propre, il prend celle de la page. Une
+période ancienne ou cible n'est gardée que si elle est prouvée : pour la page, sa citation (`periodEvidence`) se retrouve dans la page et
+contient un mot de cette période (obsolète, archivée, historique, remplacée, cible, prévue, projet...), ou le titre et les pages parentes en
+contiennent un ; pour un lien, la même période que la page, ou sa citation (`periodEvidence` ou `evidence`) qui contient un tel mot. Une date
+ou une année seule ne prouve rien (« Cartographie 2024 », « Note de version 7.3 ») : la page est alors actuelle (rejet `période de la page (past)`) et le
+lien prend la période de la page. Un lien
 dit actuel dans une page ancienne est au mieux `toValidate` (sauf `confirmed` par l'inventaire). L'environnement de la page n'est
 retenu que si sa citation (`envEvidence`) se retrouve dans l'en-tête (titre, pages parentes) et contient un mot qui le désigne (`PRD`,
 `production`, synonymes du bloc `environnements` de `mappings.json`) : jamais déduit d'une section, d'une phrase ou des serveurs
@@ -152,6 +157,7 @@ application ». `trust` d'un lien vaut `confirmed`, `added`, `toValidate` ou `ot
 | S dans l'inventaire, rattaché à une autre application | `otherApp` : non écrit, compté dans le contrôle de la page |
 | S hors inventaire, supervisé par Naemon ou page actuelle modifiée depuis moins de 730 jours disant S actif (cette page, ou une autre page non retirée déjà écrite : liens `mentions`) | `added` : écrit, serveur marqué `outOfInventory`, compte dans l'impact |
 | S hors inventaire sans corroboration (ou période illisible) | `toValidate` : écrit, inactif, listé dans `/api/gaps` |
+| S hors inventaire dit arrêté par une autre page non retirée, actuelle ou plus récente que celle-ci (`disputed`) | `toValidate`, même s'il est supervisé par Naemon ou cité actif ailleurs |
 | page ancienne ou cible, S décommissionné ou prévu | écrit avec `period` `past` ou `target`, inactif |
 
 Un lien est **inactif** s'il est retiré, ancien, cible ou à valider (`isInactiveEdge`). Les liens inactifs sont ignorés par l'impact, les
@@ -168,8 +174,11 @@ lecture gardée, si son contenu ou `readingHash` ont changé, ou avec `--force`.
 et l'écriture sont refaites à partir de la lecture gardée (`attrs.reading`), sans IA. Sinon la page est sautée. Une page en erreur garde sa
 lecture, son empreinte et ses rejets précédents et est reprise au passage suivant. L'année de lecture est gardée (`readingYear`) :
 l'année suivante, seules les pages dont la lecture a une période ancienne ou cible (page ou lien) sont relues. En fin de passage, les
-pages vérifiées pendant le passage dont un lien est resté `toValidate` sont vérifiées et écrites une seconde fois, sans IA : la règle
-« base d'une autre application » et la corroboration par une autre page ne dépendent alors plus de l'ordre de lecture. La première analyse après la mise à jour relit donc toutes
+pages vérifiées pendant le passage dont un lien est resté `toValidate`, ou qui citent un serveur hors inventaire, sont vérifiées et écrites
+une seconde fois, sans IA : la règle « base d'une autre application », la corroboration par une autre page et le serveur dit arrêté ailleurs
+ne dépendent alors plus de l'ordre de lecture. `verifyHash` compte aussi les citations « arrêté » des serveurs hors inventaire : une page
+nouvelle ou modifiée qui dit un tel serveur arrêté fait revérifier, sans IA, les pages sautées au passage suivant (les pages vérifiées pendant
+le passage prennent l'empreinte de fin). La première analyse après la mise à jour relit donc toutes
 les pages. Sans IA, les pages sont stockées et rien n'est déduit.
 
 ### Consignes, environnements, équipes

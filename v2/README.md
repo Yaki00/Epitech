@@ -191,7 +191,11 @@ L'inventaire (APM, marketplace) reste la référence pour « quel serveur appart
 | S est dans l'inventaire, rattaché à une autre application | aucun lien ajouté, écart « autre application » signalé |
 | S est hors inventaire, supervisé par Naemon ou cité actif par une page actuelle modifiée depuis moins de 24 mois | lien ajouté, S marqué « Hors inventaire », compté dans l'impact |
 | S est hors inventaire et rien ne le corrobore | lien « À valider » : grisé, hors impact par défaut, listé dans le rapport d'écarts |
+| S est hors inventaire et une autre page actuelle (ou plus récente) le dit arrêté | lien « À valider », même si Naemon le supervise encore |
 | la page est ancienne ou décrit une cible, ou S est dit décommissionné ou prévu | lien gardé avec sa période (« Ancien », « Cible »), hors impact et hors carte par défaut |
+
+Une page n'est ancienne ou cible que si l'IA cite la phrase qui le prouve (« obsolète », « archivée », « architecture cible », « prévu »...)
+ou si son titre le dit : une année seule (« Cartographie 2024 ») ou un numéro de version ne suffit pas, la page reste actuelle.
 
 Les liens entre applications, vers les bases et entre bases et serveurs n'existent pas dans les inventaires : ils viennent des pages
 actuelles. Dans l'interface, la case « Afficher retirés, anciens et à valider » les rend visibles.

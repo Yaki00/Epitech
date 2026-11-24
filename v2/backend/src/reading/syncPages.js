@@ -11,9 +11,10 @@
  *  - sinon la page est sautée.
  * Sans IA : la page est lue et stockée, rien n'est déduit (`stats.notRead`). Lecture en échec : la
  * page garde sa lecture précédente (rien n'est purgé) et passe en erreur, reprise au passage suivant.
- * En fin de passage, les pages vérifiées dont un lien est resté à valider sont vérifiées et écrites une
- * seconde fois, sans IA : la règle « base d'une autre application » et la corroboration par une autre
- * page lisent le graphe, qui est alors complet quel que soit l'ordre de lecture.
+ * En fin de passage, les pages vérifiées dont un lien est resté à valider, ou qui citent un serveur hors
+ * inventaire, sont vérifiées et écrites une seconde fois, sans IA : la règle « base d'une autre
+ * application », la corroboration par une autre page et le serveur dit arrêté ailleurs lisent le graphe,
+ * qui est alors complet quel que soit l'ordre de lecture.
  * Après le passage, les nœuds créés par des lectures qui n'ont plus aucun lien actif sont marqués
  * retirés (jamais supprimés), sauf les personnes et équipes (anciens responsables montrés comme tels). Les rapports CSV sont tirés du graphe et des lignes document.
  */
@@ -44,8 +45,10 @@ function readingHashOf({ consignes, matcher }) {
  * Empreinte de ce qui change la vérification sans changer la lecture : serveurs des inventaires
  * (nom, IP, FQDN), liens runs_on des inventaires, hôtes Naemon hors inventaire.
  * Seules les sources d'inventaire comptent : un lien ajouté par une lecture changerait l'empreinte
- * après chaque passage. Le mois en cours (AAAA-MM) y entre aussi : la corroboration par une page
- * modifiée depuis moins de 24 mois est réévaluée chaque mois.
+ * après chaque passage. Exception : les citations d'un serveur hors inventaire comme arrêté (une page
+ * nouvelle ou modifiée qui dit un serveur arrêté fait revérifier les autres pages au passage suivant).
+ * Le mois en cours (AAAA-MM) y entre aussi : la corroboration par une page modifiée depuis moins de
+ * 24 mois est réévaluée chaque mois.
  */
 function verifyHashOf(repo, naemonHosts, now = Date.now()) {
   const servers = repo
@@ -57,8 +60,17 @@ function verifyHashOf(repo, naemonHosts, now = Date.now()) {
     .filter((e) => e.type === 'runs_on' && !DOC_SOURCES.has(e.source) && !e.attrs.retired)
     .map((e) => `${e.src}>${e.dst}`)
     .sort();
+  const stopped = repo
+    .allEdges()
+    .filter((e) => e.type === 'mentions' && !e.attrs.retired && e.attrs.status === 'decommissioned')
+    .filter((e) => {
+      const n = repo.getNode(e.dst);
+      return Boolean(n && n.type === 'server' && n.attrs.outOfInventory);
+    })
+    .map((e) => `${e.src}>${e.dst}:${e.attrs.period || ''}`)
+    .sort();
   const month = new Date(now).toISOString().slice(0, 7);
-  return sha256(JSON.stringify([servers, links, [...naemonHosts].sort(), month])).slice(0, 16);
+  return sha256(JSON.stringify([servers, links, [...naemonHosts].sort(), month, stopped])).slice(0, 16);
 }
 
 /** Texte d'une page pour le résumé IA : titres et paragraphes, 4000 caractères au plus. */
@@ -151,6 +163,8 @@ async function runConfluenceSync({
   const { today, year } = localDay(now);
   /** Pages vérifiées pendant ce passage dont un lien est resté à valider : revues une fois en fin de passage. */
   const recheck = new Map();
+  /** Pages vérifiées et écrites pendant ce passage (leur empreinte est mise à jour en fin de passage). */
+  const verifiedNow = new Set();
 
   /** Ajoute (sign 1) ou retire (sign -1) aux compteurs ce qu'une page a produit. */
   function count(res, sign) {
@@ -192,15 +206,16 @@ async function runConfluenceSync({
     const subject = verified.apps.some((a) => a.role === 'subject');
     repo.patchNodeAttrs(docNodeId, { excerpt: subject ? pageExcerpt(page) : undefined });
     repo.saveDocument({ ...docBase, status: 'enriched', attrs: { ...rowAttrs, ...readingAttrs, reading, verifyHash, rejected: verified.rejected } });
+    verifiedNow.add(docBase.id);
     return { out, verified };
   }
 
   function applyAndSave(ctx, reading, readingAttrs) {
     const res = verifyAndWrite(ctx, reading, readingAttrs);
     count(res, 1);
-    // un lien à valider peut dépendre du graphe (base d'une autre application, serveur cité ailleurs) :
-    // la page est revue en fin de passage, quand toutes les pages du passage sont écrites
-    if (res.verified.links.some((l) => l.trust === 'toValidate')) recheck.set(ctx.p.id, { ctx, reading, readingAttrs, res });
+    // un lien à valider, ou un serveur hors inventaire, dépend du graphe (base d'une autre application,
+    // serveur cité actif ou arrêté ailleurs) : la page est revue en fin de passage, quand toutes les pages sont écrites
+    if (res.verified.links.some((l) => l.trust === 'toValidate') || res.verified.servers.some((s) => !s.inInventory)) recheck.set(ctx.p.id, { ctx, reading, readingAttrs, res });
     else recheck.delete(ctx.p.id);
   }
 
@@ -217,6 +232,22 @@ async function runConfluenceSync({
       }
     }
     recheck.clear();
+  }
+
+  /**
+   * Les citations « serveur arrêté » écrites pendant ce passage changent l'empreinte : les pages vérifiées
+   * pendant ce passage l'ont été sur le graphe complet (revue de fin de passage) et prennent l'empreinte de
+   * fin ; les autres gardent l'ancienne et sont revérifiées, sans IA, au passage suivant.
+   */
+  function markVerifiedWithEndHash() {
+    const endHash = verifyHashOf(repo, naemon, now);
+    if (endHash === verifyHash) return;
+    for (const id of verifiedNow) {
+      const d = repo.getDocument(id);
+      if (!d || d.status !== 'enriched' || !d.attrs || d.attrs.verifyHash !== verifyHash) continue;
+      const { source, title, url, version, updated_at: updatedAt, content_hash: contentHash, status, error } = d;
+      repo.saveDocument({ id, source, title, url, version, updatedAt, contentHash, status, error, attrs: { ...d.attrs, verifyHash: endHash } });
+    }
   }
 
   /**
@@ -347,6 +378,7 @@ async function runConfluenceSync({
     }
     await Promise.all(inflight);
     recheckPages();
+    markVerifiedWithEndHash();
 
     stats.retired = retireOrphans(repo, now);
     const reports = reportsDir ? writeReports(repo, matcher, reportsDir) : [];

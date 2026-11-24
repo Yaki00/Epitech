@@ -207,7 +207,7 @@ describe('serveurs cités seulement comme anciens', () => {
     });
     const ctx = { pageText: 'OrderHub sur srvx01' };
     apply(env, verify(env, reading('active'), ctx), '1');
-    apply(env, verify(env, { ...reading('active'), page: { kind: 'architecture', period: 'past', topics: [] } }, ctx), '2', 'past');
+    apply(env, verify(env, { ...reading('active'), page: { kind: 'architecture', period: 'past', topics: [] } }, { ...ctx, headerText: 'Titre : Ancienne architecture (archivée)' }), '2', 'past');
     retireOrphans(env.repo, NOW);
     assert.equal(env.repo.getNode('server:srvx01').attrs.retired, undefined);
     assert.deepEqual(computeGaps(env.repo, null).citedNotInInventory, ['srvx01']);
@@ -266,7 +266,7 @@ describe('appels entrants', () => {
     assert.deepEqual(det.usedBy.map((u) => [u.id, u.active, u.retired, u.trust, u.period]), [['application:billing', true, false, 'added', 'current']]);
     // même appel lu dans une page ancienne
     const env2 = setup();
-    apply(env2, verify(env2, { ...probeReading(), page: { kind: 'architecture', period: 'past', topics: [] } }), '1', 'past');
+    apply(env2, verify(env2, { ...probeReading(), page: { kind: 'architecture', period: 'past', topics: [] } }, { headerText: 'Titre : Ancienne architecture (archivée)' }), '1', 'past');
     const old = applicationDetail(env2.repo, 'application:orderhub').usedBy;
     assert.deepEqual(old.map((u) => [u.id, u.active, u.retired, u.period]), [['application:billing', false, true, 'past']]);
   });
@@ -333,7 +333,7 @@ describe('responsables de période inconnue et anciens seulement', () => {
       entities: [],
       links: [],
       owners: [{ name: 'Bruno Petit', kind: 'person', application: 'OrderHub', role: 'owner', evidence: 'Responsable : Bruno Petit' }],
-    }, { pageText: 'Responsable : Bruno Petit' });
+    }, { pageText: 'Responsable : Bruno Petit', headerText: 'Titre : Exploitation (archivée)' });
     apply(env, v);
     const teams = listTeams(env.repo);
     const unassigned = teams.find((t) => t.kind === 'unassigned');
