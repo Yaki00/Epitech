@@ -75,6 +75,8 @@ describe('verifyFiches', () => {
     const r = run(fiche({ kind: 'procedure', lists: { steps: [...steps, it_('redémarrer le service', 'Étape 1 : redémarrer le service')] } }));
     assert.deepEqual(r.fiches[0].lists.steps.map((s) => s.text), ['redémarrer le service']);
     assert.equal(r.rejected.filter((x) => x.reason === 'secret').length, 6);
+    const leak = JSON.stringify(r.rejected);
+    for (const v of ['Azerty12', 'abc123', 'xyz', 'zzz', 'tokens', 'secrets', 'mot de passe']) assert.ok(!leak.includes(v), v);
   });
 
   test('secret in keywords or section is dropped', () => {
@@ -82,6 +84,8 @@ describe('verifyFiches', () => {
     assert.equal(r.fiches[0].section, null);
     assert.deepEqual(r.fiches[0].keywords, ['lenteur']);
     assert.equal(r.rejected.filter((x) => x.reason === 'secret').length, 2);
+    const leak = JSON.stringify(r.rejected);
+    for (const v of ['Azerty12', 'abc123', 'xyz', 'zzz', 'tokens', 'secrets', 'mot de passe']) assert.ok(!leak.includes(v), v);
   });
 
   test('email and phone never kept', () => {

@@ -40,11 +40,11 @@ function verifyFiches(reading, ctx) {
   const rejected = [];
 
   /** Élément vérifié et nettoyé, ou null (rejet noté). */
-  function check(item) {
+  function check(item, label = 'fiche') {
     if (!item) return null;
     const what = item.text;
     if (SECRET.test(item.text) || SECRET.test(item.evidence)) {
-      rejected.push({ what, reason: 'secret' });
+      rejected.push({ what: `élément masqué (secret) : ${label}`, reason: 'secret' });
       return null;
     }
     if (!hasEvidence(pageText, item.evidence)) {
@@ -59,30 +59,30 @@ function verifyFiches(reading, ctx) {
     const evidence = cleanEvidence(item.evidence, true);
     return text && evidence ? { text, evidence } : null;
   }
-  const checkAll = (items) => (items || []).map(check).filter(Boolean);
+  const checkAll = (items, label) => (items || []).map((i) => check(i, label)).filter(Boolean);
 
   const fiches = [];
   for (const f of (reading && reading.fiches) || []) {
-    const title = check(f.title);
+    const title = check(f.title, 'title');
     if (!title) continue;
     const fields = {};
     for (const [name, it] of Object.entries(f.fields || {})) {
-      const v = check(it);
+      const v = check(it, `fields.${name}`);
       if (v) fields[name] = v;
     }
     const lists = {};
-    for (const [name, items] of Object.entries(f.lists || {})) lists[name] = checkAll(items);
+    for (const [name, items] of Object.entries(f.lists || {})) lists[name] = checkAll(items, `lists.${name}`);
 
     const appIds = [];
     const serverIds = [];
     const unresolved = [];
     const addUnique = (arr, v) => { if (!arr.includes(v)) arr.push(v); };
-    for (const a of checkAll(f.apps)) {
+    for (const a of checkAll(f.apps, 'apps')) {
       const hit = matcher && matcher.resolveAppName(a.text);
       if (hit) addUnique(appIds, hit.app.id);
       else addUnique(unresolved, a.text);
     }
-    for (const s of checkAll(f.servers)) {
+    for (const s of checkAll(f.servers, 'servers')) {
       const node = repo.resolve(s.text).find((n) => n.type === 'server');
       if (node) addUnique(serverIds, node.id);
       else addUnique(unresolved, s.text);
@@ -96,18 +96,18 @@ function verifyFiches(reading, ctx) {
     }
     const keywords = [];
     for (const k of f.keywords || []) {
-      if (SECRET.test(k)) { rejected.push({ what: k, reason: 'secret' }); continue; }
+      if (SECRET.test(k)) { rejected.push({ what: 'élément masqué (secret) : keywords', reason: 'secret' }); continue; }
       const c = cleanName(k, true);
       if (c) keywords.push(c);
     }
     let section = null;
-    if (f.section && SECRET.test(f.section)) rejected.push({ what: f.section, reason: 'secret' });
+    if (f.section && SECRET.test(f.section)) rejected.push({ what: 'élément masqué (secret) : section', reason: 'secret' });
     else if (f.section) section = cleanName(f.section, true) || null;
 
     fiches.push({
       kind: f.kind, title, section,
-      date: check(f.date), fields, lists, appIds, serverIds, unresolved, tickets, keywords,
-      replaces: check(f.replaces), fixes: check(f.fixes),
+      date: check(f.date, 'date'), fields, lists, appIds, serverIds, unresolved, tickets, keywords,
+      replaces: check(f.replaces, 'replaces'), fixes: check(f.fixes, 'fixes'),
     });
   }
   return { fiches, rejected };
