@@ -208,6 +208,35 @@ function giveUp(ctx, lang) {
   return searched ? NOTHING[lang === 'en' ? 'en' : 'fr'] : FAILED;
 }
 
+const LAST_TURN = {
+  fr: `Tu n'as plus d'appel d'outil. Réponds maintenant à la question avec ce que les outils ont rendu, en citant titres et liens. Si rien ne répond à la question, réponds exactement : ${NOTHING.fr}`,
+  en: `You have no tool call left. Answer the question now with what the tools returned, quoting titles and links. If nothing answers the question, answer exactly: ${NOTHING.en}`,
+};
+const JSON_LAST = { fr: ' Réponds seulement par {"answer": "<ta réponse>"}.', en: ' Reply only with {"answer": "<your answer>"}.' };
+
+/** Étapes épuisées : un dernier appel sans outils ; texte vide, erreur ou nouvel appel d'outil : l'abandon habituel. */
+async function lastTurn({ llm, messages, lang, ctx, json }) {
+  const l = lang === 'en' ? 'en' : 'fr';
+  const msgs = [...messages, { role: 'user', content: LAST_TURN[l] + (json ? JSON_LAST[l] : '') }];
+  try {
+    const res = await llm.chat({ task: 'chat', messages: msgs, ...(json ? { json: true } : {}), temperature: 0.2, maxTokens: 1500, cache: false });
+    if (json) {
+      let msg;
+      try {
+        msg = parseLlmJson(res.content);
+      } catch {
+        return String(res.content || '').trim() || null; // texte libre : rendu tel quel
+      }
+      return msg && typeof msg.answer === 'string' && msg.answer.trim() ? msg.answer : null;
+    }
+    if (res.toolCalls && res.toolCalls.length) return null;
+    return String(res.content || '').trim() || null;
+  } catch (err) {
+    if (ctx.logger) ctx.logger.warn('dernier tour du chat en échec', { type: err && err.name });
+    return null;
+  }
+}
+
 async function askNative({ llm, repo, messages, toolTrace, maxRounds, lang, ctx }) {
   for (let round = 0; round < maxRounds; round++) {
     const res = await llm.chat({ task: 'chat', messages, tools: TOOLS, temperature: 0.2, maxTokens: 1500, cache: false });
@@ -225,7 +254,8 @@ async function askNative({ llm, repo, messages, toolTrace, maxRounds, lang, ctx 
       messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) });
     }
   }
-  return { answer: giveUp(ctx, lang), toolTrace };
+  const last = await lastTurn({ llm, messages, lang, ctx, json: false });
+  return { answer: last || giveUp(ctx, lang), toolTrace };
 }
 
 async function askJson({ llm, repo, messages, toolTrace, maxRounds, lang, ctx }) {
@@ -246,7 +276,8 @@ async function askJson({ llm, repo, messages, toolTrace, maxRounds, lang, ctx })
     messages.push({ role: 'assistant', content: res.content });
     messages.push({ role: 'user', content: `Résultat de ${msg.tool} :\n${JSON.stringify(result)}` });
   }
-  return { answer: giveUp(ctx, lang), toolTrace };
+  const last = await lastTurn({ llm, messages, lang, ctx, json: true });
+  return { answer: last || giveUp(ctx, lang), toolTrace };
 }
 
 /** La passerelle refuse-t-elle le champ tools ? (HTTP 400 qui parle d'outils) */

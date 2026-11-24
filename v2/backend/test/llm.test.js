@@ -584,31 +584,95 @@ describe('assistant ask (documentation)', () => {
     assert.deepEqual(r.removedLinks, []);
   });
 
+  const refused = { status: 422, body: 'refus' }; // dernier tour refusé sans nouvelle tentative
   const loopSearch = (n, query = 'rien du tout') => Array.from({ length: n }, (_, i) => ({ status: 200, body: reply('', { tool_calls: [toolCall(String(i), 'search_knowledge', { query })] }) }));
 
   test('search finds nothing until maxRounds: fixed nothing-found answer (fr, en, json mode)', async () => {
     const w = world({ withFiche: false });
-    const { r } = await run(w, loopSearch(3), { maxRounds: 3 });
+    const { r } = await run(w, [...loopSearch(3), refused], { maxRounds: 3 });
     assert.equal(r.answer, 'Rien trouvé dans la documentation pour cette question.');
     assert.deepEqual([r.sources, r.removedLinks], [[], []]);
-    const { r: en } = await run(w, loopSearch(3), { maxRounds: 3, lang: 'en' });
+    const { r: en } = await run(w, [...loopSearch(3), refused], { maxRounds: 3, lang: 'en' });
     assert.equal(en.answer, 'Nothing found in the documentation for this question.');
-    const js = Array.from({ length: 2 }, () => ({ status: 200, body: reply('{"tool":"search_knowledge","arguments":{"query":"x"}}') }));
+    const js = [...Array.from({ length: 2 }, () => ({ status: 200, body: reply('{"tool":"search_knowledge","arguments":{"query":"x"}}') })), refused];
     const { r: j } = await run(w, js, { maxRounds: 2, toolsMode: 'json' });
     assert.equal(j.answer, 'Rien trouvé dans la documentation pour cette question.');
   });
 
   test('looping while a search returned fiches keeps the give-up message', async () => {
     const w = world();
-    const { r } = await run(w, loopSearch(2, 'file Q.MRL.EVT saturee'), { maxRounds: 2 });
+    const { r } = await run(w, [...loopSearch(2, 'file Q.MRL.EVT saturee'), refused], { maxRounds: 2 });
     assert.match(r.answer, /pas pu conclure/);
   });
 
   test('looping without any search keeps the give-up message', async () => {
     const w = world({ withFiche: false });
     const rounds = Array.from({ length: 2 }, (_, i) => ({ status: 200, body: reply('', { tool_calls: [toolCall(String(i), 'search_entities', { query: 'x' })] }) }));
-    const { r } = await run(w, rounds, { maxRounds: 2 });
+    const { r } = await run(w, [...rounds, refused], { maxRounds: 2 });
     assert.match(r.answer, /pas pu conclure/);
+  });
+
+  describe('steps exhausted: one last call without tools', () => {
+    const FINAL = 'Voir File pleine https://wiki.example.local/7001';
+    const jsonLoop = (n) => Array.from({ length: n }, () => ({ status: 200, body: reply('{"tool":"search_knowledge","arguments":{"query":"file Q.MRL.EVT saturee"}}') }));
+
+    test('native: the last call has no tools, its answer is returned and goes through the link check', async () => {
+      const w = world();
+      const { r, f } = await run(w, [...loopSearch(2, 'file Q.MRL.EVT saturee'), { status: 200, body: reply(`${FINAL} et https://evil.example.com/x`) }], { maxRounds: 2 });
+      assert.equal(f.calls.length, 3);
+      assert.ok(f.calls[0].body.tools);
+      assert.equal(f.calls[2].body.tools, undefined);
+      assert.match(f.calls[2].body.messages.at(-1).content, /Rien trouvé dans la documentation pour cette question\./);
+      assert.equal(f.calls[2].body.messages.at(-1).role, 'user');
+      assert.equal(r.answer, `${FINAL} et`);
+      assert.deepEqual(r.removedLinks, ['https://evil.example.com/x']);
+      assert.equal(r.sources.length, 1);
+      assert.equal(r.toolTrace.length, 2);
+    });
+
+    test('native: english instruction when lang is en', async () => {
+      const w = world();
+      const { f } = await run(w, [...loopSearch(1, 'file Q.MRL.EVT saturee'), { status: 200, body: reply('Done') }], { maxRounds: 1, lang: 'en' });
+      assert.match(f.calls[1].body.messages.at(-1).content, /Nothing found in the documentation for this question\./);
+    });
+
+    test('native: the last call failing, empty, or asking for tools falls back to the give-up message', async () => {
+      const w = world();
+      const a = await run(w, [...loopSearch(2, 'file Q.MRL.EVT saturee'), refused], { maxRounds: 2 });
+      assert.match(a.r.answer, /pas pu conclure/);
+      const b = await run(w, [...loopSearch(2, 'file Q.MRL.EVT saturee'), { status: 200, body: reply('') }], { maxRounds: 2 });
+      assert.match(b.r.answer, /pas pu conclure/);
+      const c = await run(w, [...loopSearch(3, 'file Q.MRL.EVT saturee')], { maxRounds: 2 });
+      assert.match(c.r.answer, /pas pu conclure/);
+      assert.equal(c.r.toolTrace.length, 2);
+    });
+
+    test('native: the formula from the last call empties the sources', async () => {
+      const w = world();
+      const { r } = await run(w, [...calls(w), ...loopSearch(0), { status: 200, body: reply('Rien trouvé dans la documentation pour cette question.') }], { maxRounds: 2 });
+      assert.equal(r.answer, 'Rien trouvé dans la documentation pour cette question.');
+      assert.deepEqual(r.sources, []);
+    });
+
+    test('json: the last call asks for {"answer"} only and its answer is returned', async () => {
+      const w = world();
+      const { r, f } = await run(w, [...jsonLoop(2), { status: 200, body: reply(JSON.stringify({ answer: FINAL })) }], { maxRounds: 2, toolsMode: 'json' });
+      assert.equal(f.calls.length, 3);
+      assert.match(f.calls[2].body.messages.at(-1).content, /Réponds seulement par \{"answer"/);
+      assert.match(f.calls[2].body.messages.at(-1).content, /Rien trouvé dans la documentation/);
+      assert.equal(r.answer, FINAL);
+      assert.equal(r.sources.length, 1);
+    });
+
+    test('json: failure, empty, or another tool call falls back; the formula empties the sources', async () => {
+      const w = world();
+      const a = await run(w, [...jsonLoop(2), refused], { maxRounds: 2, toolsMode: 'json' });
+      assert.match(a.r.answer, /pas pu conclure/);
+      const b = await run(w, [...jsonLoop(3)], { maxRounds: 2, toolsMode: 'json' });
+      assert.match(b.r.answer, /pas pu conclure/);
+      const c = await run(w, [...jsonLoop(2), { status: 200, body: reply(JSON.stringify({ answer: 'Rien trouvé dans la documentation pour cette question.' })) }], { maxRounds: 2, toolsMode: 'json' });
+      assert.deepEqual([c.r.answer, c.r.sources], ['Rien trouvé dans la documentation pour cette question.', []]);
+    });
   });
 
   test('open_fiche throwing does not break the chat', async () => {
