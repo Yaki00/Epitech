@@ -51,7 +51,12 @@ const OWNER_PATTERNS = [/\bqui (s'occupe|est responsable|gere|est le responsable
 const askedOwners = (q) => OWNER_PATTERNS.some((re) => re.test(q));
 
 /** « Comment… », « Erreur… », « Incident… » : question de dépannage ou de procédure, réponse tirée des fiches. */
-const DOC_PATTERNS = [/^(comment|how)\b/, /\b(erreur|error)\b/, /\bincident\b/, /\bprocedure\b/];
+const DOC_PATTERNS = [
+  /^(comment|how)\b.*\b(relanc|redemarr|purg|restaur|restor|rotation|renouvel|bascul|reparer|corrig|resoudre|debloqu|deploy|install|restart|reboot|purge|fix|resolve|unblock|renew|recover)/,
+  /\b(erreur|error)\b/,
+  /\bincident\b/,
+  /\bprocedure\b/,
+];
 const askedDocumentation = (q) => DOC_PATTERNS.some((re) => re.test(q));
 
 const question2text = (q) => norm(q).replace(/[\u2019`]/g, "'").replace(/\s+/g, ' ');
@@ -147,7 +152,9 @@ function createChatMock(repo) {
 
     // 1er temps : choix de l'outil
     const question = String(last.content || '');
-    if (askedDocumentation(question2text(question))) {
+    const qt = question2text(question);
+    // les questions de responsables, de dépendances ou d'impact gardent leurs outils ; la documentation vient ensuite
+    if (!askedOwners(qt) && !askedDependencies(qt) && !IMPACT_PATTERNS.some((re) => re.test(qt)) && askedDocumentation(qt)) {
       const args = { query: question };
       if (jsonMode) return completion({ role: 'assistant', content: JSON.stringify({ tool: 'search_knowledge', arguments: args }) });
       return completion({ role: 'assistant', content: '', tool_calls: [{ id: 'call_demo_1', type: 'function', function: { name: 'search_knowledge', arguments: JSON.stringify(args) } }] });

@@ -266,6 +266,25 @@ describe('mode démo : fiches', () => {
     assert.ok(fiches.some((f) => repo.edgesFrom(f.id).some((e) => e.type === 'corrige')));
   });
 
+  test('questions starting with Comment or How keep their entity tools', async () => {
+    const owners = await ask({ llm, repo, question: "Comment s'appelle le responsable de Vega Facturation ?", knowledge });
+    assert.deepEqual(owners.toolTrace.map((t) => t.tool), ['owners_of']);
+    const count = await ask({ llm, repo, question: 'How many servers does Atlas Paiements have?', knowledge });
+    assert.ok(!count.toolTrace.some((t) => t.tool === 'search_knowledge'));
+    const deps = await ask({ llm, repo, question: 'How does Helios Commandes depend on what?', knowledge });
+    assert.deepEqual(deps.toolTrace.map((t) => t.tool), ['dependencies']);
+    const proc = await ask({ llm, repo, question: 'Comment relancer Atlas Paiements ?', knowledge });
+    assert.deepEqual(proc.toolTrace.map((t) => t.tool), ['search_knowledge']);
+  });
+
+  test('fiche quotes appear in the demo page text', () => {
+    for (const f of fiches) {
+      const doc = repo.getNode(f.attrs.docId);
+      assert.ok(doc.attrs.excerpt.includes(f.attrs.title), f.id);
+      assert.equal(doc.attrs.updatedAt, f.attrs.updatedAt, f.id);
+    }
+  });
+
   test('demo chat answers a procedure question with sources', async () => {
     for (const q of ["Comment relancer l'encaissement d'Atlas Paiements ?", 'Erreur SMTP-451 sur Vega Facturation', 'Incident sur les commandes bloquées']) {
       const r = await ask({ llm, repo, question: q, knowledge });
@@ -274,7 +293,7 @@ describe('mode démo : fiches', () => {
       assert.ok(r.sources.length >= 1, q);
       assert.ok(r.answer.includes(r.sources[0].url), q);
     }
-    const none = await ask({ llm, repo, question: 'Comment zzzqqq ?', knowledge });
+    const none = await ask({ llm, repo, question: 'Incident zzzqqq', knowledge });
     assert.equal(none.sources.length, 0);
     assert.ok(/rien trouvé/.test(none.answer));
   });

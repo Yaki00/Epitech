@@ -395,6 +395,16 @@ function generateDemo(repo, history, { seed = 42, now = Date.now(), dir = null }
     byPage.get(page.pid).list.push({ ...base, ...d.fiche, appIds: [appId(d.app)] });
   }
   for (const { page, daysAgo, period, list } of byPage.values()) {
+    // la page contient les phrases citées par ses fiches, et sa date est celle des fiches
+    const texts = [];
+    for (const f of list) {
+      for (const x of [f.title, f.replaces, f.fixes, ...Object.values(f.fields), ...Object.values(f.lists).flat()]) if (x) texts.push(x.text, x.evidence);
+    }
+    const node = repo.getNode(page.docId);
+    const stamp = new Date(now - daysAgo * DAY).toISOString();
+    repo.patchNodeAttrs(page.docId, { excerpt: [node.attrs.excerpt, ...new Set(texts)].join('. '), updatedAt: stamp });
+    const row = repo.store.data.documents.get(page.docId);
+    if (row) row.updated_at = stamp;
     applyFiches(repo, list, { pageId: page.pid, docNodeId: page.docId, page: { title: repo.getNode(page.docId).name, url: `${WIKI}/${page.pid}`, updatedAt: new Date(now - daysAgo * DAY).toISOString() }, period });
   }
   linkFiches(repo);
