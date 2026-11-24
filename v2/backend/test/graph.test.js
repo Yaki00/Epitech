@@ -122,3 +122,62 @@ describe('impact et liens inactifs', () => {
     assert.equal(isInactiveEdge({ attrs: {} }), false);
   });
 });
+
+describe('fiches et graphe', () => {
+  const { applyFiches } = require('../src/knowledge/apply');
+  const views = require('../src/api/views');
+  const views2 = require('../src/api/views2');
+  const { docScore } = require('../src/quality/docScore');
+  const { computeGaps } = require('../src/naemon/gaps');
+  const item = (text) => ({ text, evidence: text });
+  const fiche = (over = {}) => ({
+    kind: 'incident', title: item('Lenteur ALTO'), section: null, date: null, fields: {}, lists: { tickets: [] },
+    appIds: ['application:alto'], serverIds: ['server:srvalto01'], unresolved: [], tickets: [], keywords: [], replaces: null, fixes: null, ...over,
+  });
+  const write = () => {
+    const doc = repo.upsertNode({ type: 'document', key: 'confluence-9001', name: 'Page exploitation', source: 'confluence' });
+    return applyFiches(repo, { fiches: [fiche(), fiche({ kind: 'correctif', title: item('Correctif lenteur') })], rejected: [] }, { pageId: '9001', docNodeId: doc, page: { title: 'Page exploitation', url: 'https://wiki.example.local/9001', updatedAt: '2026-11-01' }, period: 'current' });
+  };
+
+  test('impact never follows fiche links', () => {
+    const before = ['server:srvalto01', 'application:alto', 'database:ora_alto'].map((id) => [impactOf(repo, id).total, dependenciesOf(repo, id).total]);
+    const r = write();
+    assert.equal(r.fiches.length, 2);
+    assert.ok(repo.edgesFrom(r.fiches[0]).some((e) => e.type === 'concerne' && e.dst === 'server:srvalto01'));
+    const after = ['server:srvalto01', 'application:alto', 'database:ora_alto'].map((id) => [impactOf(repo, id).total, dependenciesOf(repo, id).total]);
+    assert.deepEqual(after, before);
+    for (const id of ['server:srvalto01', 'application:alto']) {
+      assert.ok(!impactOf(repo, id).items.some((i) => i.type === 'fiche' || i.type === 'document'));
+      assert.ok(!dependenciesOf(repo, id).items.some((i) => i.type === 'fiche'));
+    }
+    // même en désignant le type de lien explicitement, depuis la fiche, rien d'autre que ses propres liens
+    assert.ok(!impactOf(repo, r.fiches[0]).items.length);
+  });
+
+  test('entity search ignores fiches', () => {
+    write();
+    assert.deepEqual(repo.search('lenteur'), []);
+    assert.deepEqual(repo.search('correctif'), []);
+    assert.deepEqual(repo.resolve('Lenteur ALTO'), []);
+    assert.ok(repo.search('alto').length > 0 && repo.search('alto').every((n) => n.type !== 'fiche'));
+  });
+
+  test('fiches change no existing number, map or application detail', () => {
+    repo.patchNodeAttrs('application:alto', { perimeter: true });
+    const snapshot = () => JSON.parse(JSON.stringify({
+      apps: views.listApplications(repo),
+      detail: views.applicationDetail(repo, 'application:alto'),
+      overview: views2.overviewView({ repo }),
+      map: views2.mapView({ repo }, { scope: 'perimeter' }),
+      docScore: docScore(repo, 'application:alto'),
+      gaps: computeGaps(repo, null),
+      servers: views.searchServers(repo, 'srvalto01'),
+      server: views2.serverDetail({ repo }, 'server:srvalto01'),
+    }));
+    repo.upsertNode({ type: 'document', key: 'confluence-9001', name: 'Page exploitation', source: 'confluence' }); // la page existe déjà : seules les fiches s'ajoutent
+    const before = snapshot();
+    write();
+    assert.equal(repo.countByType().fiche, 2);
+    assert.deepEqual(snapshot(), before);
+  });
+});

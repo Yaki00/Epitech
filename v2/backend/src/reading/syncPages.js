@@ -15,9 +15,15 @@
  * inventaire, sont vérifiées et écrites une seconde fois, sans IA : la règle « base d'une autre
  * application », la corroboration par une autre page et le serveur dit arrêté ailleurs lisent le graphe,
  * qui est alors complet quel que soit l'ordre de lecture.
+ * Fiches : une page dont la nature est « d'exploitation » (OPS_KINDS) reçoit, après sa lecture, un second appel
+ * qui en tire des fiches vérifiées (src/knowledge). Leur empreinte (`opsHash`, `opsContentHash`) est propre : une page
+ * dont la lecture est à jour mais pas les fiches ne relance que les fiches. Une fiche en échec n'arrête jamais le
+ * passage et ne met jamais la page en erreur (`stats.ficheErrors`) : elle est reprise au passage suivant.
  * Après le passage, les nœuds créés par des lectures qui n'ont plus aucun lien actif sont marqués
  * retirés (jamais supprimés), sauf les personnes et équipes (anciens responsables montrés comme tels). Les rapports CSV sont tirés du graphe et des lignes document.
  */
+const fs = require('fs');
+const path = require('path');
 const { sha256 } = require('../lib/hash');
 const { writeCsvReport } = require('../lib/report');
 const { readExportPages, exportHash, analyseEntry, loadDiagrams } = require('../ingest/confluenceExport');
@@ -30,10 +36,27 @@ const { readPage, READING_VERSION } = require('./readPage');
 const { pageHeaderLines } = require('./prompt');
 const { verifyReading, DOC_SOURCES } = require('./verify');
 const { applyReading, PAGE_SOURCES, INACTIVE_STATUS } = require('./apply');
+const { OPS_KINDS, OPS_VERSION } = require('../knowledge/schema');
+const { readFiches } = require('../knowledge/readFiches');
+const { verifyFiches, SECRET } = require('../knowledge/verify');
+const { applyFiches, linkFiches, ficheUrl } = require('../knowledge/apply');
 
 const QUIET = { debug() {}, info() {}, warn() {}, error() {} };
-const READING_KEYS = ['reading', 'readingHash', 'readingContentHash', 'readingYear', 'verifyHash', 'rejected', 'rulesCleared'];
-const STEP_FR = { llm: 'lecture IA', verify: 'vérification', apply: 'écriture dans le graphe', parse: 'analyse' };
+const OPS_KEYS = ['opsHash', 'opsContentHash', 'ficheCount'];
+const READING_KEYS = ['reading', 'readingHash', 'readingContentHash', 'readingYear', 'verifyHash', 'rejected', 'rulesCleared', ...OPS_KEYS];
+const STEP_FR = { llm: 'lecture IA', verify: 'vérification', apply: 'écriture dans le graphe', parse: 'analyse', fiches: 'fiches' };
+const pickOps = (attrs) => Object.fromEntries(OPS_KEYS.filter((k) => attrs && attrs[k] !== undefined).map((k) => [k, attrs[k]]));
+
+/** Empreinte de ce qui change la réponse de l'IA pour les fiches : version des fiches, consignes, périmètre. */
+function opsHashOf({ consignes, matcher }) {
+  return sha256([OPS_VERSION, (consignes && consignes.hash) || '', matcher ? matcher.hash : ''].join('|')).slice(0, 16);
+}
+
+/** Message d'une erreur du modèle pour le journal : sans mot de passe ni jeton, court (jamais le contenu d'une page). */
+function safeMessage(err) {
+  const g = new RegExp(SECRET.source, 'gi');
+  return String((err && err.message) || err).replace(g, (m, k) => `${k} : [masqué]`).replace(/\s+/g, ' ').slice(0, 200);
+}
 const hasInventoryRow = (n) => Object.keys(n.attrs || {}).some((k) => k.endsWith('_row') && k !== 'confluence_row');
 
 /** Empreinte de ce qui change la réponse de l'IA : version de la lecture, consignes, périmètre. */
@@ -109,6 +132,7 @@ const keepReading = (attrs) => Object.fromEntries(READING_KEYS.filter((k) => att
  * @param {{text, hash}} [o.consignes]   résultat de loadConsignes
  * @param {string[]} [o.naemonHosts]     hôtes Naemon hors inventaire (unmatchedHosts)
  * @param {string|null} [o.reportsDir]   dossier des rapports CSV (null : pas de rapport)
+ * @param {string|null} [o.knowledgeSectionsFile] fichier des sections de toutes les pages (recherche de second recours), réécrit à chaque passage (null : pas écrit)
  * @returns {Promise<{runId, status, stats, reports: string[]}>}
  */
 async function runConfluenceSync({
@@ -119,6 +143,7 @@ async function runConfluenceSync({
   consignes = { text: '', hash: null },
   naemonHosts = [],
   reportsDir = null,
+  knowledgeSectionsFile = null,
   force = false,
   limit = Infinity,
   chunkChars = 12000,
@@ -152,11 +177,17 @@ async function runConfluenceSync({
     diagramsMissing: 0,
     obsoleteFragments: 0,
     retired: 0,
+    fiches: 0,
+    ficheErrors: 0,
+    ficheRejected: 0,
+    corrige: 0,
+    remplacees: 0,
   };
   if (matcher) stats.inScope = 0;
   const naemon = new Set((naemonHosts || []).map((h) => String(h).toLowerCase()));
   const readingHash = readingHashOf({ consignes, matcher });
   const verifyHash = verifyHashOf(repo, naemon, now);
+  const opsHash = opsHashOf({ consignes, matcher });
   const apps = perimeter ? perimeter.applications.map((a) => ({ name: a.name, aliases: a.aliases })) : [];
   const perimeterIds = new Set(matcher ? matcher.apps.map((a) => a.id) : []);
   // date du jour donnée à l'IA pour juger la période des pages (« Plan 2026 » est actuel en 2026), heure locale
@@ -165,6 +196,8 @@ async function runConfluenceSync({
   const recheck = new Map();
   /** Pages vérifiées et écrites pendant ce passage (leur empreinte est mise à jour en fin de passage). */
   const verifiedNow = new Set();
+  /** Sections de toutes les pages lues (fichier de la recherche de second recours). */
+  const sectionRows = [];
 
   /** Ajoute (sign 1) ou retire (sign -1) aux compteurs ce qu'une page a produit. */
   function count(res, sign) {
@@ -205,7 +238,7 @@ async function runConfluenceSync({
     // texte gardé pour le résumé IA : seulement si la page porte sur une application
     const subject = verified.apps.some((a) => a.role === 'subject');
     repo.patchNodeAttrs(docNodeId, { excerpt: subject ? pageExcerpt(page) : undefined });
-    repo.saveDocument({ ...docBase, status: 'enriched', attrs: { ...rowAttrs, ...readingAttrs, reading, verifyHash, rejected: verified.rejected } });
+    repo.saveDocument({ ...docBase, status: 'enriched', attrs: { ...rowAttrs, ...(ctx.ops || {}), ...readingAttrs, reading, verifyHash, rejected: verified.rejected } });
     verifiedNow.add(docBase.id);
     return { out, verified };
   }
@@ -217,6 +250,89 @@ async function runConfluenceSync({
     // serveur cité actif ou arrêté ailleurs) : la page est revue en fin de passage, quand toutes les pages sont écrites
     if (res.verified.links.some((l) => l.trust === 'toValidate') || res.verified.servers.some((s) => !s.inInventory)) recheck.set(ctx.p.id, { ctx, reading, readingAttrs, res });
     else recheck.delete(ctx.p.id);
+    return res.verified;
+  }
+
+  /** Écrit les empreintes des fiches dans la ligne document (les autres attributs ne changent pas). */
+  function saveOps(ctx) {
+    const d = repo.getDocument(ctx.docBase.id);
+    if (!d) return;
+    const attrs = Object.fromEntries(Object.entries(d.attrs || {}).filter(([k]) => !OPS_KEYS.includes(k)));
+    const { source, title, url, version, updated_at: updatedAt, content_hash: contentHash, status, error } = d;
+    repo.saveDocument({ id: d.id, source, title, url, version, updatedAt, contentHash, status, error, attrs: { ...attrs, ...ctx.ops } });
+  }
+
+  /**
+   * Fiches d'une page dont la lecture est écrite : lecture IA, vérification, écriture. Une page qui n'est plus
+   * d'exploitation perd ses fiches. Ne lève jamais : en échec, l'empreinte reste ancienne (reprise au passage suivant).
+   */
+  async function ficheStep(ctx, kind) {
+    if (!llm) return;
+    const { p, page, docNodeId, docBase } = ctx;
+    try {
+      const node = repo.getNode(docNodeId);
+      const pageInfo = { title: page.title || p.title, url: p.url, updatedAt: p.updatedAt || page.updatedAt, sections: page.sections };
+      const period = node && node.attrs.period;
+      if (!OPS_KINDS.includes(kind)) {
+        applyFiches(repo, [], { pageId: p.id, docNodeId, page: pageInfo, period });
+        ctx.ops = {};
+      } else {
+        const reading = await readFiches(
+          llm,
+          { title: pageInfo.title, ancestors: p.ancestors || [], today, kind, sections: page.sections, apps, consignes },
+          { chunkChars, maxTokens }
+        );
+        const verified = verifyFiches(reading, { pageText: ctx.pageText, repo, matcher });
+        const res = applyFiches(repo, verified, { pageId: p.id, docNodeId, page: pageInfo, period });
+        stats.fiches += res.fiches.length;
+        stats.ficheRejected += verified.rejected.length;
+        ctx.ops = { opsHash, opsContentHash: docBase.contentHash, ficheCount: res.fiches.length };
+      }
+      saveOps(ctx);
+    } catch (err) {
+      stats.ficheErrors++;
+      const message = safeMessage(err);
+      log.warn(`page ${p.id} (${p.title}) : fiches en échec, page gardée, reprise au passage suivant : ${message}`);
+      try {
+        repo.recordError(runId, { source: 'confluence', ref: p.id, step: 'fiches', message });
+      } catch (err2) {
+        log.error(`page ${p.id} : erreur des fiches non enregistrée : ${err2.message}`);
+      }
+    }
+  }
+
+  /** Sections d'une page pour le fichier de recherche (texte barré déjà exclu par l'analyse de la page). */
+  function collectSections(p, page, docNodeId) {
+    if (!knowledgeSectionsFile) return;
+    const title = page.title || p.title;
+    for (const s of page.sections || []) {
+      sectionRows.push({ pageId: String(p.id), docNodeId, title, url: ficheUrl({ url: p.url, sections: page.sections }, s.heading), section: s.heading || null, text: s.text });
+    }
+  }
+  /** Page sautée : analysée seulement pour ses sections. */
+  function collectSkipped(entry) {
+    if (!knowledgeSectionsFile) return;
+    try {
+      collectSections(entry.p, analyseEntry(entry), `document:${documentId(entry.p.id)}`);
+    } catch (err) {
+      log.warn(`page ${entry.p.id} : sections non relevées : ${err.message}`);
+    }
+  }
+
+  function writeSections() {
+    if (!knowledgeSectionsFile) return;
+    try {
+      const rows = sectionRows.map(({ docNodeId, ...r }) => {
+        const n = repo.getNode(docNodeId);
+        return { ...r, period: (n && n.attrs.period) || null };
+      });
+      fs.mkdirSync(path.dirname(knowledgeSectionsFile), { recursive: true });
+      const tmp = `${knowledgeSectionsFile}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(rows));
+      fs.renameSync(tmp, knowledgeSectionsFile);
+    } catch (err) {
+      log.warn(`sections de recherche non écrites : ${err.message}`);
+    }
   }
 
   /** Un seul tour, sans IA : les liens uses_db et mentions lus par ces règles ne dépendent pas du graphe. */
@@ -271,6 +387,7 @@ async function runConfluenceSync({
   async function readAndApply(ctx, prevAttrs) {
     const { page, p, docBase } = ctx;
     let reading;
+    let verified;
     try {
       reading = await readPage(
         llm,
@@ -282,11 +399,13 @@ async function runConfluenceSync({
       return;
     }
     try {
-      applyAndSave(ctx, reading, { readingHash, readingContentHash: docBase.contentHash, readingYear: year });
+      verified = applyAndSave(ctx, reading, { readingHash, readingContentHash: docBase.contentHash, readingYear: year });
       stats.read++;
     } catch (err) {
       fail(ctx, prevAttrs, err.step || 'apply', err);
+      return;
     }
+    await ficheStep(ctx, verified.kind);
   }
 
   /** Sans IA, page jamais lue : ce que l'ancienne analyse (règles) avait écrit pour elle est retiré une fois. */
@@ -323,14 +442,23 @@ async function runConfluenceSync({
       const readingCurrent = !force && Boolean(pa.reading) && pa.readingContentHash === hash && pa.readingHash === readingHash && !yearChanged;
       const retry = prev && prev.status === 'error';
 
-      if (readingCurrent && pa.verifyHash === verifyHash && contentSame && !retry) {
+      // fiches à refaire seules : lecture à jour, page d'exploitation, empreinte des fiches périmée
+      const node = repo.getNode(`document:${documentId(p.id)}`);
+      const storedKind = node && node.attrs.pageKindAi;
+      const opsStale = Boolean(llm) && readingCurrent && OPS_KINDS.includes(storedKind) && (pa.opsHash !== opsHash || pa.opsContentHash !== hash);
+
+      if (readingCurrent && pa.verifyHash === verifyHash && contentSame && !retry && !opsStale) {
         stats.skipped++;
+        collectSkipped(entry);
         continue;
       }
       if (!readingCurrent && !llm) {
         // page sans lecture à jour et sans IA : comptée « non lue » (jamais aussi « inchangée »)
         stats.notRead++;
-        if (contentSame && prev.status === 'parsed' && (pa.reading || pa.rulesCleared)) continue;
+        if (contentSame && prev.status === 'parsed' && (pa.reading || pa.rulesCleared)) {
+          collectSkipped(entry);
+          continue;
+        }
       }
 
       const docBase = { id: docId, source: 'confluence', title: p.title, url: p.url, version: p.version, updatedAt: p.updatedAt, contentHash: hash };
@@ -347,6 +475,7 @@ async function runConfluenceSync({
           docBase,
           rowAttrs,
           docNodeId: `document:${documentId(p.id)}`,
+          ops: pickOps(pa),
           // en-tête seul : l'environnement d'une page n'est retenu que s'il y est écrit (titre, pages parentes)
           headerText: pageHeaderLines({ title: page.title || p.title, ancestors: p.ancestors || [] }).join('\n'),
           // en-tête tel qu'envoyé à l'IA (« Titre : X », pages parentes), puis le texte : une citation de l'en-tête est retrouvée
@@ -356,11 +485,22 @@ async function runConfluenceSync({
         stats.pages++;
         stats.diagramsMissing += diagrams.missing.length;
         stats.obsoleteFragments += page.obsoleteFragments || 0;
+        collectSections(p, page, ctx.docNodeId);
 
         if (readingCurrent) {
           // seuls les inventaires ou Naemon ont changé : vérification et écriture refaites sans IA
-          applyAndSave(ctx, pa.reading, { readingHash: pa.readingHash, readingContentHash: pa.readingContentHash, readingYear: pa.readingYear });
-          stats.reverified++;
+          if (pa.verifyHash === verifyHash && contentSame && !retry) {
+            // rien d'autre n'a changé : seules les fiches sont refaites
+            if (inflight.size >= maxInFlight) await Promise.race(inflight);
+            track(ficheStep(ctx, storedKind));
+          } else {
+            const verified = applyAndSave(ctx, pa.reading, { readingHash: pa.readingHash, readingContentHash: pa.readingContentHash, readingYear: pa.readingYear });
+            stats.reverified++;
+            if (opsStale) {
+              if (inflight.size >= maxInFlight) await Promise.race(inflight);
+              track(ficheStep(ctx, verified.kind));
+            }
+          }
         } else if (!llm) {
           if (!pa.reading && !pa.rulesCleared) clearOldRules(ctx);
           repo.saveDocument({ ...docBase, status: 'parsed', attrs: { ...rowAttrs, ...keepReading(pa), ...(pa.reading ? {} : { rulesCleared: true }) } });
@@ -379,12 +519,14 @@ async function runConfluenceSync({
     await Promise.all(inflight);
     recheckPages();
     markVerifiedWithEndHash();
+    ({ corrige: stats.corrige, remplacees: stats.remplacees } = linkFiches(repo));
+    writeSections();
 
     stats.retired = retireOrphans(repo, now);
     const reports = reportsDir ? writeReports(repo, matcher, reportsDir) : [];
     if (reports.length) log.info(`rapports : ${reports.join(' ; ')}`);
     if (!llm && stats.notRead) log.warn(`${stats.notRead} pages non lues par l'IA (lancer avec --llm et une IA configurée) : rien n'en est déduit`);
-    const status = stats.errors ? 'partial' : 'success';
+    const status = stats.errors || stats.ficheErrors ? 'partial' : 'success';
     repo.finishRun(runId, { status, stats: { ...stats, llm: llm ? llm.stats : undefined } });
     return { runId, status, stats, reports };
   } catch (err) {
@@ -543,4 +685,4 @@ function writeRejectsReport(repo, dir) {
   return writeCsvReport(dir, 'lectures-rejets', ['page', 'élément', 'raison', 'url'], rows);
 }
 
-module.exports = { runConfluenceSync, readingHashOf, verifyHashOf, retireOrphans, pageExcerpt, localDay, readingDependsOnYear };
+module.exports = { runConfluenceSync, readingHashOf, opsHashOf, verifyHashOf, retireOrphans, pageExcerpt, localDay, readingDependsOnYear };

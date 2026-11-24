@@ -79,7 +79,7 @@ function createRepo(store) {
     const s = String(text || '').trim().toLowerCase();
     if (!s) return [];
     const found = new Map();
-    for (const candidate of new Set([s, ...hostAliases(s)])) for (const n of nodesByAlias(candidate)) found.set(n.id, toNode(n));
+    for (const candidate of new Set([s, ...hostAliases(s)])) for (const n of nodesByAlias(candidate)) if (n.type !== 'fiche') found.set(n.id, toNode(n));
     return [...found.values()];
   }
 
@@ -158,7 +158,7 @@ function createRepo(store) {
     for (const [alias, m] of D().aliases) if (alias.includes(needle)) for (const id of m.keys()) ids.add(id);
     return [...ids]
       .map((id) => D().nodes.get(id))
-      .filter(Boolean)
+      .filter((n) => n && n.type !== 'fiche') // les fiches ont leur propre recherche (src/knowledge)
       .sort((a, b) => byText(a.type, b.type) || byText(a.name, b.name))
       .slice(0, limit)
       .map(toNode);

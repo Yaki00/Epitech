@@ -17,6 +17,8 @@
  * une citation), puis le code garde ce qui est cité dans la page et le rapproche des inventaires
  * et du périmètre (config/perimeter.json). Les consignes de config/consignes-ia.md sont données à
  * l'IA ; les modifier relance la lecture des pages au passage suivant. Rapports CSV dans data/rapports/.
+ * Les pages d'exploitation (incident, version, exploitation, installation) donnent aussi des fiches, écrites dans le
+ * graphe ; les sections de toutes les pages sont écrites dans data/knowledge-sections.json (recherche de second recours).
  * Lancer l'import des inventaires AVANT : ils servent de référence à la vérification.
  */
 const fs = require('fs');
@@ -78,6 +80,7 @@ async function main() {
       consignes,
       naemonHosts: naemonHosts(),
       reportsDir: config.reportsDir,
+      knowledgeSectionsFile: path.join(config.dataDir, 'knowledge-sections.json'),
       force: opt.force,
       limit: opt.limit,
       chunkChars: config.reading.chunkChars,

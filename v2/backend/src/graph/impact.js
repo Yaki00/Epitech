@@ -8,8 +8,8 @@
  *  - dependencies (downstream): de quoi `nodeId` a besoin ?       => on suit les liens sortants
  */
 
-// Les liens documentaires ne propagent pas une panne.
-const NON_PROPAGATING = new Set(['mentions', 'documented_in', 'monitored_by']);
+// Les liens documentaires (et ceux des fiches) ne propagent pas une panne.
+const NON_PROPAGATING = new Set(['mentions', 'documented_in', 'monitored_by', 'concerne', 'vient_de', 'corrige']);
 
 /**
  * Lien hors impact : retiré, ancien ou cible (période lue par l'IA), à valider ou rattaché à une autre

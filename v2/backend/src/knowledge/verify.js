@@ -113,4 +113,4 @@ function verifyFiches(reading, ctx) {
   return { fiches, rejected };
 }
 
-module.exports = { verifyFiches };
+module.exports = { verifyFiches, SECRET };
