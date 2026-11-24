@@ -250,6 +250,11 @@ async function main() {
         else throw err;
       }
     });
+    await check('LLM rerank', async () => {
+      const { doctorRerank } = require('../src/knowledge/rerank');
+      const [level, msg] = await doctorRerank(config, llm);
+      results.push([level.padEnd(4), msg]);
+    });
     await check('LLM outils (function calling)', async () => {
       const tool = { type: 'function', function: { name: 'ping', description: 'Renvoie pong', parameters: { type: 'object', properties: {} } } };
       try {

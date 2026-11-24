@@ -12,7 +12,8 @@ const { writeGapsReport } = require('../naemon/gaps');
 const path = require('path');
 const fs = require('fs');
 const { loadPerimeter, createMatcher } = require('../perimeter/perimeter');
-const { buildKnowledgeIndex, searchKnowledge, getFiche, ficheSummariesOf } = require('../knowledge/search');
+const { buildKnowledgeIndex, getFiche, ficheSummariesOf } = require('../knowledge/search');
+const { searchWithRerank, createReranker } = require('../knowledge/rerank');
 
 /**
  * @param {object} deps { repo, llm, logger, frontendDist, toolsMode, jobs, poller, history, config }
@@ -114,10 +115,12 @@ function createApp({ repo, llm, logger, frontendDist, toolsMode = 'native', jobs
     if (r) r.knowledge = ficheSummariesOf(repo, req.params.id);
     return r ? res.json(r) : res.status(404).json({ error: 'introuvable' });
   });
-  app.get('/api/knowledge/search', (req, res) => {
+  // reclassement par la passerelle : seulement si KNOWLEDGE_RERANK=true (éteint par défaut)
+  const rerank = config && config.knowledge && config.knowledge.rerank && llm && typeof llm.rerank === 'function' ? createReranker({ llm, logger }) : null;
+  app.get('/api/knowledge/search', async (req, res) => {
     const none = { fiches: [], sections: [], apps: [] };
     if (!knowledge) return res.json(none);
-    const out = searchKnowledge(knowledge.index, repo, knowledge.matcher, { query: String(req.query.q || ''), application: req.query.app ? String(req.query.app) : undefined, limit: intOr(req.query.limit, 10) });
+    const out = await searchWithRerank(knowledge.index, repo, knowledge.matcher, { query: String(req.query.q || ''), application: req.query.app ? String(req.query.app) : undefined, limit: intOr(req.query.limit, 10), rerank });
     res.json(out);
   });
   app.get('/api/knowledge/:id', (req, res) => {

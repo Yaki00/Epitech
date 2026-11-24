@@ -267,10 +267,30 @@ function createLlmClient(cfg, deps = {}) {
     });
   }
 
+  /**
+   * Reclassement (endpoint cfg.rerankPath, ex : /rerank) : un score par document, dans l'ordre des documents.
+   * Les erreurs remontent (l'appelant décide de garder son ordre).
+   */
+  async function rerank({ query, documents, task = 'rerank' }) {
+    const docs = Array.isArray(documents) ? documents : [];
+    if (!docs.length) return [];
+    return limit(async () => {
+      stats.calls++;
+      const raw = await post(cfg.rerankPath || '/rerank', { model: modelFor(task), query, documents: docs });
+      const scores = new Array(docs.length).fill(null);
+      for (const r of raw?.results || []) {
+        if (Number.isInteger(r?.index) && r.index >= 0 && r.index < docs.length && Number.isFinite(r.relevance_score)) scores[r.index] = r.relevance_score;
+      }
+      if (scores.some((s) => s === null)) throw new LlmError(`Réponse rerank incomplète (${scores.filter((s) => s !== null).length} scores pour ${docs.length} documents)`);
+      return scores;
+    });
+  }
+
   return {
     chat,
     chatJson,
     embed,
+    rerank,
     imageMessage,
     stats,
     modelFor,

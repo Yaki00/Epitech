@@ -10,6 +10,7 @@ const { createMatcher, ensurePerimeterNodes } = require('../src/perimeter/perime
 const { applyFiches, linkFiches } = require('../src/knowledge/apply');
 const { buildKnowledgeIndex, searchKnowledge, getFiche } = require('../src/knowledge/search');
 const { createApp } = require('../src/api/app');
+const { searchWithRerank, createReranker, doctorRerank } = require('../src/knowledge/rerank');
 
 const item = (text, evidence = text) => ({ text, evidence });
 const PERIMETER = {
@@ -306,6 +307,71 @@ describe('correctifs de revue', () => {
       w.repo.patchNodeAttrs(id, { retired: true });
       await request(app).get(`/api/knowledge/${encodeURIComponent(id)}`).expect(404);
       assert.deepEqual((await request(app).get(url).expect(200)).body.knowledge.map((k) => k.id), [keep]);
+    });
+  });
+
+  describe('reclassement facultatif', () => {
+    const many = (w, n) => {
+      const ids = [];
+      for (let i = 0; i < n; i++) ids.push(w.write({ title: item(`Relance planificateur numero ${i}`), fields: { symptoms: item('planificateur bloque') } }));
+      return ids;
+    };
+    const run = (w, opts) => searchWithRerank(buildKnowledgeIndex(w.repo, { sections: [] }), w.repo, w.matcher, { query: 'planificateur bloque', limit: 30, ...opts });
+
+    test('rerank off by default', async () => {
+      const w = world();
+      many(w, 5);
+      const plain = w.search('planificateur bloque', { limit: 30 });
+      const r = await run(w, {});
+      assert.deepEqual(r.fiches.map((f) => f.id), plain.fiches.map((f) => f.id));
+    });
+
+    test('rerank reorders the first twenty', async () => {
+      const w = world();
+      many(w, 25);
+      const plain = w.search('planificateur bloque', { limit: 30 }).fiches.map((f) => f.id);
+      let seen;
+      const rerank = async (query, texts) => {
+        seen = { query, n: texts.length, first: texts[0] };
+        return texts.map((_, i) => i); // dernier du lot en tete
+      };
+      const r = await run(w, { rerank });
+      assert.equal(seen.n, 20);
+      assert.equal(seen.query, 'planificateur bloque');
+      assert.ok(seen.first.includes('Relance planificateur'));
+      const ids = r.fiches.map((f) => f.id);
+      assert.deepEqual(ids.slice(0, 20), plain.slice(0, 20).reverse());
+      assert.deepEqual(ids.slice(20), plain.slice(20));
+    });
+
+    test('rerank failure keeps order and warns once per process', async () => {
+      const w = world();
+      many(w, 4);
+      const plain = w.search('planificateur bloque', { limit: 30 }).fiches.map((f) => f.id);
+      const warns = [];
+      const llm = { rerank: async () => { throw new Error('HTTP 404 sur /rerank'); } };
+      const rerank = createReranker({ llm, logger: { warn: (m) => warns.push(m) } });
+      for (let i = 0; i < 3; i++) assert.deepEqual((await run(w, { rerank })).fiches.map((f) => f.id), plain);
+      assert.equal(warns.length, 1);
+      assert.ok(/rerank/i.test(warns[0]));
+      // un autre echec (nombre de scores incorrect) garde aussi l'ordre
+      const bad = await run(w, { rerank: async () => [1] });
+      assert.deepEqual(bad.fiches.map((f) => f.id), plain);
+    });
+
+    test('doctor tries rerank only when enabled', async () => {
+      let calls = 0;
+      const llm = { rerank: async () => { calls++; return [0.9, 0.1]; } };
+      const off = await doctorRerank({ knowledge: { rerank: false } }, llm);
+      assert.equal(off[0], 'INFO');
+      assert.equal(calls, 0);
+      const on = await doctorRerank({ knowledge: { rerank: true } }, llm);
+      assert.equal(on[0], 'OK');
+      assert.match(on[1], /\d+ ms/);
+      assert.equal(calls, 1);
+      const ko = await doctorRerank({ knowledge: { rerank: true } }, { rerank: async () => { throw new Error('HTTP 404'); } });
+      assert.equal(ko[0], 'WARN');
+      assert.match(ko[1], /HTTP 404/);
     });
   });
 });

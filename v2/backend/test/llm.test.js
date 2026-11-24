@@ -332,4 +332,19 @@ describe('langue du chat', () => {
     assert.match(systemFor('en'), /Answer in English/);
     assert.doesNotMatch(systemFor('en'), /Tu réponds en français/);
   });
+
+  test('rerank : scores dans l ordre des documents, chemin et modele de la config', async () => {
+    const f = fakeFetch([{ status: 200, body: { results: [{ index: 1, relevance_score: 0.9 }, { index: 0, relevance_score: 0.2 }, { index: 2, relevance_score: 0.5 }] } }]);
+    const llm = createLlmClient({ ...baseCfg, models: { rerank: 'm-rerank' }, rerankPath: '/v1/rerank' }, { fetch: f, logger: silent, backoffBaseMs: 1 });
+    const scores = await llm.rerank({ query: 'q', documents: ['a', 'b', 'c'] });
+    assert.deepEqual(scores, [0.2, 0.9, 0.5]);
+    assert.equal(f.calls[0].url, 'http://fake/v1/rerank');
+    assert.deepEqual(f.calls[0].body, { model: 'm-rerank', query: 'q', documents: ['a', 'b', 'c'] });
+  });
+
+  test('rerank : reponse incomplete = erreur', async () => {
+    const f = fakeFetch([{ status: 200, body: { results: [{ index: 0, relevance_score: 1 }] } }]);
+    const llm = createLlmClient(baseCfg, { fetch: f, logger: silent, backoffBaseMs: 1 });
+    await assert.rejects(() => llm.rerank({ query: 'q', documents: ['a', 'b'] }), /rerank/i);
+  });
 });
