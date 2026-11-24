@@ -71,10 +71,17 @@ describe('verifyFiches', () => {
   });
 
   test('secret in a step is dropped', () => {
-    const steps = ['mot de passe : Azerty12', 'password=xyz', 'token: abc123', 'jeton : zzz'].map((s) => it_(s));
+    const steps = ['mot de passe : Azerty12', 'password=xyz', 'token: abc123', 'jeton : zzz', 'tokens: x', 'secrets=y'].map((s) => it_(s));
     const r = run(fiche({ kind: 'procedure', lists: { steps: [...steps, it_('redémarrer le service', 'Étape 1 : redémarrer le service')] } }));
     assert.deepEqual(r.fiches[0].lists.steps.map((s) => s.text), ['redémarrer le service']);
-    assert.equal(r.rejected.filter((x) => x.reason === 'secret').length, 4);
+    assert.equal(r.rejected.filter((x) => x.reason === 'secret').length, 6);
+  });
+
+  test('secret in keywords or section is dropped', () => {
+    const r = run(fiche({ section: 'token: abc123', keywords: ['mot de passe : x', 'lenteur'] }));
+    assert.equal(r.fiches[0].section, null);
+    assert.deepEqual(r.fiches[0].keywords, ['lenteur']);
+    assert.equal(r.rejected.filter((x) => x.reason === 'secret').length, 2);
   });
 
   test('email and phone never kept', () => {

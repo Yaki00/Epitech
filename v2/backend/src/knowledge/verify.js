@@ -24,7 +24,7 @@
 const { hasEvidence, normalizeText } = require('../reading/evidence');
 const { cleanName, cleanEvidence, normKey } = require('../reading/schema');
 
-const SECRET = /(mot de passe|password|passwd|pwd|token|jeton|secret|api[ _-]?key)\s*[:=]\s*\S+/i;
+const SECRET = /(mot de passe|password|passwd|pwd|tokens?|jeton|secrets?|api[ _-]?keys?)\s*[:=]\s*\S+/i;
 
 /** La citation contient le texte ou un mot de 4 lettres ou plus du texte. */
 function quoteMatchesText(quote, text) {
@@ -94,10 +94,18 @@ function verifyFiches(reading, ctx) {
       const k = normKey(t.text);
       if (!seen.has(k)) { seen.add(k); tickets.push(t.text); }
     }
-    const keywords = (f.keywords || []).map((k) => cleanName(k, true)).filter(Boolean);
+    const keywords = [];
+    for (const k of f.keywords || []) {
+      if (SECRET.test(k)) { rejected.push({ what: k, reason: 'secret' }); continue; }
+      const c = cleanName(k, true);
+      if (c) keywords.push(c);
+    }
+    let section = null;
+    if (f.section && SECRET.test(f.section)) rejected.push({ what: f.section, reason: 'secret' });
+    else if (f.section) section = cleanName(f.section, true) || null;
 
     fiches.push({
-      kind: f.kind, title, section: f.section ? cleanName(f.section, true) || null : null,
+      kind: f.kind, title, section,
       date: check(f.date), fields, lists, appIds, serverIds, unresolved, tickets, keywords,
       replaces: check(f.replaces), fixes: check(f.fixes),
     });
