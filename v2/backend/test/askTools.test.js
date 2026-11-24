@@ -65,6 +65,6 @@ describe('outils de documentation', () => {
     assert.ok(TOOLS.some((t) => t.function.name === 'search_knowledge'));
     assert.ok(TOOLS.some((t) => t.function.name === 'open_fiche'));
     assert.match(systemFor('en'), /nothing found in the documentation/);
-    assert.doesNotMatch(systemFor('fr') + systemFor('en'), /[–—]/);
+    assert.doesNotMatch(systemFor('fr') + systemFor('en'), new RegExp(`[${String.fromCharCode(0x2013, 0x2014)}]`));
   });
 });
