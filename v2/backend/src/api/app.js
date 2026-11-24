@@ -211,7 +211,7 @@ function createApp({ repo, llm, logger, frontendDist, toolsMode = 'native', jobs
     const question = String(req.body?.question || '').trim();
     if (!question) return res.status(400).json({ error: 'question vide' });
     try {
-      res.json(await ask({ llm, repo, question, history: req.body.history || [], toolsMode, lang: req.body.lang === 'en' ? 'en' : 'fr', knowledge: () => (knowledge ? { ...knowledge, rerank } : null) }));
+      res.json(await ask({ llm, repo, question, history: req.body.history || [], toolsMode, lang: req.body.lang === 'en' ? 'en' : 'fr', logger, knowledge: () => (knowledge ? { ...knowledge, rerank } : null) }));
     } catch (err) {
       logger?.error('ask en échec', { erreur: err.message });
       res.status(502).json({ error: `IA indisponible : ${err.message}` });

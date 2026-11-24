@@ -165,6 +165,16 @@ function runTool(repo, name, args, ctx = {}) {
   }
 }
 
+/** Un outil qui plante ne fait pas échouer la question : le modèle reçoit une erreur et répond quand même. */
+async function safeTool(repo, name, args, ctx) {
+  try {
+    return await runTool(repo, name, args, ctx);
+  } catch (err) {
+    if (ctx.logger) ctx.logger.warn('outil du chat en échec', { outil: name, type: err && err.name });
+    return { error: 'recherche indisponible' };
+  }
+}
+
 /** Consigne du mode "json" : pour les passerelles qui ne gèrent pas le champ tools (function calling). */
 function jsonToolsPrompt(lang = 'fr') {
   const list = TOOLS.map((t) => `- ${t.function.name}(${Object.keys(t.function.parameters.properties).join(', ')}) : ${t.function.description}`).join('\n');
@@ -193,7 +203,7 @@ async function askNative({ llm, repo, messages, toolTrace, maxRounds, ctx }) {
       } catch {
         /* arguments invalides : l'outil renverra une erreur */
       }
-      const result = await runTool(repo, call.function.name, args, ctx);
+      const result = await safeTool(repo, call.function.name, args, ctx);
       ctx.results.push(result);
       toolTrace.push({ tool: call.function.name, args });
       messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) });
@@ -215,7 +225,7 @@ async function askJson({ llm, repo, messages, toolTrace, maxRounds, lang, ctx })
     if (typeof msg.answer === 'string') return { answer: msg.answer, toolTrace };
     if (!msg.tool) return { answer: res.content, toolTrace };
     const args = msg.arguments && typeof msg.arguments === 'object' ? msg.arguments : {};
-    const result = await runTool(repo, String(msg.tool), args, ctx);
+    const result = await safeTool(repo, String(msg.tool), args, ctx);
     ctx.results.push(result);
     toolTrace.push({ tool: String(msg.tool), args });
     messages.push({ role: 'assistant', content: res.content });
@@ -227,9 +237,10 @@ async function askJson({ llm, repo, messages, toolTrace, maxRounds, lang, ctx })
 /** La passerelle refuse-t-elle le champ tools ? (HTTP 400 qui parle d'outils) */
 const toolsRejected = (err) => err && err.status === 400 && /tool|function/i.test(err.body || err.message || '');
 
-const URL_RE = /https?:\/\/[^\s<>"'`)\]]+/g;
-const normUrl = (u) => String(u || '').split('#')[0].replace(/\/+$/, '');
-const trimUrl = (u) => u.replace(/[.,;:!?]+$/, '');
+const URL_SRC = "https?:\\/\\/[^\\s<>\"'`)\\]\\[*«»}]+";
+const URL_RE = new RegExp(URL_SRC, 'gi');
+const normUrl = (u) => String(u || '').split('#')[0].replace(/\/+$/, '').replace(/^https?:\/\/[^/]*/i, (m) => m.toLowerCase());
+const trimUrl = (u) => u.replace(/[.,;:!?_]+$/, '');
 
 /** Toutes les URL http(s) présentes dans les résultats d'outils de la question. */
 function urlsOf(value, out = new Set()) {
@@ -239,6 +250,9 @@ function urlsOf(value, out = new Set()) {
   return out;
 }
 
+// Lien markdown entier, URL entre chevrons, ou URL nue : une seule passe, dans cet ordre.
+const LINK_RE = new RegExp(`\\[([^\\]]*)\\]\\(<?(${URL_SRC.replace('\\]\\[', '\\]')})>?\\)|<(${URL_SRC})>|(${URL_SRC})`, 'gi');
+
 /** Retire de la réponse toute URL absente des résultats d'outils ; un lien markdown garde son libellé. */
 function controlLinks(answer, allowed) {
   const removed = [];
@@ -247,10 +261,20 @@ function controlLinks(answer, allowed) {
     if (!ok && !removed.includes(u)) removed.push(u);
     return ok;
   };
-  let text = String(answer || '').replace(/\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)/g, (all, label, url) => (keep(url) ? all : label));
-  text = text.replace(URL_RE, (m) => {
+  const bare = (str) => str.replace(URL_RE, (m) => {
     const url = trimUrl(m);
     return keep(url) ? m : m.slice(url.length);
+  });
+  let text = String(answer || '').replace(LINK_RE, (all, label, mdUrl, angled, plain) => {
+    if (mdUrl !== undefined) {
+      const url = trimUrl(mdUrl);
+      if (!keep(url)) return bare(label);
+      const clean = bare(label).trim();
+      return clean ? `[${clean}](${mdUrl})` : mdUrl;
+    }
+    if (angled !== undefined) return keep(trimUrl(angled)) ? all : '';
+    const url = trimUrl(plain);
+    return keep(url) ? all : all.slice(url.length);
   });
   return { text: text.replace(/[ \t]+\n/g, '\n').replace(/ {2,}/g, ' ').trim(), removed };
 }
@@ -280,9 +304,9 @@ function sourcesOf(results, text) {
  *   toolsMode 'native' : function calling ; si la passerelle le refuse, bascule automatiquement en 'json'.
  * @returns {Promise<{answer: string, toolTrace: Array, toolsMode: string, sources: Array, removedLinks: string[]}>}
  */
-async function ask({ llm, repo, question, history = [], maxRounds = 5, toolsMode = 'native', lang = 'fr', knowledge = null }) {
+async function ask({ llm, repo, question, history = [], maxRounds = 5, toolsMode = 'native', lang = 'fr', knowledge = null, logger = null }) {
   const fresh = () => [{ role: 'system', content: systemFor(lang) }, ...history.slice(-10), { role: 'user', content: question }];
-  const ctx = { knowledge, results: [] };
+  const ctx = { knowledge, results: [], logger };
   let out;
   if (toolsMode === 'json') out = { ...(await askJson({ llm, repo, messages: fresh(), toolTrace: [], maxRounds, lang, ctx })), toolsMode: 'json' };
   else {

@@ -427,6 +427,71 @@ describe('assistant ask (documentation)', () => {
     assert.deepEqual(r.removedLinks, ['https://invented.example.com/z']);
   });
 
+  test('emphasis and guillemets around a link do not remove it', async () => {
+    const w = world();
+    const u = 'https://wiki.example.local/7001';
+    const text = `**${u}** *${u}* _${u}_ ${u}» «${u}» <${u}> ([lien](${u}))`;
+    const { r } = await run(w, [...calls(w), { status: 200, body: reply(text) }]);
+    assert.deepEqual(r.removedLinks, []);
+    assert.equal(r.answer, text);
+  });
+
+  test('markdown link with a disallowed label and angle brackets', async () => {
+    const w = world();
+    const u = 'https://wiki.example.local/7001';
+    const text = `[https://evil.example.com/a](${u}) puis <https://evil.example.com/b> fin, [x](<https://evil.example.com/c>)`;
+    const { r } = await run(w, [...calls(w), { status: 200, body: reply(text) }]);
+    assert.equal(r.answer, `[${u}](${u}) puis fin, x`);
+    assert.deepEqual(r.removedLinks, ['https://evil.example.com/a', 'https://evil.example.com/b', 'https://evil.example.com/c']);
+  });
+
+  test('scheme and host compare case-insensitively', async () => {
+    const w = world();
+    const { r } = await run(w, [...calls(w), { status: 200, body: reply('HTTPS://WIKI.EXAMPLE.LOCAL/7001 ok') }]);
+    assert.deepEqual(r.removedLinks, []);
+  });
+
+  test('a failing search tool does not break the chat', async () => {
+    const w = world();
+    w.knowledge = { index: {}, matcher: null };
+    const warns = [];
+    const { r, f } = await run(
+      w,
+      [{ status: 200, body: reply('', { tool_calls: [toolCall('1', 'search_knowledge', { query: 'file' })] }) }, { status: 200, body: reply('Rien trouvé dans la documentation.') }],
+      { logger: { warn: (m, c) => warns.push([m, c]) } },
+    );
+    assert.deepEqual(JSON.parse(f.calls[1].body.messages.at(-1).content), { error: 'recherche indisponible' });
+    assert.match(r.answer, /Rien trouvé/);
+    assert.equal(warns.length, 1);
+  });
+
+  test('json mode: search then answer with an allowed link', async () => {
+    const w = world();
+    const { r, f } = await run(
+      w,
+      [
+        { status: 200, body: reply('{"tool": "search_knowledge", "arguments": {"query": "file Q.MRL.EVT saturee"}}') },
+        { status: 200, body: reply('{"answer": "Voir https://wiki.example.local/7001 et https://evil.example.com/q"}') },
+      ],
+      { toolsMode: 'json' },
+    );
+    assert.equal(r.toolsMode, 'json');
+    assert.match(f.calls[1].body.messages.at(-1).content, /File pleine/);
+    assert.equal(r.answer, 'Voir https://wiki.example.local/7001 et');
+    assert.deepEqual(r.removedLinks, ['https://evil.example.com/q']);
+    assert.deepEqual(r.sources.map((s) => s.id), [w.ficheId]);
+  });
+
+  test('open_fiche with an unknown id returns an error and no source', async () => {
+    const w = world();
+    const { r, f } = await run(w, [
+      { status: 200, body: reply('', { tool_calls: [toolCall('1', 'open_fiche', { id: 'fiche:nope' })] }) },
+      { status: 200, body: reply('Introuvable.') },
+    ]);
+    assert.match(JSON.parse(f.calls[1].body.messages.at(-1).content).error, /fiche inconnue/);
+    assert.deepEqual(r.sources, []);
+  });
+
   test('no knowledge given: ask still works', async () => {
     const repo = createRepo(openStore(':memory:'));
     const llm = createLlmClient(baseCfg, { fetch: fakeFetch([{ status: 200, body: reply('ok') }]), logger: silent });
