@@ -37,6 +37,7 @@ const HTML = {
   [T_MEET]: '<p>Points divers. OrderHub passe en 4.2 bientot.</p>',
 };
 const OPS_TITLES = [T_INC, T_NEW, T_OLD, T_REL].sort();
+const UPDATED = { [T_OLD]: '2025-03-01T10:00:00.000+01:00' };
 const IDS = { [T_INC]: '8001', [T_REL]: '8002', [T_OLD]: '8003', [T_NEW]: '8004', [T_MEET]: '8005' };
 const KIND = { [T_INC]: 'incident', [T_REL]: 'release', [T_OLD]: 'operations', [T_NEW]: 'operations', [T_MEET]: 'meeting' };
 
@@ -82,7 +83,7 @@ const FICHES = {
 function writePage(root, title) {
   const d = path.join(root, 'ESP', `${IDS[title]} - ${title.replace(/[^A-Za-z0-9 ]/g, '')}`);
   fs.mkdirSync(d, { recursive: true });
-  fs.writeFileSync(path.join(d, 'metadata.json'), JSON.stringify({ pageId: IDS[title], title, spaceKey: 'ESP', updatedAt: '2026-11-01T10:00:00.000+01:00', version: 1, ancestors: [{ id: '1', title: 'Accueil' }], url: `https://wiki.example.local/${IDS[title]}` }));
+  fs.writeFileSync(path.join(d, 'metadata.json'), JSON.stringify({ pageId: IDS[title], title, spaceKey: 'ESP', updatedAt: UPDATED[title] || '2026-11-01T10:00:00.000+01:00', version: 1, ancestors: [{ id: '1', title: 'Accueil' }], url: `https://wiki.example.local/${IDS[title]}` }));
   fs.writeFileSync(path.join(d, 'page.html'), HTML[title]);
 }
 
@@ -300,7 +301,71 @@ describe('fiches dans la synchro Confluence', () => {
   });
 });
 
+describe('fiches : corrections de revue', () => {
+  test('a reading-made server cited only by a fiche is still retired', async () => {
+    const { repo, run } = setup([T_INC]);
+    await run();
+    repo.upsertNode({ type: 'server', key: 'srvghost09', name: 'srvghost09', source: 'llm', attrs: { fromLlm: true, outOfInventory: true } });
+    repo.addEdge({ src: 'fiche:8001-1', dst: 'server:srvghost09', type: 'concerne', source: 'knowledge', sourceRef: '8001' });
+    const { retireOrphans } = require('../src/reading/syncPages');
+    retireOrphans(repo, NOW);
+    assert.equal(repo.getNode('server:srvghost09').attrs.retired, true);
+  });
+
+  test('forced re-read then fiche failure: the next pass retries the fiches', async () => {
+    const { repo, run, state, reset } = setup([T_INC]);
+    await run();
+    assert.ok(repo.getDocument('confluence:8001').attrs.opsHash);
+    state.failFiches = true;
+    reset();
+    const r = await run({ force: true });
+    assert.equal(r.stats.ficheErrors, 1);
+    assert.equal(repo.getDocument('confluence:8001').attrs.opsHash, undefined);
+    state.failFiches = false;
+    reset();
+    await run();
+    assert.deepEqual(state.reading, []);
+    assert.deepEqual(state.fiche, [T_INC]);
+    assert.ok(repo.getDocument('confluence:8001').attrs.opsHash);
+  });
+
+  test('a secret in a section is masked in the sections file', async () => {
+    const { run, sectionsFile, exportDir } = setup([T_MEET]);
+    fs.writeFileSync(path.join(exportDir, 'ESP', '8005 - CR reunion du 1211', 'page.html'), '<h2 id="acces">Acces</h2><p>Le compte : mot de passe : Azerty12 pour la recette.</p>');
+    await run();
+    const raw = fs.readFileSync(sectionsFile, 'utf8');
+    assert.ok(!/Azerty12/.test(raw));
+    assert.match(raw, /\[masqué\]/);
+  });
+});
+
 describe('linkFiches', () => {
+  test('replaces: ambiguous match, newer target and unique older match', () => {
+    const repo = createRepo(openStore(':memory:'));
+    repo.upsertNode({ type: 'application', key: 'a', name: 'A', source: 't' });
+    const proc = (id, pageId, title, updatedAt, extra = {}) =>
+      repo.upsertNode({ type: 'fiche', key: id, name: title, source: 'llm', attrs: { kind: 'procedure', title, pageId, url: `https://w.example.local/${pageId}`, updatedAt, replacedBy: null, tickets: [], fields: {}, lists: {}, replaces: null, fixes: null, ...extra } });
+    const link = (id) => repo.addEdge({ src: `fiche:${id}`, dst: 'application:a', type: 'concerne', source: 'knowledge', sourceRef: id });
+    // ambigu : deux anciennes procedures de meme titre sur la meme application
+    proc('1-1', '1', 'Installer', '2024-01-01'); link('1-1');
+    proc('2-1', '2', 'Installer', '2024-02-01'); link('2-1');
+    proc('3-1', '3', 'Installer v3', '2026-01-01', { replaces: it0('Installer', 'remplace Installer') }); link('3-1');
+    assert.equal(linkFiches(repo).remplacees, 0);
+    assert.equal(repo.getNode('fiche:1-1').attrs.replacedBy, null);
+    assert.equal(repo.getNode('fiche:2-1').attrs.replacedBy, null);
+    // cible plus recente : rien, et pas de remplacement mutuel
+    proc('4-1', '4', 'Sauvegarder', '2026-05-01', { replaces: it0('Restaurer', 'remplace Restaurer') }); link('4-1');
+    proc('5-1', '5', 'Restaurer', '2026-06-01', { replaces: it0('Sauvegarder', 'remplace Sauvegarder') }); link('5-1');
+    assert.equal(linkFiches(repo).remplacees, 1); // seule 5 remplace 4 (4 est plus ancienne)
+    assert.equal(repo.getNode('fiche:5-1').attrs.replacedBy, null);
+    assert.equal(repo.getNode('fiche:4-1').attrs.replacedBy, 'fiche:5-1');
+    // cible plus recente seule
+    proc('6-1', '6', 'Purger', '2027-01-01'); link('6-1');
+    proc('7-1', '7', 'Purger v2', '2026-01-01', { replaces: it0('Purger', 'remplace Purger') }); link('7-1');
+    linkFiches(repo);
+    assert.equal(repo.getNode('fiche:6-1').attrs.replacedBy, null);
+  });
+
   const mk = (repo, id, attrs) => repo.upsertNode({ type: 'fiche', key: id, name: attrs.title, source: 'llm', attrs: { replacedBy: null, tickets: [], fields: {}, lists: {}, replaces: null, fixes: null, ...attrs } });
 
   test('fixes names the incident title, and replaces resolves by the cited Confluence link first', () => {

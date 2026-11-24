@@ -110,26 +110,31 @@ function urlsIn(text) {
   return (String(text || '').match(/https?:\/\/[^\s<>"')\]]+/g) || []).map((u) => u.replace(/[.,;:!?]+$/, '').split('#')[0]);
 }
 
-/** Ancienne procédure désignée par `replaces` : lien Confluence cité d'abord, puis même application et même but. */
+/**
+ * Ancienne procédure désignée par `replaces` : lien Confluence cité d'abord, puis même application et même but.
+ * La correspondance doit être unique et la procédure remplacée strictement plus ancienne (updatedAt) que celle qui
+ * la remplace ; sinon rien n'est marqué (ni ambiguïté, ni remplacement mutuel).
+ */
 function findReplaced(newer, procedures, appsOf) {
   const item = newer.attrs.replaces;
-  const others = procedures.filter((o) => o.id !== newer.id && o.attrs.pageId !== newer.attrs.pageId);
+  const stamp = String(newer.attrs.updatedAt || '');
+  const others = procedures.filter((o) => o.id !== newer.id && o.attrs.pageId !== newer.attrs.pageId && stamp && String(o.attrs.updatedAt || '') && String(o.attrs.updatedAt) < stamp);
   const cited = urlsIn(`${item.text} ${item.evidence}`);
   if (cited.length) {
-    const byUrl = others.filter((o) => {
+    let byUrl = others.filter((o) => {
       const u = String(o.attrs.url || '').split('#')[0];
       return u && cited.some((c) => c === u || c.endsWith(`/${o.attrs.pageId}`) || c.includes(`pageId=${o.attrs.pageId}`));
     });
-    if (byUrl.length) return byUrl.find((o) => namesTitle(item.text, o.attrs.title)) || byUrl[0];
+    if (byUrl.length > 1) byUrl = byUrl.filter((o) => namesTitle(item.text, o.attrs.title));
+    if (byUrl.length) return byUrl.length === 1 ? byUrl[0] : null;
   }
   const myApps = appsOf(newer);
-  return (
-    others.find((o) => {
-      if (!appsOf(o).some((a) => myApps.includes(a))) return false;
-      const goal = o.attrs.fields && o.attrs.fields.goal ? o.attrs.fields.goal.text : '';
-      return [o.attrs.title, goal].some((t) => t && (words(t) === words(item.text) || namesTitle(item.text, t)));
-    }) || null
-  );
+  const byGoal = others.filter((o) => {
+    if (!appsOf(o).some((a) => myApps.includes(a))) return false;
+    const goal = o.attrs.fields && o.attrs.fields.goal ? o.attrs.fields.goal.text : '';
+    return [o.attrs.title, goal].some((t) => t && (words(t) === words(item.text) || namesTitle(item.text, t)));
+  });
+  return byGoal.length === 1 ? byGoal[0] : null;
 }
 
 /**

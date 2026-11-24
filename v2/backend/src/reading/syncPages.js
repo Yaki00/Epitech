@@ -306,7 +306,7 @@ async function runConfluenceSync({
     if (!knowledgeSectionsFile) return;
     const title = page.title || p.title;
     for (const s of page.sections || []) {
-      sectionRows.push({ pageId: String(p.id), docNodeId, title, url: ficheUrl({ url: p.url, sections: page.sections }, s.heading), section: s.heading || null, text: s.text });
+      sectionRows.push({ pageId: String(p.id), docNodeId, title, url: ficheUrl({ url: p.url, sections: page.sections }, s.heading), section: s.heading || null, text: String(s.text || '').replace(new RegExp(SECRET.source, 'gi'), () => '[masqué]') });
     }
   }
   /** Page sautée : analysée seulement pour ses sections. */
@@ -388,6 +388,8 @@ async function runConfluenceSync({
     const { page, p, docBase } = ctx;
     let reading;
     let verified;
+    // page relue : les empreintes des fiches sont effacées de la ligne, elles ne sont réécrites que si les fiches réussissent
+    ctx.ops = {};
     try {
       reading = await readPage(
         llm,
@@ -558,7 +560,7 @@ function retireOrphans(repo, now) {
     if (NEVER_RETIRED.has(type)) continue;
     for (const node of repo.listByType(type)) {
       if (!node.attrs.fromLlm || hasInventoryRow(node)) continue;
-      const active = [...repo.edgesFrom(node.id), ...repo.edgesTo(node.id)].some((e) => (e.type === 'mentions' ? mentionAlive(e) : !isInactiveEdge(e)));
+      const active = [...repo.edgesFrom(node.id), ...repo.edgesTo(node.id)].filter((e) => e.source !== 'knowledge').some((e) => (e.type === 'mentions' ? mentionAlive(e) : !isInactiveEdge(e)));
       if (!active && !node.attrs.retired) {
         repo.patchNodeAttrs(node.id, { retired: true, retiredAt: at });
         n++;
