@@ -254,7 +254,8 @@ l'erreur est enregistrée avec l'étape `fiches` et l'empreinte reste ancienne, 
 
 À chaque passage, `knowledge-sections.json` (dans `DATA_DIR`, écriture atomique) reçoit les sections de **toutes** les pages
 (`pageId`, `title`, `url` avec ancre, `section`, `text`, `period`), y compris les pages sautées. Tout ce qui ressemble à un secret y est
-remplacé par `[masqué]`. Il sert de second recours à la recherche. Illisible ou absent : la recherche porte sur les fiches seules
+remplacé par `[masqué]`, et les adresses électroniques et numéros de téléphone sont retirés (même nettoyage que pour les fiches). Un passage
+limité (`--limit`) ne réécrit pas ce fichier : il n'a vu qu'une partie des pages. Il sert de second recours à la recherche. Illisible ou absent : la recherche porte sur les fiches seules
 (un avertissement par démarrage).
 
 ### Recherche (`knowledge/search.js`)
@@ -271,12 +272,14 @@ jamais rendues.
    0,7, `repo.resolve`, plus l'argument `application`). Fiche de l'application ou du serveur de la question : x1,5 (`OWN_APP_BONUS`) ;
    fiche d'une **voisine** : x1,2 (`NEIGHBOUR_BONUS`). Voisines : applications liées par un lien actif `calls`, `depends_on`,
    `reads_from` ou `writes_to` (dans les deux sens), et celles qui partagent un serveur, une base ou une file actifs.
-4. **Pénalités** : procédure ou pratique de période `past` x0,5 (`OLD_MALUS`) ; procédure remplacée (`replacedBy`) x0,3
+4. **Pénalités** : procédure ou pratique de période `past` x0,5 (`OLD_MALUS`), de même qu'une section d'une page de période `past` ;
+   procédure remplacée (`replacedBy`) x0,3
    (`REPLACED_MALUS`).
 5. **Égalités** : par blocs de scores à 5 % près (`TIE_WINDOW`), la fiche dont la page est la plus récente passe d'abord.
 6. **`otherApplication`** : vrai pour une fiche qui concerne des applications, aucune n'étant celle de la question (alors qu'une
    application de la question est reconnue) : l'assistant dit que c'est « la plus proche », pas celle demandée.
 7. **Sections de pages** en second recours : au plus cinq, sans doublon avec une fiche déjà rendue (même page et même section).
+   Chaque section rendue porte `period` et `old` (vrai si la page est de période `past`).
 
 Résultat : `{ fiches (10 par défaut, 50 au plus), sections, apps }`. Chaque fiche rendue : `id`, `kind`, `title`, `appNames`, `period`,
 `updatedAt`, `url`, `section`, `excerpt`, `score`, `old`, `replaced`, `otherApplication`. Sans fiche ou sans mot utile : listes vides, sans erreur.
@@ -304,7 +307,7 @@ La consigne système demande de chercher avant de répondre à toute question de
 **Contrôle par le code**, après la réponse : toute URL de la réponse (lien markdown, entre chevrons, nue) absente des résultats d'outils
 de **cette** question est retirée (un lien markdown garde son libellé) et listée dans `removedLinks`. La réponse porte aussi `sources` :
 les fiches ouvertes par `open_fiche`, plus les fiches et sections dont l'adresse figure dans la réponse finale (`id`, `kind`, `title`,
-`url`, `updatedAt` (date de la page, absente pour une section), `appNames`, `old`, `replaced`, `otherApplication`). L'apostrophe (droite ou typographique) fait partie d'une adresse quand elle est entre deux caractères d'adresse, et n'est retirée qu'en fin d'adresse. Le nombre d'étapes reste borné (`maxRounds`, 5) ; s'il est épuisé après des recherches documentaires qui n'ont rendu ni fiche ni section, la réponse est la formule fixe « Rien trouvé dans la documentation pour cette question. » (EN : « Nothing found in the documentation for this question. »), sans lien ni source.
+`url`, `updatedAt` (date de la page, absente pour une section), `appNames`, `old`, `replaced`, `otherApplication`). Une fiche ouverte garde `otherApplication` (et `old`, `replaced`) de la recherche de la même question, même sans lien dans la réponse ; une section porte son `old`. Pour un incident ou un correctif, `period` n'est pas montrée au modèle (seul `old` compte). Quand la réponse finale est la formule « rien trouvé », `sources` est vide. L'apostrophe (droite ou typographique) fait partie d'une adresse quand elle est entre deux caractères d'adresse, et n'est retirée qu'en fin d'adresse. Le nombre d'étapes reste borné (`maxRounds`, 5) ; s'il est épuisé après des recherches documentaires qui n'ont rendu ni fiche ni section, la réponse est la formule fixe « Rien trouvé dans la documentation pour cette question. » (EN : « Nothing found in the documentation for this question. »), sans lien ni source.
 
 ## Score de documentation
 
@@ -321,7 +324,7 @@ Filtre par défaut de l'interface : `PRD` et `STG` ; `DEV` d'un clic ; le choix 
 ## Mode démo
 
 `DEMO_MODE=true` : `demo/generate.js` génère un parc fictif reproductible (graine fixe), `naemonMock.js` simule la supervision
-(état qui évolue) et `chatMock.js` répond à l'assistant sans IA. Aucun appel réseau ; les boutons de synchronisation sont coupés.
+(état qui évolue) et `chatMock.js` répond à l'assistant sans IA. Aucun appel réseau ; la recherche de la documentation n'utilise que les données de la démo (matcher de la démo, aucun `knowledge-sections.json` ni `perimeter.json` réel) ; les boutons de synchronisation sont coupés.
 `doctor` signale le mode démo par un avertissement pour éviter de le laisser actif par erreur.
 
 ## Reprise de la v1

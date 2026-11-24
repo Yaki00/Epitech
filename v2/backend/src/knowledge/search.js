@@ -271,11 +271,14 @@ function searchKnowledge(index, repo, matcher, { query, application, limit = DEF
   // sections de pages : second recours, sans doublon avec une fiche déjà rendue
   const seen = new Set(fiches.filter((f) => f.section).map((f) => `${f.url && f.url.split('#')[0]}|${normalizeText(f.section)}`));
   const sections = [];
-  const scored = index.sections.docs.map((d) => ({ d, s: bm25Score(index.sections, d, terms) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s);
+  const scored = index.sections.docs
+    .map((d) => ({ d, s: bm25Score(index.sections, d, terms) * (d.id.period === 'past' ? OLD_MALUS : 1) }))
+    .filter((x) => x.s > 0)
+    .sort((a, b) => b.s - a.s);
   for (const { d, s } of scored) {
     const sec = d.id;
     if (seen.has(`${String(sec.url || '').split('#')[0]}|${normalizeText(sec.section || '')}`) && sec.section) continue;
-    sections.push({ pageId: sec.pageId, title: sec.title, section: sec.section || null, url: sec.url || null, excerpt: excerptOf(sec.text, terms), score: Math.round(s * 1000) / 1000 });
+    sections.push({ pageId: sec.pageId, title: sec.title, section: sec.section || null, url: sec.url || null, period: sec.period || null, old: sec.period === 'past', excerpt: excerptOf(sec.text, terms), score: Math.round(s * 1000) / 1000 });
     if (sections.length >= MAX_SECTION_HITS) break;
   }
   return { fiches, sections, apps: [...target.apps] };

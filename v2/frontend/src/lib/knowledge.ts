@@ -31,7 +31,7 @@ export interface SourceItem extends Flags {
   title: string;
   url: string | null;
   appNames: string[];
-  /** pas fournie par le serveur pour l'instant : affichée si elle existe */
+  /** date de la page (fiches), absente pour une section de page */
   updatedAt?: string | null;
 }
 

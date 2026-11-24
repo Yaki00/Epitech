@@ -339,6 +339,29 @@ describe('fiches : corrections de revue', () => {
   });
 });
 
+describe('sections : données personnelles et limite', () => {
+  test('email and phone are removed from the sections file', async () => {
+    const { run, sectionsFile, exportDir } = setup([T_MEET]);
+    fs.writeFileSync(path.join(exportDir, 'ESP', '8005 - CR reunion du 1211', 'page.html'), '<h2 id="c">Contact</h2><p>contact admin@example.com 01 23 45 67 89 pour toute demande.</p>');
+    await run();
+    const raw = fs.readFileSync(sectionsFile, 'utf8');
+    assert.ok(!/admin@example\.com/.test(raw));
+    assert.ok(!/01 23 45 67 89/.test(raw));
+    assert.match(raw, /pour toute demande/);
+  });
+
+  test('a limited run leaves the sections file untouched', async () => {
+    const { run, sectionsFile } = setup();
+    await run();
+    const before = fs.readFileSync(sectionsFile, 'utf8');
+    await run({ limit: 1 });
+    assert.equal(fs.readFileSync(sectionsFile, 'utf8'), before);
+    fs.rmSync(sectionsFile);
+    await run({ limit: 1 });
+    assert.ok(!fs.existsSync(sectionsFile));
+  });
+});
+
 describe('linkFiches', () => {
   test('replaces: ambiguous match, newer target and unique older match', () => {
     const repo = createRepo(openStore(':memory:'));

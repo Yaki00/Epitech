@@ -22,6 +22,7 @@ let jobs = null;
 let poller = null; // relève Naemon (démo : source simulée ; production : thruk ou csv ; off : aucune)
 let history = null; // historique des imports
 let dataDir = config.dataDir;
+let demoMatcher = null; // démo : la reconnaissance des applications vient des données de la démo
 
 if (config.demo) {
   const { createPoller } = require('./naemon/poller');
@@ -37,6 +38,7 @@ if (config.demo) {
   history = createHistory(dataDir, { keep: config.history.keep });
   const demo = generateDemo(repo, history, { seed: 42, now: Date.now(), dir: dataDir });
   repo.flush();
+  demoMatcher = demo.matcher;
 
   // Naemon simulé : une relève par minute, l'état évolue à chaque fois
   const mock = createMockNaemon(repo, { seed: 42 });
@@ -62,7 +64,7 @@ if (config.demo) {
   jobs = config.allowUiSync ? createJobRunner({ scriptsDir: path.join(config.root, 'scripts'), cwd: config.root, logger: log }) : null;
 }
 
-const app = createApp({ repo, llm, logger: log, frontendDist: config.frontendDist, toolsMode: config.llm.toolsMode, jobs, poller, history, config });
+const app = createApp({ repo, llm, logger: log, frontendDist: config.frontendDist, toolsMode: config.llm.toolsMode, jobs, poller, history, config, matcher: demoMatcher });
 
 const server = app.listen(config.port, config.host, () => {
   const shown = config.host === '0.0.0.0' ? 'localhost' : config.host;

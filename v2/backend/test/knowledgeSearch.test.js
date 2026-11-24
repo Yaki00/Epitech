@@ -142,6 +142,19 @@ describe('recherche des fiches', () => {
     assert.ok(r.sections[0].excerpt.includes('zeta'));
   });
 
+  test('section of a past page is old and ranked after an equivalent current one', () => {
+    const w = world();
+    const base = { title: 'Page', section: 'Reprise', text: 'relancer le planificateur zeta apres incident' };
+    const sections = [
+      { pageId: '1', url: 'https://wiki.example.local/1', period: 'past', ...base },
+      { pageId: '2', url: 'https://wiki.example.local/2', period: 'current', ...base },
+    ];
+    const r = w.search('relancer planificateur zeta', {}, sections);
+    assert.deepEqual(r.sections.map((s) => s.pageId), ['2', '1']);
+    assert.deepEqual(r.sections.map((s) => [s.old, s.period]), [[false, 'current'], [true, 'past']]);
+    assert.ok(r.sections[1].score < r.sections[0].score);
+  });
+
   test('empty index', () => {
     const w = world();
     const r = w.search('quelque chose');
@@ -302,6 +315,17 @@ describe('correctifs de revue', () => {
         assert.deepEqual(r.body.sections, []);
       }
       assert.equal(warns.filter((m) => /sections/.test(m)).length, 1);
+    });
+
+    test('demo mode ignores the real sections file and the real perimeter', async () => {
+      const { w, dir } = mk();
+      fs.writeFileSync(path.join(dir, 'knowledge-sections.json'), JSON.stringify([{ pageId: '99', title: 'Piege', url: 'https://wiki.example.local/99', section: 'S', text: 'relancer le planificateur zeta', period: 'current' }]));
+      fs.writeFileSync(path.join(dir, 'perimeter.json'), JSON.stringify({ applications: [{ name: 'Piege', aliases: [] }] }));
+      const app = createApp({ repo: w.repo, llm: null, logger: { info() {}, error() {}, warn() {} }, config: { dataDir: dir, perimeterFile: path.join(dir, 'perimeter.json'), demo: true }, matcher: w.matcher });
+      const r = await request(app).get('/api/knowledge/search').query({ q: 'relancer planificateur zeta' }).expect(200);
+      assert.deepEqual(r.body.sections, []);
+      const real = createApp({ repo: w.repo, llm: null, logger: { info() {}, error() {}, warn() {} }, config: { dataDir: dir }, matcher: w.matcher });
+      assert.equal((await request(real).get('/api/knowledge/search').query({ q: 'relancer planificateur zeta' }).expect(200)).body.sections.length, 1);
     });
 
     test('valid sections file is used', async () => {

@@ -136,6 +136,11 @@ function splitPersonal(s, phones) {
   return marked.split('\u0000');
 }
 
+/** Texte libre sans adresse électronique ni numéro de téléphone (les espaces sont gardés tels quels). */
+function cleanPersonal(s) {
+  return String(s || '').replace(EMAIL, '').replace(PHONE_CANDIDATE, (m) => (isPhone(m) ? '' : m));
+}
+
 /** Nom sans adresse ni numéro. */
 function cleanName(s, phones) {
   return splitPersonal(s, phones)
@@ -329,6 +334,7 @@ module.exports = {
   opt,
   list,
   cleanName,
+  cleanPersonal,
   cleanEvidence,
   READING_SCHEMA,
   KINDS,

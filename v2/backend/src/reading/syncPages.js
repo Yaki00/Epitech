@@ -38,6 +38,7 @@ const { verifyReading, DOC_SOURCES } = require('./verify');
 const { applyReading, PAGE_SOURCES, INACTIVE_STATUS } = require('./apply');
 const { OPS_KINDS, OPS_VERSION } = require('../knowledge/schema');
 const { readFiches } = require('../knowledge/readFiches');
+const { cleanPersonal } = require('./schema');
 const { verifyFiches, SECRET } = require('../knowledge/verify');
 const { applyFiches, linkFiches, ficheUrl } = require('../knowledge/apply');
 
@@ -306,7 +307,7 @@ async function runConfluenceSync({
     if (!knowledgeSectionsFile) return;
     const title = page.title || p.title;
     for (const s of page.sections || []) {
-      sectionRows.push({ pageId: String(p.id), docNodeId, title, url: ficheUrl({ url: p.url, sections: page.sections }, s.heading), section: s.heading || null, text: String(s.text || '').replace(new RegExp(SECRET.source, 'gi'), () => '[masqué]') });
+      sectionRows.push({ pageId: String(p.id), docNodeId, title, url: ficheUrl({ url: p.url, sections: page.sections }, s.heading), section: s.heading || null, text: cleanPersonal(String(s.text || '').replace(new RegExp(SECRET.source, 'gi'), () => '[masqué]')) });
     }
   }
   /** Page sautée : analysée seulement pour ses sections. */
@@ -320,7 +321,8 @@ async function runConfluenceSync({
   }
 
   function writeSections() {
-    if (!knowledgeSectionsFile) return;
+    // un passage limité n'a vu qu'une partie des pages : il ne réécrit pas le fichier complet
+    if (!knowledgeSectionsFile || Number.isFinite(limit)) return;
     try {
       const rows = sectionRows.map(({ docNodeId, ...r }) => {
         const n = repo.getNode(docNodeId);

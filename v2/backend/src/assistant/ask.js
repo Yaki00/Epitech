@@ -142,7 +142,7 @@ async function searchKnowledgeTool(repo, args, ctx) {
   const k = typeof ctx.knowledge === 'function' ? ctx.knowledge() : ctx.knowledge;
   if (!k || !k.index) return { fiches: [], sections: [], apps: [] };
   const { fiches, sections, apps } = await searchWithRerank(k.index, repo, k.matcher, { query: String(args.query || ''), application: args.application ? String(args.application) : undefined, rerank: k.rerank || undefined });
-  return { fiches, sections, apps };
+  return { fiches: fiches.map(forModel), sections, apps };
 }
 
 /** Rend le résultat, ou une promesse pour search_knowledge (les appelants font `await`). */
@@ -151,7 +151,7 @@ function runTool(repo, name, args, ctx = {}) {
     case 'search_knowledge':
       return searchKnowledgeTool(repo, args, ctx);
     case 'open_fiche':
-      return getFiche(repo, args.id) || { error: `fiche inconnue : ${args.id}` };
+      return forModel(getFiche(repo, args.id)) || { error: `fiche inconnue : ${args.id}` };
     case 'search_entities':
       return repo.search(String(args.query || ''), 15).map((n) => ({ id: n.id, name: n.name, type: n.type, attrs: n.attrs, ...(outOf(n) ? { outOfInventory: true } : {}) }));
     case 'owners_of':
@@ -297,21 +297,32 @@ function controlLinks(answer, allowed) {
   return { text: text.replace(/[ \t]+\n/g, '\n').replace(/ {2,}/g, ' ').trim(), removed };
 }
 
+// Pour un incident ou un correctif, la période ne veut rien dire : seul « old » compte (jamais montrée au modèle).
+const NO_PERIOD_KINDS = new Set(['incident', 'correctif']);
+const forModel = (f) => {
+  if (!f || typeof f !== 'object' || !NO_PERIOD_KINDS.has(f.kind) || !('period' in f)) return f;
+  const { period, ...rest } = f;
+  return rest;
+};
+
 const sourceOf = (f) => ({ id: f.id, kind: f.kind, title: f.title, url: f.url || null, ...(f.updatedAt ? { updatedAt: f.updatedAt } : {}), appNames: f.appNames || [], old: Boolean(f.old), replaced: Boolean(f.replaced), otherApplication: Boolean(f.otherApplication) });
 
 /** Fiches ouvertes, plus fiches et sections dont l'URL figure dans la réponse finale. */
 function sourcesOf(results, text) {
   const inAnswer = urlsOf(text);
   const out = new Map();
+  // drapeaux de la recherche de la même question (une fiche ouverte n'a pas la question en tête)
+  const found = new Map();
+  for (const r of results) for (const f of r && Array.isArray(r.fiches) ? r.fiches : []) if (f && f.id && !found.has(f.id)) found.set(f.id, f);
   const add = (s, opened) => {
     const key = s.id || `url:${normUrl(s.url)}`;
     if (!out.has(key) && (opened || (s.url && inAnswer.has(normUrl(s.url))))) out.set(key, s);
   };
   for (const r of results) {
     if (!r || typeof r !== 'object') continue;
-    if (r.id && r.kind && r.title && Array.isArray(r.appNames) && r.fields) add(sourceOf(r), true); // résultat d'open_fiche
+    if (r.id && r.kind && r.title && Array.isArray(r.appNames) && r.fields) add(sourceOf(found.has(r.id) ? { ...r, otherApplication: found.get(r.id).otherApplication } : r), true); // résultat d'open_fiche
     for (const f of Array.isArray(r.fiches) ? r.fiches : []) add(sourceOf(f), false);
-    for (const s of Array.isArray(r.sections) ? r.sections : []) add({ id: s.pageId || null, kind: 'page', title: s.title, url: s.url || null, appNames: [], old: false, replaced: false, otherApplication: false }, false);
+    for (const s of Array.isArray(r.sections) ? r.sections : []) add({ id: s.pageId || null, kind: 'page', title: s.title, url: s.url || null, appNames: [], old: Boolean(s.old), replaced: false, otherApplication: false }, false);
   }
   return [...out.values()];
 }
@@ -338,7 +349,9 @@ async function ask({ llm, repo, question, history = [], maxRounds = 5, toolsMode
     }
   }
   const { text, removed } = controlLinks(out.answer, urlsOf(ctx.results));
-  return { ...out, answer: text, sources: sourcesOf(ctx.results, text), removedLinks: removed };
+  // la formule « rien trouvé » ne s'appuie sur aucune source, même si une fiche a été ouverte
+  const nothing = /^\W*(rien trouvé dans la documentation|nothing found in the documentation)/i.test(text);
+  return { ...out, answer: text, sources: nothing ? [] : sourcesOf(ctx.results, text), removedLinks: removed };
 }
 
 module.exports = { ask, runTool, TOOLS, jsonToolsPrompt, systemFor };

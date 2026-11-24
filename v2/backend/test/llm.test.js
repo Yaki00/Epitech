@@ -415,6 +415,52 @@ describe('assistant ask (documentation)', () => {
     assert.deepEqual(r.sources[0], { id: w.ficheId, kind: 'incident', title: 'File pleine', url: 'https://wiki.example.local/7001', updatedAt: '2026-10-01T10:00:00.000Z', appNames: ['OrderHub'], old: false, replaced: false, otherApplication: false });
   });
 
+  test('an opened fiche keeps otherApplication from the search of the same question, without a link in the answer', async () => {
+    const PER = { applications: [{ name: 'OrderHub', aliases: [], auid: null }, { name: 'Marelle', aliases: [], auid: null }], ignoreOtherApplications: true };
+    const w = world();
+    ensurePerimeterNodes(w.repo, PER);
+    w.knowledge.matcher = createMatcher(PER, w.repo);
+    const doc = w.repo.upsertNode({ type: 'document', key: 'confluence-7002', name: 'Page 7002', source: 'confluence' });
+    const f = { kind: 'incident', title: item('File pleine Marelle'), section: null, date: null, fields: { symptoms: item('la file Q.MRL.EVT est saturee') }, lists: {}, appIds: ['application:marelle'], serverIds: [], unresolved: [], tickets: [], keywords: [], replaces: null, fixes: null };
+    const id = applyFiches(w.repo, { fiches: [f], rejected: [] }, { pageId: '7002', docNodeId: doc, page: { title: 'Page 7002', url: 'https://wiki.example.local/7002', updatedAt: '2026-10-01T10:00:00.000Z' }, period: 'current' }).fiches[0];
+    w.knowledge.index = buildKnowledgeIndex(w.repo, { sections: [] });
+    const { r } = await run(w, [
+      { status: 200, body: reply('', { tool_calls: [toolCall('1', 'search_knowledge', { query: 'file Q.MRL.EVT saturee', application: 'OrderHub' })] }) },
+      { status: 200, body: reply('', { tool_calls: [toolCall('2', 'open_fiche', { id })] }) },
+      { status: 200, body: reply('Voici les etapes.') },
+    ]);
+    assert.equal(r.sources.length, 1);
+    assert.equal(r.sources[0].id, id);
+    assert.equal(r.sources[0].otherApplication, true);
+  });
+
+  test('section sources carry old', async () => {
+    const w = world({ withFiche: false });
+    w.knowledge.index = buildKnowledgeIndex(w.repo, { sections: [{ pageId: '9', title: 'Vieille page', url: 'https://wiki.example.local/9', section: 'Reprise', text: 'relancer le planificateur zeta', period: 'past' }] });
+    const { r } = await run(w, [
+      { status: 200, body: reply('', { tool_calls: [toolCall('1', 'search_knowledge', { query: 'relancer planificateur zeta' })] }) },
+      { status: 200, body: reply('Voir https://wiki.example.local/9') },
+    ]);
+    assert.equal(r.sources.length, 1);
+    assert.equal(r.sources[0].old, true);
+  });
+
+  test('period is hidden from the model for incident fiches, kept for procedures', async () => {
+    const w = world();
+    const { f } = await run(w, [...calls(w), { status: 200, body: reply('ok') }]);
+    const search = JSON.parse(f.calls[1].body.messages.at(-1).content);
+    assert.ok(!('period' in search.fiches[0]));
+    const opened = JSON.parse(f.calls[2].body.messages.at(-1).content);
+    assert.ok(!('period' in opened));
+    assert.equal(opened.old, false);
+  });
+
+  test('nothing-found final answer gives no sources even if a fiche was opened', async () => {
+    const w = world();
+    const { r } = await run(w, [...calls(w), { status: 200, body: reply('Rien trouvé dans la documentation pour cette question.') }]);
+    assert.deepEqual(r.sources, []);
+  });
+
   test('nothing found says so', async () => {
     const w = world({ withFiche: false });
     const { r, f } = await run(w, [

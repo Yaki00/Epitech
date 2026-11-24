@@ -17,7 +17,7 @@
  * une citation), puis le code garde ce qui est cité dans la page et le rapproche des inventaires
  * et du périmètre (config/perimeter.json). Les consignes de config/consignes-ia.md sont données à
  * l'IA ; les modifier relance la lecture des pages au passage suivant. Rapports CSV dans data/rapports/.
- * Les pages d'exploitation (incident, version, exploitation, installation) donnent aussi des fiches, écrites dans le
+ * Les pages d'exploitation (incident, version, exploitation, installation, autre) donnent aussi des fiches, écrites dans le
  * graphe ; les sections de toutes les pages sont écrites dans data/knowledge-sections.json (recherche de second recours).
  * Lancer l'import des inventaires AVANT : ils servent de référence à la vérification.
  */

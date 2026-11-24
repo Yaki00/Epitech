@@ -33,7 +33,7 @@ function createApp({ repo, llm, logger, frontendDist, toolsMode = 'native', jobs
   // recherche dans les fiches : index en mémoire, refait à chaque rechargement du store
   let warnedSections = false;
   const readSections = () => {
-    if (!config || !config.dataDir) return [];
+    if (!config || !config.dataDir || config.demo) return []; // démo : jamais les sections réelles
     const file = path.join(config.dataDir, 'knowledge-sections.json');
     try {
       if (!fs.existsSync(file)) return [];
@@ -49,7 +49,7 @@ function createApp({ repo, llm, logger, frontendDist, toolsMode = 'native', jobs
   const makeMatcher = () => {
     if (givenMatcher) return givenMatcher;
     try {
-      const perimeter = (config && config.perimeterFile && loadPerimeter(config.perimeterFile)) || {
+      const perimeter = (config && !config.demo && config.perimeterFile && loadPerimeter(config.perimeterFile)) || {
         applications: repo.listByType('application').map((a) => ({ name: a.name, aliases: [], auid: null, naemonHostgroups: [] })),
         ignoreOtherApplications: true,
       };
