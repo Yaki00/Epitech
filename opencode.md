@@ -175,7 +175,7 @@ L'interface est déjà compilée dans `v2/frontend/dist` ; si elle manque, seule
 | `NAEMON_CSV_FILE` | pour `csv` ; les colonnes sont décrites dans le bloc `naemon` de `mappings.json` (proposer, attendre l'accord) |
 | `NAEMON_POLL_MINUTES` | minutes entre deux relevés (5 par défaut) |
 | `NAEMON_URL_TEMPLATE` | lien du bouton « Monitoring Naemon », `{app}` = nom de l'application |
-| `LLM_REASONING_EFFORT` | vide par défaut ; `none` si l'IA rend des réponses vides ou coupées |
+| `LLM_REASONING_EFFORT` | `none` conseillé (modèle de `.env.example`) ; si la passerelle refuse ce réglage, Lyra le retire seul et l'écrit dans le journal |
 | `LLM_MAX_TOKENS_EXTRACT`, `READING_CHUNK_CHARS`, `CONSIGNES_FILE` | laisser les valeurs par défaut sauf demande |
 
 `NODE_EXTRA_CA_CERTS` (certificat d'entreprise) se définit dans l'environnement **système**, pas dans `.env`.

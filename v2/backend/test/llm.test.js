@@ -51,6 +51,29 @@ describe('llmClient', () => {
     assert.equal(f.calls.length, 3);
   });
 
+  test('reasoning_effort refusé -> désactivé et relancé sans, puis response_format refusé à son tour', async () => {
+    const f = fakeFetch([
+      { status: 400, body: '{"error":{"message":"Unsupported parameter: reasoning_effort"}}' },
+      { status: 400, body: 'unsupported response_format' },
+      { status: 200, body: reply('{"a":1}') },
+      { status: 200, body: reply('{"a":2}') },
+    ]);
+    const llm = createLlmClient({ ...baseCfg, reasoningEffort: 'none' }, { fetch: f, logger: silent });
+    assert.equal(f.calls.length, 0);
+    assert.deepEqual(await llm.chatJson({ messages: [] }), { a: 1 });
+    assert.equal(f.calls[0].body.reasoning_effort, 'none');
+    assert.deepEqual([f.calls[1].body.reasoning_effort, f.calls[2].body.reasoning_effort, f.calls[2].body.response_format], [undefined, undefined, undefined]);
+    await llm.chatJson({ messages: [{ role: 'user', content: 'autre' }] });
+    assert.deepEqual([f.calls[3].body.reasoning_effort, f.calls[3].body.response_format], [undefined, undefined]);
+  });
+
+  test('une autre erreur 400 ne retire aucun réglage', async () => {
+    const f = fakeFetch([{ status: 400, body: 'context length exceeded' }]);
+    const llm = createLlmClient({ ...baseCfg, reasoningEffort: 'none' }, { fetch: f, logger: silent });
+    await assert.rejects(() => llm.chat({ messages: [] }), /HTTP 400/);
+    assert.equal(f.calls.length, 1);
+  });
+
   test('response_format refusé -> désactivé et relancé sans', async () => {
     const f = fakeFetch([{ status: 400, body: 'unsupported response_format' }, { status: 200, body: reply('{"a":1}') }, { status: 200, body: reply('{"a":2}') }]);
     const llm = createLlmClient(baseCfg, { fetch: f, logger: silent });

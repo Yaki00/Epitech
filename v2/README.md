@@ -172,7 +172,7 @@ l'environnement.
 
 | Variable | Rôle |
 |---|---|
-| `LLM_REASONING_EFFORT` | vide par défaut (rien n'est envoyé). Mettre `none` si le modèle « réfléchit » et rend des réponses vides ou coupées |
+| `LLM_REASONING_EFFORT` | `none` conseillé (modèle de `.env.example`) : la réflexion du modèle est coupée. Vide : rien n'est envoyé. Si la passerelle refuse ce réglage (erreur 400), Lyra le retire seul pour la suite et l'écrit dans le journal |
 | `LLM_MAX_TOKENS_EXTRACT` | place de réponse pour la lecture d'un morceau (4096 par défaut) |
 | `READING_CHUNK_CHARS` | taille d'un morceau de page (12000 par défaut, 1000 au minimum) |
 | `CONSIGNES_FILE` | chemin du fichier de consignes (`./config/consignes-ia.md` par défaut) |

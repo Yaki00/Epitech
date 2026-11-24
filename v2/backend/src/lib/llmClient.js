@@ -35,6 +35,7 @@ function createLlmClient(cfg, deps = {}) {
   const limit = createLimiter(cfg.concurrency || 4);
   const stats = { calls: 0, cacheHits: 0, retries: 0, errors: 0, promptTokens: 0, completionTokens: 0 };
   let jsonModeSupported = cfg.jsonMode !== false;
+  let reasoningSupported = true; // coupé si la passerelle refuse reasoning_effort
 
   const modelFor = (task) => cfg.models?.[task] || task;
 
@@ -119,7 +120,7 @@ function createLlmClient(cfg, deps = {}) {
   async function chat({ task = 'chat', messages, temperature = 0, maxTokens = 2048, json = false, tools, cache, validate }) {
     const body = { model: modelFor(task), messages, temperature, max_tokens: maxTokens };
     if (tools) body.tools = tools;
-    if (cfg.reasoningEffort) body.reasoning_effort = cfg.reasoningEffort;
+    if (cfg.reasoningEffort && reasoningSupported) body.reasoning_effort = cfg.reasoningEffort;
     if (json && jsonModeSupported) body.response_format = { type: 'json_object' };
 
     const useCache = cache ?? (temperature === 0 && !tools);
@@ -135,16 +136,24 @@ function createLlmClient(cfg, deps = {}) {
 
     const callOnce = async (reqBody) => {
       let raw;
-      try {
-        raw = await post('/chat/completions', reqBody);
-      } catch (err) {
-        // Passerelle qui refuse response_format : on le coupe pour la suite et on réessaie.
-        if (err.status === 400 && reqBody.response_format && /response_format|json/i.test(err.body || '')) {
-          log.warn('response_format refusé par la passerelle, désactivé pour la suite');
-          jsonModeSupported = false;
-          delete reqBody.response_format;
+      // Passerelle qui refuse un réglage facultatif (reasoning_effort, response_format) : on le coupe pour
+      // la suite et on réessaie ; chaque réglage n'est retiré qu'une fois.
+      for (;;) {
+        try {
           raw = await post('/chat/completions', reqBody);
-        } else throw err;
+          break;
+        } catch (err) {
+          const said = err.status === 400 ? String(err.body || '') : '';
+          if (said && reqBody.reasoning_effort !== undefined && /reasoning/i.test(said)) {
+            log.warn('reasoning_effort refusé par la passerelle, désactivé pour la suite (le modèle peut réfléchir : réponses plus lentes)');
+            reasoningSupported = false;
+            delete reqBody.reasoning_effort;
+          } else if (said && reqBody.response_format && /response_format|json/i.test(said)) {
+            log.warn('response_format refusé par la passerelle, désactivé pour la suite');
+            jsonModeSupported = false;
+            delete reqBody.response_format;
+          } else throw err;
+        }
       }
       const choice = raw?.choices?.[0] || {};
       const msg = choice.message || {};
