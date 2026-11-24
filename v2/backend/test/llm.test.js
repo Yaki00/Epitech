@@ -348,3 +348,89 @@ describe('langue du chat', () => {
     await assert.rejects(() => llm.rerank({ query: 'q', documents: ['a', 'b'] }), /rerank/i);
   });
 });
+
+describe('assistant ask (documentation)', () => {
+  const { createMatcher, ensurePerimeterNodes } = require('../src/perimeter/perimeter');
+  const { applyFiches } = require('../src/knowledge/apply');
+  const { buildKnowledgeIndex } = require('../src/knowledge/search');
+  const item = (text) => ({ text, evidence: text });
+  const PERIMETER = { applications: [{ name: 'OrderHub', aliases: [], auid: null }], ignoreOtherApplications: true };
+  const toolCall = (id, name, args) => ({ id, type: 'function', function: { name, arguments: JSON.stringify(args) } });
+
+  function world({ withFiche = true } = {}) {
+    const repo = createRepo(openStore(':memory:'));
+    ensurePerimeterNodes(repo, PERIMETER);
+    let ficheId = null;
+    if (withFiche) {
+      const doc = repo.upsertNode({ type: 'document', key: 'confluence-7001', name: 'Page 7001', source: 'confluence' });
+      const f = { kind: 'incident', title: item('File pleine'), section: null, date: null, fields: { symptoms: item('la file Q.MRL.EVT est saturee') }, lists: {}, appIds: ['application:orderhub'], serverIds: [], unresolved: [], tickets: [], keywords: [], replaces: null, fixes: null };
+      ficheId = applyFiches(repo, { fiches: [f], rejected: [] }, { pageId: '7001', docNodeId: doc, page: { title: 'Page 7001', url: 'https://wiki.example.local/7001', updatedAt: '2026-10-01T10:00:00.000Z' }, period: 'current' }).fiches[0];
+    }
+    const knowledge = { index: buildKnowledgeIndex(repo, { sections: [] }), matcher: createMatcher(PERIMETER, repo) };
+    return { repo, knowledge, ficheId };
+  }
+  const run = async (w, responses, extra = {}) => {
+    const f = fakeFetch(responses);
+    const llm = createLlmClient(baseCfg, { fetch: f, logger: silent });
+    const r = await ask({ llm, repo: w.repo, question: 'la file Q.MRL.EVT est saturee', knowledge: w.knowledge, ...extra });
+    return { r, f };
+  };
+  const calls = (w) => [
+    { status: 200, body: reply('', { tool_calls: [toolCall('1', 'search_knowledge', { query: 'file Q.MRL.EVT saturee' })] }) },
+    { status: 200, body: reply('', { tool_calls: [toolCall('2', 'open_fiche', { id: w.ficheId })] }) },
+  ];
+
+  test('troubleshooting question calls search then open', async () => {
+    const w = world();
+    const { r, f } = await run(w, [...calls(w), { status: 200, body: reply('Voir File pleine https://wiki.example.local/7001') }]);
+    assert.deepEqual(r.toolTrace.map((t) => t.tool), ['search_knowledge', 'open_fiche']);
+    assert.match(f.calls[1].body.messages.at(-1).content, /File pleine/);
+    assert.match(f.calls[2].body.messages.at(-1).content, /wiki\.example\.local\/7001/);
+    assert.match(f.calls[0].body.messages[0].content, /rien trouvé dans la documentation/);
+    assert.ok(f.calls[0].body.tools.some((t) => t.function.name === 'search_knowledge'));
+  });
+
+  test('answer keeps only links from tool results', async () => {
+    const w = world();
+    const text = 'Voir [la fiche](https://wiki.example.local/7001) et [un autre](https://evil.example.com/x) puis https://invented.example.com/y fin';
+    const { r } = await run(w, [...calls(w), { status: 200, body: reply(text) }]);
+    assert.ok(r.answer.includes('https://wiki.example.local/7001'));
+    assert.ok(r.answer.includes('un autre'));
+    assert.ok(!r.answer.includes('evil.example.com'));
+    assert.ok(!r.answer.includes('invented.example.com'));
+    assert.deepEqual(r.removedLinks, ['https://evil.example.com/x', 'https://invented.example.com/y']);
+  });
+
+  test('trailing slash and anchor do not count as different links', async () => {
+    const w = world();
+    const { r } = await run(w, [...calls(w), { status: 200, body: reply('A https://wiki.example.local/7001/ et B https://wiki.example.local/7001#etape-2 ok') }]);
+    assert.deepEqual(r.removedLinks, []);
+    assert.ok(r.answer.includes('7001#etape-2'));
+  });
+
+  test('sources list the opened fiches', async () => {
+    const w = world();
+    const { r } = await run(w, [...calls(w), { status: 200, body: reply('Voir https://wiki.example.local/7001') }]);
+    assert.equal(r.sources.length, 1);
+    assert.deepEqual(r.sources[0], { id: w.ficheId, kind: 'incident', title: 'File pleine', url: 'https://wiki.example.local/7001', appNames: ['OrderHub'], old: false, replaced: false, otherApplication: false });
+  });
+
+  test('nothing found says so', async () => {
+    const w = world({ withFiche: false });
+    const { r, f } = await run(w, [
+      { status: 200, body: reply('', { tool_calls: [toolCall('1', 'search_knowledge', { query: 'file saturee' })] }) },
+      { status: 200, body: reply('Rien trouvé dans la documentation. https://invented.example.com/z') },
+    ]);
+    assert.deepEqual(JSON.parse(f.calls[1].body.messages.at(-1).content), { fiches: [], sections: [], apps: [] });
+    assert.deepEqual(r.sources, []);
+    assert.ok(!/https?:/.test(r.answer));
+    assert.deepEqual(r.removedLinks, ['https://invented.example.com/z']);
+  });
+
+  test('no knowledge given: ask still works', async () => {
+    const repo = createRepo(openStore(':memory:'));
+    const llm = createLlmClient(baseCfg, { fetch: fakeFetch([{ status: 200, body: reply('ok') }]), logger: silent });
+    const r = await ask({ llm, repo, question: 'x' });
+    assert.deepEqual([r.answer, r.sources, r.removedLinks], ['ok', [], []]);
+  });
+});

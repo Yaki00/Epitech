@@ -53,3 +53,18 @@ describe('outils du chat', () => {
     assert.equal(r.items[0].period, 'current');
   });
 });
+
+describe('outils de documentation', () => {
+  const { jsonToolsPrompt, systemFor } = require('../src/assistant/ask');
+  test('json tools mode offers the two new tools', () => {
+    for (const lang of ['fr', 'en']) {
+      const p = jsonToolsPrompt(lang);
+      assert.match(p, /search_knowledge\(query, application\)/);
+      assert.match(p, /open_fiche\(id\)/);
+    }
+    assert.ok(TOOLS.some((t) => t.function.name === 'search_knowledge'));
+    assert.ok(TOOLS.some((t) => t.function.name === 'open_fiche'));
+    assert.match(systemFor('en'), /nothing found in the documentation/);
+    assert.doesNotMatch(systemFor('fr') + systemFor('en'), /[–—]/);
+  });
+});
