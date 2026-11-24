@@ -229,10 +229,9 @@ function orderWithTies(hits) {
 function searchKnowledge(index, repo, matcher, { query, application, limit = DEFAULT_LIMIT } = {}) {
   const q = String(query || '');
   const terms = queryTerms(q, index);
-  const empty = { fiches: [], sections: [], apps: [] };
-  if (!index || !terms.length) return empty;
-  const max = Math.min(Math.max(Number(limit) || DEFAULT_LIMIT, 1), MAX_LIMIT);
   const target = questionTargets(repo, matcher, q, application);
+  if (!index || !terms.length) return { fiches: [], sections: [], apps: [...target.apps] };
+  const max = Math.min(Math.max(Number(limit) || DEFAULT_LIMIT, 1), MAX_LIMIT);
   const neighbours = new Set();
   for (const a of target.apps) for (const n of neighboursOf(repo, a)) neighbours.add(n);
 
@@ -264,7 +263,7 @@ function searchKnowledge(index, repo, matcher, { query, application, limit = DEF
       score: Math.round(score * 1000) / 1000,
       old,
       replaced,
-      otherApplication: target.apps.size > 0 && !own,
+      otherApplication: target.apps.size > 0 && apps.length > 0 && !apps.some((x) => target.apps.has(x)),
     });
   }
   const fiches = orderWithTies(hits).slice(0, max);

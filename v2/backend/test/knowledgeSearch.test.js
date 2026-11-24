@@ -1,5 +1,8 @@
 'use strict';
 const assert = require('assert').strict;
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const request = require('supertest');
 const { openStore } = require('../src/store/store');
 const { createRepo } = require('../src/store/repo');
@@ -199,5 +202,110 @@ describe('routes de connaissance', () => {
     assert.ok(r.body.knowledge.some((k) => k.id === id));
     const other = await request(app).get(`/api/applications/${encodeURIComponent(APP('solo'))}`).expect(200);
     assert.deepEqual(other.body.knowledge, []);
+  });
+});
+
+describe('correctifs de revue', () => {
+  test('recency breaks ties within 5 %, score wins beyond', () => {
+    const w = world();
+    const older = w.write({ title: item('Certificat expire') }, { updatedAt: '2025-01-01T00:00:00.000Z' });
+    const newer = w.write({ title: item('Certificat expire') }, { updatedAt: '2026-06-01T00:00:00.000Z' });
+    let r = w.search('certificat expire');
+    assert.equal(r.fiches[0].score, r.fiches[1].score);
+    assert.deepEqual(r.fiches.map((f) => f.id), [newer, older]);
+    // score nettement meilleur (plus de mots en commun) mais plus ancien : le score l'emporte
+    const best = w.write({ title: item('Certificat expire sur le portail'), keywords: ['certificat', 'expire'] }, { updatedAt: '2020-01-01T00:00:00.000Z' });
+    r = w.search('certificat expire portail');
+    assert.ok(r.fiches[0].score > r.fiches[1].score * 1.05);
+    assert.equal(r.fiches[0].id, best);
+  });
+
+  test('other application only when linked to other applications', () => {
+    const w = world();
+    const none = w.write({ title: item('Sans application') });
+    const solo = w.write({ title: item('Sans application'), appIds: [APP('solo')] });
+    const both = w.write({ title: item('Sans application'), appIds: [APP('solo'), APP('orderhub')] });
+    const r = w.search('sans application', { application: 'OrderHub' });
+    const by = Object.fromEntries(r.fiches.map((f) => [f.id, f.otherApplication]));
+    assert.deepEqual(by, { [none]: false, [solo]: true, [both]: false });
+  });
+
+  test('recognised apps returned even when no term is in the index', () => {
+    const w = world();
+    w.write({ title: item('Quelque chose') });
+    const r = w.search('zzzqqq sur Marelle');
+    assert.deepEqual(r.fiches, []);
+    assert.deepEqual(r.apps, [APP('marelle')]);
+    assert.deepEqual(w.search('zzzqqq', { application: 'Solo' }).apps, [APP('solo')]);
+  });
+
+  describe('API : rechargement, sections, fiches retirées', () => {
+    const dirs = [];
+    afterAll(() => dirs.forEach((d) => fs.rmSync(d, { recursive: true, force: true })));
+    const mk = (extra = {}) => {
+      const w = world();
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lyra-ks-'));
+      dirs.push(dir);
+      const state = { changed: false };
+      const repo = Object.assign({}, w.repo, { reloadIfChanged: () => { const c = state.changed; state.changed = false; return c; } });
+      const warns = [];
+      const logger = { info() {}, error() {}, warn: (m) => warns.push(m) };
+      const app = createApp({ repo, llm: null, logger, config: { dataDir: dir }, matcher: w.matcher, ...extra });
+      return { w, dir, state, warns, app };
+    };
+
+    test('a fiche added after startup is found once the store reloads', async () => {
+      const { w, state, app } = mk();
+      assert.deepEqual((await request(app).get('/api/knowledge/search').query({ q: 'coupure reseau' }).expect(200)).body.fiches, []);
+      const id = w.write({ title: item('Coupure reseau') });
+      // pas de rechargement signalé : l'index reste celui du démarrage
+      assert.deepEqual((await request(app).get('/api/knowledge/search').query({ q: 'coupure reseau' }).expect(200)).body.fiches, []);
+      state.changed = true;
+      const r = await request(app).get('/api/knowledge/search').query({ q: 'coupure reseau' }).expect(200);
+      assert.equal(r.body.fiches[0].id, id);
+    });
+
+    test('missing sections file: fiches only, no error, no warning', async () => {
+      const { w, state, warns, app } = mk();
+      const id = w.write({ title: item('Fiche seule') });
+      state.changed = true;
+      const r = await request(app).get('/api/knowledge/search').query({ q: 'fiche seule' }).expect(200);
+      assert.equal(r.body.fiches[0].id, id);
+      assert.deepEqual(r.body.sections, []);
+      assert.equal(warns.length, 0);
+    });
+
+    test('corrupt sections file warns once, search still works', async () => {
+      const { w, dir, state, warns, app } = mk();
+      fs.writeFileSync(path.join(dir, 'knowledge-sections.json'), '{ pas du json');
+      state.changed = true;
+      w.write({ title: item('Fiche robuste') });
+      for (let i = 0; i < 3; i++) {
+        state.changed = true;
+        const r = await request(app).get('/api/knowledge/search').query({ q: 'fiche robuste' }).expect(200);
+        assert.equal(r.body.fiches.length, 1);
+        assert.deepEqual(r.body.sections, []);
+      }
+      assert.equal(warns.filter((m) => /sections/.test(m)).length, 1);
+    });
+
+    test('valid sections file is used', async () => {
+      const { dir, state, app } = mk();
+      fs.writeFileSync(path.join(dir, 'knowledge-sections.json'), JSON.stringify([{ pageId: '1', title: 'P', url: 'https://wiki.example.local/1', section: 'S', text: 'relancer le planificateur zeta', period: 'current' }]));
+      state.changed = true;
+      const r = await request(app).get('/api/knowledge/search').query({ q: 'planificateur zeta' }).expect(200);
+      assert.equal(r.body.sections.length, 1);
+    });
+
+    test('retired fiche: 404 on GET /api/knowledge/:id and absent from application detail', async () => {
+      const { w, app } = mk();
+      const id = w.write({ title: item('Fiche a retirer'), appIds: [APP('orderhub')] });
+      const keep = w.write({ title: item('Fiche gardee'), appIds: [APP('orderhub')] });
+      const url = `/api/applications/${encodeURIComponent(APP('orderhub'))}`;
+      assert.equal((await request(app).get(url).expect(200)).body.knowledge.length, 2);
+      w.repo.patchNodeAttrs(id, { retired: true });
+      await request(app).get(`/api/knowledge/${encodeURIComponent(id)}`).expect(404);
+      assert.deepEqual((await request(app).get(url).expect(200)).body.knowledge.map((k) => k.id), [keep]);
+    });
   });
 });
