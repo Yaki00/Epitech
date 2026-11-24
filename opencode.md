@@ -176,6 +176,7 @@ L'interface est déjà compilée dans `v2/frontend/dist` ; si elle manque, seule
 | `NAEMON_POLL_MINUTES` | minutes entre deux relevés (5 par défaut) |
 | `NAEMON_URL_TEMPLATE` | lien du bouton « Monitoring Naemon », `{app}` = nom de l'application |
 | `LLM_REASONING_EFFORT` | `none` conseillé (modèle de `.env.example`) ; si la passerelle refuse ce réglage, Lyra le retire seul et l'écrit dans le journal |
+| `LLM_MAX_TOKENS_REASONING` | place de réponse minimale par appel tant que la réflexion n'est pas coupée (réglage vide ou refusé), 8192 par défaut |
 | `LLM_MAX_TOKENS_EXTRACT`, `READING_CHUNK_CHARS`, `CONSIGNES_FILE` | laisser les valeurs par défaut sauf demande |
 
 `NODE_EXTRA_CA_CERTS` (certificat d'entreprise) se définit dans l'environnement **système**, pas dans `.env`.

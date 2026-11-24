@@ -239,12 +239,12 @@ async function main() {
       });
     }
     await check("LLM lecture d'essai (extract)", async () => {
-      info(`LLM_REASONING_EFFORT = ${config.llm.reasoningEffort || '(non envoyé)'}, LLM_MAX_TOKENS_EXTRACT = ${config.llm.maxTokens.extract}`);
+      info(`LLM_REASONING_EFFORT = ${config.llm.reasoningEffort || '(non envoyé)'}, LLM_MAX_TOKENS_EXTRACT = ${config.llm.maxTokens.extract}, LLM_MAX_TOKENS_REASONING = ${config.llm.maxTokens.reasoning}`);
       const t0 = Date.now();
       try {
         const r = await llm.chat({ task: 'extract', cache: false, maxTokens: config.llm.maxTokens.extract, messages: [{ role: 'user', content: 'Résume en une phrase : le serveur web01 héberge l\'application Facture.' }] });
         ok(`lecture d'essai OK (${Date.now() - t0} ms, ${r.content.length} caractères)`);
-        if (llm.reasoningRefused) warn(`la passerelle refuse LLM_REASONING_EFFORT=${config.llm.reasoningEffort} : Lyra le retire seul, mais le modèle réfléchit (appels plus lents, quelques réponses coupées puis relancées). Le laisser vide dans backend/.env supprime cet avertissement`);
+        if (llm.reasoningRefused) warn(`la passerelle refuse LLM_REASONING_EFFORT=${config.llm.reasoningEffort} : Lyra le retire seul, mais le modèle réfléchit (appels plus lents) : Lyra donne alors au moins ${config.llm.maxTokens.reasoning} tokens à chaque réponse (LLM_MAX_TOKENS_REASONING). Le laisser vide dans backend/.env supprime cet avertissement`);
       } catch (err) {
         if (err.code === 'empty' || err.code === 'truncated') warn(`lecture d'essai ${err.code === 'empty' ? 'vide' : 'coupée'} : régler LLM_REASONING_EFFORT=none dans backend/.env`);
         else throw err;

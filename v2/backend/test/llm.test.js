@@ -106,6 +106,61 @@ describe('llmClient', () => {
     assert.equal('reasoning_effort' in f.calls[0].body, false);
   });
 
+  const floorCfg = { ...baseCfg, maxTokens: { reasoning: 8192 } };
+  const msg = [{ role: 'user', content: 'x' }];
+
+  test('reasoning off: small requests get the reasoning floor', async () => {
+    const f = fakeFetch([{ status: 200, body: reply('a') }, { status: 200, body: reply('b') }]);
+    const llm = createLlmClient(floorCfg, { fetch: f, logger: silent });
+    await llm.chat({ messages: msg, maxTokens: 1600 });
+    await llm.chat({ messages: msg, maxTokens: 20000, temperature: 0.5 });
+    assert.equal(f.calls[0].body.max_tokens, 8192);
+    assert.equal(f.calls[1].body.max_tokens, 20000);
+  });
+
+  test('reasoning refused: floor applies after the refusal', async () => {
+    const f = fakeFetch([
+      { status: 400, body: '{"error":{"message":"Unsupported parameter: reasoning_effort"}}' },
+      { status: 200, body: reply('a') },
+      { status: 200, body: reply('b') },
+    ]);
+    const llm = createLlmClient({ ...floorCfg, reasoningEffort: 'none' }, { fetch: f, logger: silent });
+    await llm.chat({ messages: msg, maxTokens: 1600 });
+    assert.equal(f.calls[0].body.max_tokens, 1600);
+    assert.equal(f.calls[1].body.max_tokens, 8192);
+    await llm.chat({ messages: [{ role: 'user', content: 'y' }], maxTokens: 1500 });
+    assert.equal(f.calls[2].body.max_tokens, 8192);
+  });
+
+  test('reasoning accepted: requested max_tokens sent unchanged', async () => {
+    const f = fakeFetch([{ status: 200, body: reply('a') }]);
+    const llm = createLlmClient({ ...floorCfg, reasoningEffort: 'none' }, { fetch: f, logger: silent });
+    await llm.chat({ messages: msg, maxTokens: 1600 });
+    assert.equal(f.calls[0].body.max_tokens, 1600);
+    assert.equal(f.calls[0].body.reasoning_effort, 'none');
+  });
+
+  test('retry doubles the floor', async () => {
+    const f = fakeFetch([
+      { status: 200, body: { choices: [{ message: { content: 'cut' }, finish_reason: 'length' }] } },
+      { status: 200, body: reply('ok') },
+    ]);
+    const llm = createLlmClient(floorCfg, { fetch: f, logger: silent });
+    const r = await llm.chat({ messages: msg, maxTokens: 1600 });
+    assert.equal(r.content, 'ok');
+    assert.deepEqual(f.calls.map((c) => c.body.max_tokens), [8192, 16384]);
+  });
+
+  test('cache key ignores the floor', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lyra-cache-'));
+    const f1 = fakeFetch([{ status: 200, body: reply('cached') }]);
+    await createLlmClient({ ...floorCfg, cacheDir: dir }, { fetch: f1, logger: silent }).chat({ messages: msg, maxTokens: 1600 });
+    const f2 = fakeFetch([]);
+    const r = await createLlmClient({ ...floorCfg, maxTokens: { reasoning: 4096 }, cacheDir: dir }, { fetch: f2, logger: silent }).chat({ messages: msg, maxTokens: 1600 });
+    assert.equal(r.cached, true);
+    assert.equal(f2.calls.length, 0);
+  });
+
   test('empty answer is not cached and is retried with doubled max_tokens', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lyra-cache-'));
     const f = fakeFetch([{ status: 200, body: reply('') }, { status: 200, body: reply('bonjour') }]);

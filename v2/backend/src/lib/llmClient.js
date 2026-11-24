@@ -123,8 +123,15 @@ function createLlmClient(cfg, deps = {}) {
     if (cfg.reasoningEffort && reasoningSupported) body.reasoning_effort = cfg.reasoningEffort;
     if (json && jsonModeSupported) body.response_format = { type: 'json_object' };
 
+    // La clé de cache porte sur la demande d'origine, pas sur la place ajustée ci-dessous.
     const useCache = cache ?? (temperature === 0 && !tools);
     const key = useCache ? stableHash({ ep: 'chat', ...body, response_format: undefined }) : null;
+    // Modèle qui réfléchit (réglage vide ou refusé) : la réflexion consomme max_tokens, on garantit un minimum.
+    const applyFloor = (b) => {
+      const floor = cfg.maxTokens?.reasoning;
+      if (floor && !(cfg.reasoningEffort && reasoningSupported)) b.max_tokens = Math.max(b.max_tokens, floor);
+    };
+    applyFloor(body);
     if (key) {
       const hit = cacheGet(key);
       // Une ancienne entrée vide (écrite avant ce contrôle) n'est pas servie.
@@ -148,6 +155,7 @@ function createLlmClient(cfg, deps = {}) {
             log.warn('reasoning_effort refusé par la passerelle, désactivé pour la suite (le modèle peut réfléchir : réponses plus lentes)');
             reasoningSupported = false;
             delete reqBody.reasoning_effort;
+            applyFloor(reqBody);
           } else if (said && reqBody.response_format && /response_format|json/i.test(said)) {
             log.warn('response_format refusé par la passerelle, désactivé pour la suite');
             jsonModeSupported = false;

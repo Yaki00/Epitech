@@ -48,7 +48,8 @@ const config = {
     // Réflexion des modèles qui en ont une (ex : none) : vide = rien n'est envoyé.
     reasoningEffort: env('LLM_REASONING_EFFORT', ''),
     // Place de réponse par tâche (la lecture des pages passe maxTokens.extract).
-    maxTokens: { extract: int('LLM_MAX_TOKENS_EXTRACT', 4096) },
+    // reasoning : place minimale de chaque réponse tant que la réflexion n'est pas coupée (réglage vide ou refusé).
+    maxTokens: { extract: int('LLM_MAX_TOKENS_EXTRACT', 4096), reasoning: int('LLM_MAX_TOKENS_REASONING', 8192) },
     concurrency: int('LLM_CONCURRENCY', 4),
     mock: bool('LLM_MOCK', 'false'),
     // avec LLM_MOCK : lectures de pages préparées ({ "<titre>": lecture }), sinon lectures vides
