@@ -43,8 +43,6 @@ const config = {
       embed: env('LLM_MODEL_EMBED', 'qwen3-embedding-8b'),
       rerank: env('LLM_MODEL_RERANK', 'bge-reranker-v2-m3'),
     },
-    // Chemin du reclassement, relatif à LLM_BASE_URL (utilisé seulement si KNOWLEDGE_RERANK est actif).
-    rerankPath: env('KNOWLEDGE_RERANK_PATH', '/rerank'),
     timeoutMs: int('LLM_TIMEOUT_MS', 120000),
     maxRetries: int('LLM_MAX_RETRIES', 3),
     // Réflexion des modèles qui en ont une (ex : none) : vide = rien n'est envoyé.
@@ -66,6 +64,7 @@ const config = {
   // Recherche dans les fiches : reclassement par la passerelle IA, éteint par défaut (non testable sur le banc).
   knowledge: {
     rerank: bool('KNOWLEDGE_RERANK', 'false'),
+    // chemin relatif à LLM_BASE_URL
     rerankPath: env('KNOWLEDGE_RERANK_PATH', '/rerank'),
   },
 

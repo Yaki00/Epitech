@@ -255,6 +255,20 @@ describe('correctifs de revue', () => {
       return { w, dir, state, warns, app };
     };
 
+    test('search error answers 500 without detail instead of an unhandled rejection', async () => {
+      const w = world();
+      w.write({ title: item('Fiche piege') });
+      let broken = false;
+      const repo = Object.assign({}, w.repo, { reloadIfChanged: () => false, getNode: (id) => { if (broken) throw new Error('secret interne'); return w.repo.getNode(id); } });
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lyra-ks-'));
+      dirs.push(dir);
+      const app = createApp({ repo, llm: null, logger: { info() {}, error() {}, warn() {} }, config: { dataDir: dir }, matcher: w.matcher });
+      await request(app).get('/api/knowledge/search').query({ q: 'fiche piege' }).expect(200);
+      broken = true;
+      const r = await request(app).get('/api/knowledge/search').query({ q: 'fiche piege' }).expect(500);
+      assert.deepEqual(r.body, { error: 'recherche indisponible' });
+    });
+
     test('a fiche added after startup is found once the store reloads', async () => {
       const { w, state, app } = mk();
       assert.deepEqual((await request(app).get('/api/knowledge/search').query({ q: 'coupure reseau' }).expect(200)).body.fiches, []);
@@ -342,6 +356,17 @@ describe('correctifs de revue', () => {
       const ids = r.fiches.map((f) => f.id);
       assert.deepEqual(ids.slice(0, 20), plain.slice(0, 20).reverse());
       assert.deepEqual(ids.slice(20), plain.slice(20));
+    });
+
+    test('rerank sees the first twenty even with a small limit', async () => {
+      const w = world();
+      many(w, 25);
+      const plain = w.search('planificateur bloque', { limit: 30 }).fiches.map((f) => f.id);
+      const rerank = async (q, texts) => texts.map((_, i) => (i === 14 ? 100 : 0));
+      const r = await run(w, { rerank, limit: 3 });
+      assert.equal(r.fiches.length, 3);
+      assert.equal(r.fiches[0].id, plain[14]);
+      assert.deepEqual((await run(w, { limit: 3 })).fiches.map((f) => f.id), plain.slice(0, 3));
     });
 
     test('rerank failure keeps order and warns once per process', async () => {

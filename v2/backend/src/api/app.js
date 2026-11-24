@@ -116,12 +116,17 @@ function createApp({ repo, llm, logger, frontendDist, toolsMode = 'native', jobs
     return r ? res.json(r) : res.status(404).json({ error: 'introuvable' });
   });
   // reclassement par la passerelle : seulement si KNOWLEDGE_RERANK=true (éteint par défaut)
-  const rerank = config && config.knowledge && config.knowledge.rerank && llm && typeof llm.rerank === 'function' ? createReranker({ llm, logger }) : null;
+  const rerank = config && config.knowledge && config.knowledge.rerank && llm && typeof llm.rerank === 'function' ? createReranker({ llm, logger, path: config.knowledge.rerankPath }) : null;
   app.get('/api/knowledge/search', async (req, res) => {
     const none = { fiches: [], sections: [], apps: [] };
     if (!knowledge) return res.json(none);
-    const out = await searchWithRerank(knowledge.index, repo, knowledge.matcher, { query: String(req.query.q || ''), application: req.query.app ? String(req.query.app) : undefined, limit: intOr(req.query.limit, 10), rerank });
-    res.json(out);
+    try {
+      const out = await searchWithRerank(knowledge.index, repo, knowledge.matcher, { query: String(req.query.q || ''), application: req.query.app ? String(req.query.app) : undefined, limit: intOr(req.query.limit, 10), rerank });
+      res.json(out);
+    } catch (err) {
+      if (logger && logger.error) logger.error('recherche de fiches en erreur', { erreur: err.message });
+      res.status(500).json({ error: 'recherche indisponible' });
+    }
   });
   app.get('/api/knowledge/:id', (req, res) => {
     const f = getFiche(repo, req.params.id);

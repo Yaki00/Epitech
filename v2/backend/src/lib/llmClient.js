@@ -268,15 +268,15 @@ function createLlmClient(cfg, deps = {}) {
   }
 
   /**
-   * Reclassement (endpoint cfg.rerankPath, ex : /rerank) : un score par document, dans l'ordre des documents.
+   * Reclassement (chemin `path`, venu de config.knowledge.rerankPath, relatif à baseUrl) : un score par document, dans l'ordre des documents.
    * Les erreurs remontent (l'appelant décide de garder son ordre).
    */
-  async function rerank({ query, documents, task = 'rerank' }) {
+  async function rerank({ query, documents, path: endpoint = '/rerank', task = 'rerank' }) {
     const docs = Array.isArray(documents) ? documents : [];
     if (!docs.length) return [];
     return limit(async () => {
       stats.calls++;
-      const raw = await post(cfg.rerankPath || '/rerank', { model: modelFor(task), query, documents: docs });
+      const raw = await post(endpoint, { model: modelFor(task), query, documents: docs });
       const scores = new Array(docs.length).fill(null);
       for (const r of raw?.results || []) {
         if (Number.isInteger(r?.index) && r.index >= 0 && r.index < docs.length && Number.isFinite(r.relevance_score)) scores[r.index] = r.relevance_score;

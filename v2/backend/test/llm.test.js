@@ -335,8 +335,8 @@ describe('langue du chat', () => {
 
   test('rerank : scores dans l ordre des documents, chemin et modele de la config', async () => {
     const f = fakeFetch([{ status: 200, body: { results: [{ index: 1, relevance_score: 0.9 }, { index: 0, relevance_score: 0.2 }, { index: 2, relevance_score: 0.5 }] } }]);
-    const llm = createLlmClient({ ...baseCfg, models: { rerank: 'm-rerank' }, rerankPath: '/v1/rerank' }, { fetch: f, logger: silent, backoffBaseMs: 1 });
-    const scores = await llm.rerank({ query: 'q', documents: ['a', 'b', 'c'] });
+    const llm = createLlmClient({ ...baseCfg, models: { rerank: 'm-rerank' } }, { fetch: f, logger: silent, backoffBaseMs: 1 });
+    const scores = await llm.rerank({ query: 'q', documents: ['a', 'b', 'c'], path: '/v1/rerank' });
     assert.deepEqual(scores, [0.2, 0.9, 0.5]);
     assert.equal(f.calls[0].url, 'http://fake/v1/rerank');
     assert.deepEqual(f.calls[0].body, { model: 'm-rerank', query: 'q', documents: ['a', 'b', 'c'] });
