@@ -176,6 +176,8 @@ l'environnement.
 | `LLM_MAX_TOKENS_EXTRACT` | place de réponse pour la lecture d'un morceau (4096 par défaut) |
 | `LLM_MAX_TOKENS_REASONING` | place de réponse minimale de chaque appel tant que la réflexion n'est pas coupée (réglage vide ou refusé par la passerelle), 8192 par défaut |
 | `READING_CHUNK_CHARS` | taille d'un morceau de page (12000 par défaut, 1000 au minimum) |
+| `KNOWLEDGE_RERANK` | `false` par défaut. `true` : les vingt premières fiches trouvées sont reclassées par le modèle `LLM_MODEL_RERANK` de la passerelle. En cas d'échec, l'ordre par mots-clés est gardé et un avertissement est écrit une fois par démarrage |
+| `KNOWLEDGE_RERANK_PATH` | chemin du reclassement, relatif à `LLM_BASE_URL` (`/rerank` par défaut) ; `npm run doctor` l'essaie seulement si `KNOWLEDGE_RERANK=true` |
 | `CONSIGNES_FILE` | chemin du fichier de consignes (`./config/consignes-ia.md` par défaut) |
 
 Une réponse vide, coupée ou en JSON illisible n'est jamais gardée en cache : une nouvelle tentative a lieu avec le double de place, puis la page
@@ -213,6 +215,46 @@ Dans `backend/data/rapports/` (CSV, ouverts avec Excel) : `perimetre-pages.csv` 
 `perimetre-orthographes.csv` (formes écrites rapprochées d'une application, hors nom et alias déclarés), `lectures-rejets.csv` (éléments
 écartés par la vérification : citation introuvable, application inconnue ou hors périmètre) et `architecture-*.csv` (contrôle des pages
 d'architecture contre l'inventaire).
+
+## Assistant opérationnel : dépannage, procédures, bonnes pratiques
+
+En plus des questions sur le graphe (impact, dépendances, responsables), l'assistant retrouve ce que la documentation dit déjà
+et donne la solution avec le lien vers la page. À la synchronisation, chaque page d'exploitation (incident, note de version,
+exploitation, installation, autre) reçoit un second appel IA qui en tire des **fiches** courtes : `incident` (symptômes, messages
+d'erreur, cause, solution, actions, tickets), `correctif` (version, tickets), `procedure` (but, quand l'utiliser, prérequis, étapes,
+précautions) et `pratique` (règles). Chaque champ porte la citation de la page qui le prouve ; sans citation retrouvée, le champ est écarté.
+
+L'assistant peut ainsi :
+
+- **dépanner** : retrouver l'incident déjà vu, sa cause, ce qui a remis en service, les tickets, et la procédure associée ;
+- **dire dans quelle version un défaut est corrigé** (note de version, date de mise en production) ;
+- **donner une procédure** telle que la fiche la donne, étape par étape, sans rien compléter de mémoire ;
+- **proposer la procédure la plus proche** quand l'application demandée n'en a pas : celle d'une application voisine (même socle),
+  présentée comme venant d'une autre application ;
+- **signaler** une procédure ancienne ou remplacée, et dire « rien trouvé dans la documentation » quand rien ne répond.
+
+Exemples de questions (noms inventés) :
+
+- « La file Q.DEM.EVT est pleine, Demeter ne publie plus. »
+- « Plantage à l'ouverture d'un dossier sans ayant droit sur Ondine, c'est corrigé dans quelle version ? »
+- « Comment relance-t-on Ondine Paiements ? »
+- « Procédure de rotation de certificat pour Brocéliande ? »
+- « ORA-01555 sur la base de Demeter, déjà vu ? »
+
+Sous la réponse, les **sources** (type, titre, application, date, mention « ancienne » ou « autre application ») sont des cartes
+cliquables vers la page. Le code retire de la réponse tout lien qui ne vient pas des résultats de la question (`removedLinks` dans la
+réponse de l'API). La fiche d'une application (onglet documentation) contient un bloc « Documentation opérationnelle » avec ses
+procédures, incidents, correctifs et bonnes pratiques. En mode démo, des fiches fictives remplissent ce bloc et les sources du chat.
+
+Lyra montre, elle n'agit jamais : aucune écriture dans Confluence, aucun ticket, aucune commande lancée. Un mot de passe ou un jeton
+repéré dans une étape fait retirer l'élément de la fiche.
+
+**Coût du premier passage après la mise à jour** : les pages d'exploitation reçoivent leur second appel IA (les autres pages ne
+sont pas relues pour cela). Sur le banc d'essai, c'est environ la moitié des pages, soit de l'ordre de 75 appels de plus pour 150 pages.
+Ensuite, seules les pages modifiées (ou toutes si les consignes ou le périmètre changent) sont relues. Une fiche en échec ne fait jamais
+échouer la page ni la synchronisation : l'erreur est dans le journal (étape « fiches ») et la page est reprise au passage suivant.
+
+Sans fiche (premier démarrage, IA absente, synchro jamais faite), la recherche rend une liste vide et l'assistant dit n'avoir rien trouvé.
 
 ## Équipes et responsables
 
@@ -283,5 +325,7 @@ curl "localhost:3002/api/overview"
 curl "localhost:3002/api/status"
 curl "localhost:3002/api/gaps?format=csv" -o ecarts-naemon.csv
 curl -X POST localhost:3002/api/simulate -H "Content-Type: application/json" -d "{\"nodeIds\":[\"server:srvalto01\"]}"
+curl "localhost:3002/api/knowledge/search?q=file%20pleine&app=Demeter&limit=10"   # fiches et sections trouvées
+curl "localhost:3002/api/knowledge/fiche:12345-1"                                  # une fiche complète, avec ses citations
 curl -X POST localhost:3002/api/ask -H "Content-Type: application/json" -d "{\"question\":\"Que se passe-t-il si srvalto01 redémarre ?\"}"
 ```

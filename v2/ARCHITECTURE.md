@@ -19,6 +19,8 @@ n'est pas redit ici reste vrai (périmètre, export Confluence, modèles d'IA). 
 - Les **environnements** `PRD`, `STG`, `DEV` (+ « Non précisé » quand le serveur n'en a pas), partout.
 - La **simulation de panne** sur plusieurs éléments, la carte ELK, un **mode démo** complet.
 - La **reprise de la v1** par `npm run setup`.
+- L'**assistant opérationnel** : fiches de dépannage, de procédure et de bonnes pratiques lues par l'IA (`src/knowledge/`), recherche
+  aidée du graphe, outils du chat avec sources et contrôle des liens.
 
 Principe inchangé : **l'impact se calcule par parcours du graphe (déterministe)**. L'IA construit le graphe et explique.
 Une valeur absente reste absente : criticité = attribut `criticality`, sinon `confidentiality` (colonne AI de l'APM), jamais inventée ;
@@ -50,6 +52,7 @@ v2/
       quality/docScore.js  score de documentation
       lib/environment.js   normalisation PRD, STG, DEV (sinon null), synonymes du bloc `environnements`
       reading/             lecture IA vérifiée : consignes, prompt, schema, readPage, evidence, verify, apply, syncPages, mockReadings
+      knowledge/           fiches opérationnelles : prompt, schema, readFiches, verify, apply, search (BM25 + graphe), rerank
       demo/                generate.js (parc fictif), naemonMock.js, chatMock.js
       ...                  le reste comme en v1 (parse, ingest, perimeter, enrich, graph, store, assistant, fetch)
     scripts/               doctor.js, fetch-confluence.js, fetch-inventory.js, sync-inventory.js, sync-confluence.js, summarize-apps.js
@@ -195,7 +198,113 @@ les pages. Sans IA, les pages sont stockées et rien n'est déduit.
 
 `LLM_REASONING_EFFORT` est ajouté aux requêtes quand il est défini. Une réponse vide, coupée (`finish_reason = length`) ou en JSON illisible
 n'est jamais écrite au cache ; une nouvelle tentative a lieu avec le double de place (hors `LLM_MAX_RETRIES`), puis l'erreur porte un `code`
-(`empty`, `truncated`, `invalid_json`). `doctor` fait une lecture d'essai et conseille `LLM_REASONING_EFFORT=none` en cas de réponse vide ou coupée.
+(`empty`, `truncated`, `invalid_json`). `doctor` fait une lecture d'essai et conseille `LLM_REASONING_EFFORT=none` en cas de réponse vide ou coupée. Si la passerelle refuse
+`reasoning_effort` (400), le réglage est retiré pour la suite (avertissement dans le journal). Tant que la réflexion n'est pas coupée
+(réglage vide ou refusé), chaque appel reçoit au moins `LLM_MAX_TOKENS_REASONING` (8192 par défaut) de place de réponse.
+
+## Assistant opérationnel : fiches, recherche, outils du chat
+
+Conception : `docs/2026-11-24-v2-assistant-operationnel-conception.md`. Code : `src/knowledge/` (sauf les outils du chat, dans
+`src/assistant/ask.js`). Aucun paquet ajouté : la recherche est écrite dans le projet.
+
+### Fiches (`knowledge/schema.js`, `readFiches.js`, `verify.js`)
+
+Une page dont la nature lue est `incident`, `release`, `operations`, `install` ou `other` (`OPS_KINDS`) reçoit, après sa lecture, un
+**second appel IA** par morceau (même découpage, mêmes consignes) qui rend des fiches ; les morceaux sont fusionnés (même type et même
+titre normalisé : une seule fiche). Types (`FICHE_KINDS`) et leurs champs (`FICHE_SHAPE`) :
+
+| Type | Champs (texte) | Listes |
+|---|---|---|
+| `incident` | `symptoms`, `cause`, `solution` | `errors`, `actions`, `tickets` |
+| `correctif` | `version` | `tickets` |
+| `procedure` | `goal`, `when`, `prerequisites`, `cautions` | `steps` |
+| `pratique` | aucun | `rules` |
+
+Chaque fiche porte aussi : `title`, `section`, `date`, `apps` et `servers` cités, `keywords` (mots de recherche rendus par l'IA, 12 au
+plus, jamais montrés comme un fait), `replaces` (procédure remplacée) et `fixes` (incident corrigé). Tout élément est de la forme
+`{ text, evidence }` : la citation (`evidence`) doit se retrouver dans la page (`hasEvidence`), sinon l'élément est écarté. Sont aussi
+rejetés : une citation qui ne contient ni le texte ni un mot de 4 lettres ou plus de ce texte (`evidence_mismatch`), et tout élément dont
+le texte ou la citation ressemble à un mot de passe, un jeton ou une clé (`secret`, motif `SECRET` : l'élément entier est retiré). Les
+adresses électroniques et numéros de téléphone sont retirés. Les applications et serveurs sont rapprochés comme dans la lecture des
+pages (`matcher.resolveAppName`, `repo.resolve`) ; un nom inconnu reste en texte (`unresolved`), sans lien. Une page peut donner
+plusieurs fiches, ou aucune.
+
+### Graphe (`knowledge/apply.js`)
+
+- Nœud `fiche:<pageId>-<n>` (type `fiche`, `attrs.kind` = le type), avec `url` (page, plus l'ancre de la section si la page en a une),
+  `period` et `updatedAt` de la page, `fields`, `lists`, `tickets`, `keywords`, `replaces`, `fixes`, `replacedBy`. Relire la page purge ses
+  liens `knowledge` et marque `retired` les fiches en trop (jamais supprimées).
+- Liens (source `knowledge`) : `concerne` (fiche vers application ou serveur), `vient_de` (fiche vers le document), `corrige` (correctif
+  vers incident, refait en fin de passage par `linkFiches` : ticket partagé, ou texte `fixes` qui nomme le titre de l'incident).
+- `linkFiches` marque aussi la procédure remplacée (`replacedBy`, `replacedByEvidence`) : le lien Confluence cité par `replaces`, sinon
+  même application et même but ; la correspondance doit être unique et la procédure remplacée strictement plus ancienne.
+- **Ces liens ne propagent jamais** : `concerne`, `vient_de` et `corrige` sont dans `NON_PROPAGATING` (`graph/impact.js`), donc ignorés
+  par l'impact, la carte, le score et les compteurs. Les fiches `incident` et `correctif` décrivent le passé par nature : jamais
+  pénalisées pour leur période.
+
+### Empreintes et reprise
+
+`opsHash = sha256(OPS_VERSION | empreinte des consignes | empreinte du périmètre)` (16 caractères), écrit dans la ligne document avec
+`opsContentHash` (empreinte du contenu) et `ficheCount`. Une page dont la lecture est à jour mais dont `opsHash` ou `opsContentHash`
+est périmé ne refait que ses fiches. Changer `OPS_VERSION` (consignes ou forme des fiches) ne relance donc que les fiches. Une fiche en
+échec n'arrête jamais le passage ni ne met la page en erreur : elle compte dans `stats.ficheErrors` (statut du passage `partial`),
+l'erreur est enregistrée avec l'étape `fiches` et l'empreinte reste ancienne, donc reprise au passage suivant.
+
+### Fichier des sections
+
+À chaque passage, `knowledge-sections.json` (dans `DATA_DIR`, écriture atomique) reçoit les sections de **toutes** les pages
+(`pageId`, `title`, `url` avec ancre, `section`, `text`, `period`), y compris les pages sautées. Tout ce qui ressemble à un secret y est
+remplacé par `[masqué]`. Il sert de second recours à la recherche. Illisible ou absent : la recherche porte sur les fiches seules
+(un avertissement par démarrage).
+
+### Recherche (`knowledge/search.js`)
+
+Index en mémoire, reconstruit au démarrage et à chaque rechargement du store (`buildKnowledgeIndex`). Les fiches retirées ne sont
+jamais rendues.
+
+1. **BM25** maison sur les fiches (`K1 = 1.2`, `B = 0.75`) ; titre et mots de recherche comptés deux fois (`TITLE_WEIGHT = 2`). Textes
+   normalisés comme les citations (casse, accents), pluriels simplifiés, mots vides ignorés.
+2. **Mots techniques entiers** : un mot qui contient un chiffre, un point, un tiret ou un souligné (`Q.DEM.EVT`, `ORA-01555`, nom de
+   serveur) est gardé entier en plus d'être découpé. Dans la question, les mots techniques passent d'abord et seuls ceux présents dans
+   l'index comptent (80 au plus) : une longue pile d'erreur collée ne noie pas le code d'erreur.
+3. **Bonus du graphe** : la question est rapprochée des applications et serveurs connus (`matcher.scanText` avec confiance d'au moins
+   0,7, `repo.resolve`, plus l'argument `application`). Fiche de l'application ou du serveur de la question : x1,5 (`OWN_APP_BONUS`) ;
+   fiche d'une **voisine** : x1,2 (`NEIGHBOUR_BONUS`). Voisines : applications liées par un lien actif `calls`, `depends_on`,
+   `reads_from` ou `writes_to` (dans les deux sens), et celles qui partagent un serveur, une base ou une file actifs.
+4. **Pénalités** : procédure ou pratique de période `past` x0,5 (`OLD_MALUS`) ; procédure remplacée (`replacedBy`) x0,3
+   (`REPLACED_MALUS`).
+5. **Égalités** : par blocs de scores à 5 % près (`TIE_WINDOW`), la fiche dont la page est la plus récente passe d'abord.
+6. **`otherApplication`** : vrai pour une fiche qui concerne des applications, aucune n'étant celle de la question (alors qu'une
+   application de la question est reconnue) : l'assistant dit que c'est « la plus proche », pas celle demandée.
+7. **Sections de pages** en second recours : au plus cinq, sans doublon avec une fiche déjà rendue (même page et même section).
+
+Résultat : `{ fiches (10 par défaut, 50 au plus), sections, apps }`. Chaque fiche rendue : `id`, `kind`, `title`, `appNames`, `period`,
+`updatedAt`, `url`, `section`, `excerpt`, `score`, `old`, `replaced`, `otherApplication`. Sans fiche ou sans mot utile : listes vides, sans erreur.
+
+### Reclassement facultatif (`knowledge/rerank.js`)
+
+Éteint par défaut (`KNOWLEDGE_RERANK=false`). Activé, les 20 premières fiches (`RERANK_TOP`) sont envoyées à `llm.rerank` (modèle
+`LLM_MODEL_RERANK`, chemin `KNOWLEDGE_RERANK_PATH` relatif à `LLM_BASE_URL`, `/rerank` par défaut ; appel `model`, `query`, `documents`,
+réponse `results[].index` et `relevance_score`) et réordonnées par score décroissant (tri stable) ; le reste ne bouge pas. Une erreur ou
+une réponse incomplète garde l'ordre par mots-clés ; l'échec est signalé une seule fois par démarrage. `doctor` n'essaie le
+reclassement que s'il est activé.
+
+### Outils du chat et contrôle des liens (`assistant/ask.js`)
+
+Deux outils s'ajoutent aux quatre existants, en mode natif comme en mode JSON :
+
+- `search_knowledge(query, application?)` : résultat de la recherche (fiches puis sections), reclassé si activé ; sans index, des listes vides.
+- `open_fiche(id)` : la fiche complète (`getFiche`) avec champs, listes, citations, lien, section, `old`, `replaced`, `replacedBy` ;
+  `{ error }` si elle est inconnue ou retirée.
+
+La consigne système demande de chercher avant de répondre à toute question de dépannage, de procédure ou de pratique, de donner les
+étapes telles que la fiche les donne, de citer titre et lien, de dire « ancienne », « remplacée » ou « autre application », et de dire
+« rien trouvé dans la documentation » sans rien inventer. Un outil qui plante renvoie `{ error }` au modèle sans faire échouer la question.
+
+**Contrôle par le code**, après la réponse : toute URL de la réponse (lien markdown, entre chevrons, nue) absente des résultats d'outils
+de **cette** question est retirée (un lien markdown garde son libellé) et listée dans `removedLinks`. La réponse porte aussi `sources` :
+les fiches ouvertes par `open_fiche`, plus les fiches et sections dont l'adresse figure dans la réponse finale (`id`, `kind`, `title`,
+`url`, `appNames`, `old`, `replaced`, `otherApplication`). Le nombre d'étapes reste borné (`maxRounds`, 5).
 
 ## Score de documentation
 
@@ -247,7 +356,7 @@ Les routes v1 restent identiques (seuls des champs sont ajoutés). Nouvelles ou 
 |---|---|
 | `GET /api/config` | `demo`, `naemonSource`, `version`, `naemonUrlTemplate`, sources branchées |
 | `GET /api/overview` | Accueil : compteurs, applications et états, alertes, applications à risque, sources, changements récents, écarts, moins bien documentées |
-| `GET /api/applications`, `/api/applications/:id` | + `retired`, `status` (état par environnement, `atRisk`), `docScore`, `owners[]` ; serveurs et bases portent `retired`, `env`, `state`, `active`, `trust`, `period` ; serveurs : `outOfInventory` |
+| `GET /api/applications`, `/api/applications/:id` | + `retired`, `status` (état par environnement, `atRisk`), `docScore`, `owners[]`, `knowledge[]` (fiches de l'application, plus récentes d'abord : `id`, `kind`, `title`, `period`, `updatedAt`, `url`, `old`, `replaced`) ; serveurs et bases portent `retired`, `env`, `state`, `active`, `trust`, `period` ; serveurs : `outOfInventory` |
 | `GET /api/servers?q=&limit=` | + `env`, `retired`, `state` |
 | `GET /api/servers/:id` | fiche serveur : état, services, applications, pages, changements concernant ce serveur |
 | `GET /api/status` | état de la relève Naemon : source, dates, dernière erreur, états par serveur et application, hôtes non rapprochés |
@@ -258,6 +367,8 @@ Les routes v1 restent identiques (seuls des champs sont ajoutés). Nouvelles ou 
 | `GET /api/map?scope=perimeter\|app:<id>&envs=PRD,STG&includeRetired=` | données de la cartographie |
 | `GET /api/health`, `/api/search`, `/api/nodes/:id`, `/api/graph/:id`, `/api/impact/:id`, `/api/dependencies/:id` | comme en v1 |
 | `GET /api/sync/runs`, `/api/sync/runs/:id/errors`, `GET/POST /api/sync/jobs` | page Synchronisation, comme en v1 |
-| `POST /api/ask` `{question, history}` | assistant (réponse simulée en démo) |
+| `POST /api/ask` `{question, history, lang?}` | assistant (réponse simulée en démo) ; rend `answer`, `toolTrace`, `toolsMode`, `sources[]` (fiches et pages citées ou ouvertes), `removedLinks[]` (liens retirés par le contrôle) |
+| `GET /api/knowledge/search?q=&app=&limit=` | recherche dans les fiches et les sections : `{ fiches, sections, apps }` ; `limit` 10 par défaut, 50 au plus ; vide sans fiche, 500 `recherche indisponible` en cas d'erreur |
+| `GET /api/knowledge/:id` | une fiche complète (`fields`, `lists` avec citations, `tickets`, `url`, `section`, `old`, `replaced`, `replacedBy`) ; 404 si inconnue ou retirée |
 
 Les formes détaillées sont dans le code (`src/api/views2.js`) et les tests (`test/`).

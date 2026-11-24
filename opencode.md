@@ -143,11 +143,12 @@ directe), `v2/backend/data/raw/...`, `v2/logs/`. Le modèle `consignes-ia.exampl
 |---|---|
 | `npm run setup` | installe le backend, crée `backend/.env` et les configs ; **reprend la v1** si `../v1/backend/.env` existe |
 | `npm run doctor` | vérifie Node, IA, Confluence, Naemon, fichiers ; objectif : `--- aucune erreur ---` |
-| `npm test` | tests du backend : tous les tests doivent passer (verts), sans réseau |
+| `npm test` | tests du backend : tous les tests doivent passer (472 au 24/11/2026, ce nombre augmente avec le code), sans réseau |
 | `npm start` | http://localhost:3002 (interface incluse, car `frontend/dist` est dans le dépôt) |
 | `npm run sync:all` | Confluence, CSV, analyse IA (seulement après l'essai sur 20 pages validé) |
 
 Ne lance jamais `npm run build`, `npm run test:front` ni `npm install` dans `v2/frontend/` (Vite demande Node >= 22.12).
+Les tests de l'interface (107 au 24/11/2026, `npm test` dans `v2/frontend/`) se lancent sur la machine de développement, pas sur ce poste.
 L'interface est déjà compilée dans `v2/frontend/dist` ; si elle manque, seule l'API répond : le signaler.
 
 ## Mise en route de la v2
@@ -177,6 +178,7 @@ L'interface est déjà compilée dans `v2/frontend/dist` ; si elle manque, seule
 | `NAEMON_URL_TEMPLATE` | lien du bouton « Monitoring Naemon », `{app}` = nom de l'application |
 | `LLM_REASONING_EFFORT` | `none` conseillé (modèle de `.env.example`) ; si la passerelle refuse ce réglage, Lyra le retire seul et l'écrit dans le journal |
 | `LLM_MAX_TOKENS_REASONING` | place de réponse minimale par appel tant que la réflexion n'est pas coupée (réglage vide ou refusé), 8192 par défaut |
+| `KNOWLEDGE_RERANK`, `KNOWLEDGE_RERANK_PATH` | reclassement des fiches par la passerelle : `false` par défaut ; ne l'activer que sur demande (chemin `/rerank` par défaut, relatif à `LLM_BASE_URL`) |
 | `LLM_MAX_TOKENS_EXTRACT`, `READING_CHUNK_CHARS`, `CONSIGNES_FILE` | laisser les valeurs par défaut sauf demande |
 
 `NODE_EXTRA_CA_CERTS` (certificat d'entreprise) se définit dans l'environnement **système**, pas dans `.env`.
@@ -199,6 +201,15 @@ consignes fait relire toutes les pages au prochain passage : le dire à l'utilis
 - Page **Équipes** et carte **Responsables** de la fiche application : alimentées par les pages lues. Liens « À valider », « Ancien »,
   « Cible » et serveurs « Hors inventaire » : normaux, ils ne comptent pas (ou pas tous) dans l'impact.
 
+## Assistant opérationnel (v2)
+
+Après l'analyse, les pages d'exploitation donnent des **fiches** (incident, correctif, procédure, bonne pratique), cherchées par le
+chat (« comment relance-t-on X ? », « cette erreur est-elle déjà arrivée ? »). Au premier passage après la mise à jour, ces pages
+reçoivent un second appel IA (environ la moitié des pages) : c'est normal, le dire à l'utilisateur avant un passage complet.
+Vérifier avec l'essai sur 20 pages : le journal de synchro indique le nombre de fiches ; une fiche en échec n'empêche pas la page
+d'être lue. Pour essayer la recherche sans le chat : `curl "localhost:3002/api/knowledge/search?q=<question>"`. Ne rien activer
+d'autre sans demande : le reclassement (`KNOWLEDGE_RERANK`) reste éteint.
+
 ## Erreurs fréquentes (v2)
 
 | Message ou symptôme | Cause probable | Que faire |
@@ -214,6 +225,10 @@ consignes fait relire toutes les pages au prochain passage : le dire à l'utilis
 | `unable to get local issuer certificate` | certificat d'entreprise | `NODE_EXTRA_CA_CERTS` (variable système) |
 | Réponses vides ou coupées de l'IA (`réponse vide`, `réponse coupée`, pages en erreur, doctor le signale) | le modèle « réfléchit » et épuise sa place | proposer `LLM_REASONING_EFFORT=none` dans `.env`, relancer `npm run doctor` puis l'essai sur 20 pages |
 | `doctor` : consignes absentes, vides, trop longues ou « consignes d'exemple non adaptées » | `consignes-ia.md` manquant, > 8 000 caractères ou copie telle quelle du modèle | proposer de l'écrire à partir du modèle (exemples remplacés par les conventions de l'entreprise) ou de le raccourcir (accord de l'utilisateur) |
+| `fiches en échec, page gardée, reprise au passage suivant` dans le journal de synchro (étape « fiches » dans la page Synchronisation, statut du passage « partiel ») | le second appel IA des fiches a échoué (réponse vide, coupée, JSON illisible, passerelle lente) ; la page elle-même est bien lue | relancer la synchro (la page est reprise toute seule) ; si cela dure, lister les pages concernées et proposer `LLM_REASONING_EFFORT=none` ; ne rien corriger dans le code |
+| `reasoning_effort refusé par la passerelle, désactivé pour la suite` | la passerelle n'accepte pas ce réglage ; le modèle réfléchit, les appels sont plus lents | normal, le signaler dans le rapport ; ne pas toucher à `LLM_MAX_TOKENS_REASONING` sans demande |
+| `reclassement des fiches indisponible (rerank), ordre des mots-clés gardé` ou `doctor` : `reclassement des fiches : ...` (404, chemin refusé) | `KNOWLEDGE_RERANK=true` alors que la passerelle n'offre pas ce point d'accès, ou chemin différent | proposer `KNOWLEDGE_RERANK=false` (le défaut) ou de régler `KNOWLEDGE_RERANK_PATH` avec le chemin donné par l'équipe de la passerelle (accord de l'utilisateur) ; la recherche marche quand même |
+| Le chat répond « rien trouvé dans la documentation » partout | aucune fiche encore (synchro avec `--llm` jamais faite, IA absente, pages en erreur) | lancer la synchro avec `--llm`, voir le journal ; `curl "localhost:3002/api/knowledge/search?q=test"` rend des listes vides tant qu'il n'y a pas de fiche |
 | Aucune équipe ni serveur cité après la synchro | pas de `--llm`, IA injoignable ou pages en erreur | lancer avec `--llm`, voir `lectures-rejets.csv` et le journal |
 | Applications du périmètre toutes à « inconnu » après reprise | `perimeter.json` ou export APM absent | vérifier `data/raw/apm/` et `config/perimeter.json` |
 
