@@ -280,7 +280,7 @@ function controlLinks(answer, allowed) {
   return { text: text.replace(/[ \t]+\n/g, '\n').replace(/ {2,}/g, ' ').trim(), removed };
 }
 
-const sourceOf = (f) => ({ id: f.id, kind: f.kind, title: f.title, url: f.url || null, appNames: f.appNames || [], old: Boolean(f.old), replaced: Boolean(f.replaced), otherApplication: Boolean(f.otherApplication) });
+const sourceOf = (f) => ({ id: f.id, kind: f.kind, title: f.title, url: f.url || null, ...(f.updatedAt ? { updatedAt: f.updatedAt } : {}), appNames: f.appNames || [], old: Boolean(f.old), replaced: Boolean(f.replaced), otherApplication: Boolean(f.otherApplication) });
 
 /** Fiches ouvertes, plus fiches et sections dont l'URL figure dans la réponse finale. */
 function sourcesOf(results, text) {

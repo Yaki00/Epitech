@@ -412,7 +412,7 @@ describe('assistant ask (documentation)', () => {
     const w = world();
     const { r } = await run(w, [...calls(w), { status: 200, body: reply('Voir https://wiki.example.local/7001') }]);
     assert.equal(r.sources.length, 1);
-    assert.deepEqual(r.sources[0], { id: w.ficheId, kind: 'incident', title: 'File pleine', url: 'https://wiki.example.local/7001', appNames: ['OrderHub'], old: false, replaced: false, otherApplication: false });
+    assert.deepEqual(r.sources[0], { id: w.ficheId, kind: 'incident', title: 'File pleine', url: 'https://wiki.example.local/7001', updatedAt: '2026-10-01T10:00:00.000Z', appNames: ['OrderHub'], old: false, replaced: false, otherApplication: false });
   });
 
   test('nothing found says so', async () => {

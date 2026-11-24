@@ -304,7 +304,7 @@ La consigne système demande de chercher avant de répondre à toute question de
 **Contrôle par le code**, après la réponse : toute URL de la réponse (lien markdown, entre chevrons, nue) absente des résultats d'outils
 de **cette** question est retirée (un lien markdown garde son libellé) et listée dans `removedLinks`. La réponse porte aussi `sources` :
 les fiches ouvertes par `open_fiche`, plus les fiches et sections dont l'adresse figure dans la réponse finale (`id`, `kind`, `title`,
-`url`, `appNames`, `old`, `replaced`, `otherApplication`). Le nombre d'étapes reste borné (`maxRounds`, 5).
+`url`, `updatedAt` (date de la page, absente pour une section), `appNames`, `old`, `replaced`, `otherApplication`). Le nombre d'étapes reste borné (`maxRounds`, 5).
 
 ## Score de documentation
 

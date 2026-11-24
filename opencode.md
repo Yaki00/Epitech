@@ -206,7 +206,7 @@ consignes fait relire toutes les pages au prochain passage : le dire à l'utilis
 Après l'analyse, les pages d'exploitation donnent des **fiches** (incident, correctif, procédure, bonne pratique), cherchées par le
 chat (« comment relance-t-on X ? », « cette erreur est-elle déjà arrivée ? »). Au premier passage après la mise à jour, ces pages
 reçoivent un second appel IA (environ la moitié des pages) : c'est normal, le dire à l'utilisateur avant un passage complet.
-Vérifier avec l'essai sur 20 pages : le journal de synchro indique le nombre de fiches ; une fiche en échec n'empêche pas la page
+Vérifier avec l'essai sur 20 pages : les statistiques du passage (`fiches`, `ficheErrors`) sont dans la ligne « progression » du journal et sur la page Synchronisation (API `/api/sync/runs`) ; une fiche en échec n'empêche pas la page
 d'être lue. Pour essayer la recherche sans le chat : `curl "localhost:3002/api/knowledge/search?q=<question>"`. Ne rien activer
 d'autre sans demande : le reclassement (`KNOWLEDGE_RERANK`) reste éteint.
 
