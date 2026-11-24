@@ -175,6 +175,14 @@ async function safeTool(repo, name, args, ctx) {
   }
 }
 
+/** Appelle l'outil et garde la trace des recherches documentaires (pour la formule « rien trouvé »). */
+async function callTool(repo, name, args, ctx) {
+  const result = await safeTool(repo, name, args, ctx);
+  ctx.results.push(result);
+  if (name === 'search_knowledge') ctx.searches.push(result);
+  return result;
+}
+
 /** Consigne du mode "json" : pour les passerelles qui ne gèrent pas le champ tools (function calling). */
 function jsonToolsPrompt(lang = 'fr') {
   const list = TOOLS.map((t) => `- ${t.function.name}(${Object.keys(t.function.parameters.properties).join(', ')}) : ${t.function.description}`).join('\n');
@@ -191,7 +199,16 @@ Appelle un seul outil à la fois. Les résultats des outils te sont renvoyés da
 
 const FAILED = "Je n'ai pas pu conclure en un nombre raisonnable d'étapes. Reformulez ou précisez l'application/le serveur.";
 
-async function askNative({ llm, repo, messages, toolTrace, maxRounds, ctx }) {
+const NOTHING = { fr: 'Rien trouvé dans la documentation pour cette question.', en: 'Nothing found in the documentation for this question.' };
+const hasHits = (r) => Boolean(r) && ((Array.isArray(r.fiches) && r.fiches.length > 0) || (Array.isArray(r.sections) && r.sections.length > 0));
+
+/** Étapes épuisées : « rien trouvé » si des recherches ont eu lieu et aucune n'a rien rendu, sinon l'abandon. */
+function giveUp(ctx, lang) {
+  const searched = ctx.searches.length > 0 && !ctx.searches.some((r) => hasHits(r) || (r && r.error));
+  return searched ? NOTHING[lang === 'en' ? 'en' : 'fr'] : FAILED;
+}
+
+async function askNative({ llm, repo, messages, toolTrace, maxRounds, lang, ctx }) {
   for (let round = 0; round < maxRounds; round++) {
     const res = await llm.chat({ task: 'chat', messages, tools: TOOLS, temperature: 0.2, maxTokens: 1500, cache: false });
     if (!res.toolCalls.length) return { answer: res.content, toolTrace };
@@ -203,13 +220,12 @@ async function askNative({ llm, repo, messages, toolTrace, maxRounds, ctx }) {
       } catch {
         /* arguments invalides : l'outil renverra une erreur */
       }
-      const result = await safeTool(repo, call.function.name, args, ctx);
-      ctx.results.push(result);
+      const result = await callTool(repo, call.function.name, args, ctx);
       toolTrace.push({ tool: call.function.name, args });
       messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) });
     }
   }
-  return { answer: FAILED, toolTrace };
+  return { answer: giveUp(ctx, lang), toolTrace };
 }
 
 async function askJson({ llm, repo, messages, toolTrace, maxRounds, lang, ctx }) {
@@ -225,22 +241,23 @@ async function askJson({ llm, repo, messages, toolTrace, maxRounds, lang, ctx })
     if (typeof msg.answer === 'string') return { answer: msg.answer, toolTrace };
     if (!msg.tool) return { answer: res.content, toolTrace };
     const args = msg.arguments && typeof msg.arguments === 'object' ? msg.arguments : {};
-    const result = await safeTool(repo, String(msg.tool), args, ctx);
-    ctx.results.push(result);
+    const result = await callTool(repo, String(msg.tool), args, ctx);
     toolTrace.push({ tool: String(msg.tool), args });
     messages.push({ role: 'assistant', content: res.content });
     messages.push({ role: 'user', content: `Résultat de ${msg.tool} :\n${JSON.stringify(result)}` });
   }
-  return { answer: FAILED, toolTrace };
+  return { answer: giveUp(ctx, lang), toolTrace };
 }
 
 /** La passerelle refuse-t-elle le champ tools ? (HTTP 400 qui parle d'outils) */
 const toolsRejected = (err) => err && err.status === 400 && /tool|function/i.test(err.body || err.message || '');
 
-const URL_SRC = "https?:\\/\\/[^\\s<>\"'`)\\]\\[*«»}]+";
+// L'apostrophe (droite ou typographique) fait partie de l'adresse seulement entre deux caractères d'adresse.
+const URL_CHAR = "[^\\s<>\"'\u2019`)\\]\\[*«»}]";
+const URL_SRC = `https?:\\/\\/(?:${URL_CHAR}|['\u2019](?=${URL_CHAR}))+`;
 const URL_RE = new RegExp(URL_SRC, 'gi');
 const normUrl = (u) => String(u || '').split('#')[0].replace(/\/+$/, '').replace(/^https?:\/\/[^/]*/i, (m) => m.toLowerCase());
-const trimUrl = (u) => u.replace(/[.,;:!?_]+$/, '');
+const trimUrl = (u) => u.replace(/[.,;:!?_'\u2019]+$/, '');
 
 /** Toutes les URL http(s) présentes dans les résultats d'outils de la question. */
 function urlsOf(value, out = new Set()) {
@@ -251,7 +268,7 @@ function urlsOf(value, out = new Set()) {
 }
 
 // Lien markdown entier, URL entre chevrons, ou URL nue : une seule passe, dans cet ordre.
-const LINK_RE = new RegExp(`\\[([^\\]]*)\\]\\(<?(${URL_SRC.replace('\\]\\[', '\\]')})>?\\)|<(${URL_SRC})>|(?<![\\w])_(${URL_SRC})_(?![\\w])|(${URL_SRC})`, 'gi');
+const LINK_RE = new RegExp(`\\[([^\\]]*)\\]\\(<?(${URL_SRC.split('\\]\\[').join('\\]')})>?\\)|<(${URL_SRC})>|(?<![\\w])_(${URL_SRC})_(?![\\w])|(${URL_SRC})`, 'gi');
 
 /** Retire de la réponse toute URL absente des résultats d'outils ; un lien markdown garde son libellé. */
 function controlLinks(answer, allowed) {
@@ -307,15 +324,16 @@ function sourcesOf(results, text) {
  */
 async function ask({ llm, repo, question, history = [], maxRounds = 5, toolsMode = 'native', lang = 'fr', knowledge = null, logger = null }) {
   const fresh = () => [{ role: 'system', content: systemFor(lang) }, ...history.slice(-10), { role: 'user', content: question }];
-  const ctx = { knowledge, results: [], logger };
+  const ctx = { knowledge, results: [], searches: [], logger };
   let out;
   if (toolsMode === 'json') out = { ...(await askJson({ llm, repo, messages: fresh(), toolTrace: [], maxRounds, lang, ctx })), toolsMode: 'json' };
   else {
     try {
-      out = { ...(await askNative({ llm, repo, messages: fresh(), toolTrace: [], maxRounds, ctx })), toolsMode: 'native' };
+      out = { ...(await askNative({ llm, repo, messages: fresh(), toolTrace: [], maxRounds, lang, ctx })), toolsMode: 'native' };
     } catch (err) {
       if (!toolsRejected(err)) throw err;
       ctx.results.length = 0;
+      ctx.searches.length = 0;
       out = { ...(await askJson({ llm, repo, messages: fresh(), toolTrace: [], maxRounds, lang, ctx })), toolsMode: 'json' };
     }
   }

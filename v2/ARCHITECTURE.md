@@ -304,7 +304,7 @@ La consigne système demande de chercher avant de répondre à toute question de
 **Contrôle par le code**, après la réponse : toute URL de la réponse (lien markdown, entre chevrons, nue) absente des résultats d'outils
 de **cette** question est retirée (un lien markdown garde son libellé) et listée dans `removedLinks`. La réponse porte aussi `sources` :
 les fiches ouvertes par `open_fiche`, plus les fiches et sections dont l'adresse figure dans la réponse finale (`id`, `kind`, `title`,
-`url`, `updatedAt` (date de la page, absente pour une section), `appNames`, `old`, `replaced`, `otherApplication`). Le nombre d'étapes reste borné (`maxRounds`, 5).
+`url`, `updatedAt` (date de la page, absente pour une section), `appNames`, `old`, `replaced`, `otherApplication`). L'apostrophe (droite ou typographique) fait partie d'une adresse quand elle est entre deux caractères d'adresse, et n'est retirée qu'en fin d'adresse. Le nombre d'étapes reste borné (`maxRounds`, 5) ; s'il est épuisé après des recherches documentaires qui n'ont rendu ni fiche ni section, la réponse est la formule fixe « Rien trouvé dans la documentation pour cette question. » (EN : « Nothing found in the documentation for this question. »), sans lien ni source.
 
 ## Score de documentation
 

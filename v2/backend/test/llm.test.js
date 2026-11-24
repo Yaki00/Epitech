@@ -509,6 +509,62 @@ describe('assistant ask (documentation)', () => {
     assert.deepEqual(r.removedLinks, ['https://evil.example.com/p']);
   });
 
+  test('url with an apostrophe is kept, counted in sources, and a longer invented one is removed', async () => {
+    const u = "https://wiki.example.local/display/EXPL/Dossier+d'exploitation";
+    const w = world({ url: u });
+    const { r } = await run(w, [{ status: 200, body: reply('', { tool_calls: [toolCall('1', 'search_knowledge', { query: 'file Q.MRL.EVT saturee' })] }) }, { status: 200, body: reply(`Voir ${u}.`) }]);
+    assert.deepEqual(r.removedLinks, []);
+    assert.equal(r.answer, `Voir ${u}.`);
+    assert.equal(r.sources.length, 1);
+    assert.equal(r.sources[0].url, u);
+    const typo = u.replace("'", '\u2019');
+    const w2 = world({ url: typo });
+    const { r: r2 } = await run(w2, [{ status: 200, body: reply('', { tool_calls: [toolCall('1', 'search_knowledge', { query: 'file Q.MRL.EVT saturee' })] }) }, { status: 200, body: reply(`Voir ${typo}`) }]);
+    assert.deepEqual([r2.removedLinks, r2.sources.length], [[], 1]);
+  });
+
+  test('an invented url differing only after the apostrophe is removed', async () => {
+    const w = world({ url: "https://wiki.example.local/display/EXPL/Dossier+d'exploitation" });
+    const fake = "https://wiki.example.local/display/EXPL/Dossier+d'importe-quoi";
+    const { r } = await run(w, [{ status: 200, body: reply('', { tool_calls: [toolCall('1', 'search_knowledge', { query: 'file Q.MRL.EVT saturee' })] }) }, { status: 200, body: reply(`Voir ${fake} fin`) }]);
+    assert.deepEqual(r.removedLinks, [fake]);
+    assert.ok(!r.answer.includes('Dossier'));
+  });
+
+  test('a url between apostrophes stays valid', async () => {
+    const w = world();
+    const u = 'https://wiki.example.local/7001';
+    const { r } = await run(w, [...calls(w), { status: 200, body: reply(`Voir '${u}' et \u2019${u}\u2019 fin`) }]);
+    assert.deepEqual(r.removedLinks, []);
+  });
+
+  const loopSearch = (n, query = 'rien du tout') => Array.from({ length: n }, (_, i) => ({ status: 200, body: reply('', { tool_calls: [toolCall(String(i), 'search_knowledge', { query })] }) }));
+
+  test('search finds nothing until maxRounds: fixed nothing-found answer (fr, en, json mode)', async () => {
+    const w = world({ withFiche: false });
+    const { r } = await run(w, loopSearch(3), { maxRounds: 3 });
+    assert.equal(r.answer, 'Rien trouvé dans la documentation pour cette question.');
+    assert.deepEqual([r.sources, r.removedLinks], [[], []]);
+    const { r: en } = await run(w, loopSearch(3), { maxRounds: 3, lang: 'en' });
+    assert.equal(en.answer, 'Nothing found in the documentation for this question.');
+    const js = Array.from({ length: 2 }, () => ({ status: 200, body: reply('{"tool":"search_knowledge","arguments":{"query":"x"}}') }));
+    const { r: j } = await run(w, js, { maxRounds: 2, toolsMode: 'json' });
+    assert.equal(j.answer, 'Rien trouvé dans la documentation pour cette question.');
+  });
+
+  test('looping while a search returned fiches keeps the give-up message', async () => {
+    const w = world();
+    const { r } = await run(w, loopSearch(2, 'file Q.MRL.EVT saturee'), { maxRounds: 2 });
+    assert.match(r.answer, /pas pu conclure/);
+  });
+
+  test('looping without any search keeps the give-up message', async () => {
+    const w = world({ withFiche: false });
+    const rounds = Array.from({ length: 2 }, (_, i) => ({ status: 200, body: reply('', { tool_calls: [toolCall(String(i), 'search_entities', { query: 'x' })] }) }));
+    const { r } = await run(w, rounds, { maxRounds: 2 });
+    assert.match(r.answer, /pas pu conclure/);
+  });
+
   test('open_fiche throwing does not break the chat', async () => {
     const w = world();
     w.repo.getNode = () => {
