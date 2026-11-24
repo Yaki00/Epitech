@@ -259,7 +259,18 @@ function createLlmClient(cfg, deps = {}) {
     });
   }
 
-  return { chat, chatJson, embed, imageMessage, stats, modelFor };
+  return {
+    chat,
+    chatJson,
+    embed,
+    imageMessage,
+    stats,
+    modelFor,
+    /** Vrai si la passerelle a refusé reasoning_effort (réglage retiré pour la suite). */
+    get reasoningRefused() {
+      return Boolean(cfg.reasoningEffort) && !reasoningSupported;
+    },
+  };
 }
 
 module.exports = { createLlmClient, LlmError };

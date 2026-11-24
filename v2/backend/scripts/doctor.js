@@ -244,6 +244,7 @@ async function main() {
       try {
         const r = await llm.chat({ task: 'extract', cache: false, maxTokens: config.llm.maxTokens.extract, messages: [{ role: 'user', content: 'Résume en une phrase : le serveur web01 héberge l\'application Facture.' }] });
         ok(`lecture d'essai OK (${Date.now() - t0} ms, ${r.content.length} caractères)`);
+        if (llm.reasoningRefused) warn(`la passerelle refuse LLM_REASONING_EFFORT=${config.llm.reasoningEffort} : Lyra le retire seul, mais le modèle réfléchit (appels plus lents, quelques réponses coupées puis relancées). Le laisser vide dans backend/.env supprime cet avertissement`);
       } catch (err) {
         if (err.code === 'empty' || err.code === 'truncated') warn(`lecture d'essai ${err.code === 'empty' ? 'vide' : 'coupée'} : régler LLM_REASONING_EFFORT=none dans backend/.env`);
         else throw err;

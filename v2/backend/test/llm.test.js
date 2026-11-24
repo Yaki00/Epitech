@@ -59,12 +59,13 @@ describe('llmClient', () => {
       { status: 200, body: reply('{"a":2}') },
     ]);
     const llm = createLlmClient({ ...baseCfg, reasoningEffort: 'none' }, { fetch: f, logger: silent });
-    assert.equal(f.calls.length, 0);
+    assert.equal(llm.reasoningRefused, false);
     assert.deepEqual(await llm.chatJson({ messages: [] }), { a: 1 });
     assert.equal(f.calls[0].body.reasoning_effort, 'none');
     assert.deepEqual([f.calls[1].body.reasoning_effort, f.calls[2].body.reasoning_effort, f.calls[2].body.response_format], [undefined, undefined, undefined]);
     await llm.chatJson({ messages: [{ role: 'user', content: 'autre' }] });
     assert.deepEqual([f.calls[3].body.reasoning_effort, f.calls[3].body.response_format], [undefined, undefined]);
+    assert.equal(llm.reasoningRefused, true);
   });
 
   test('une autre erreur 400 ne retire aucun réglage', async () => {
