@@ -441,7 +441,7 @@ describe('assistant ask (documentation)', () => {
     const u = 'https://wiki.example.local/7001';
     const text = `[https://evil.example.com/a](${u}) puis <https://evil.example.com/b> fin, [x](<https://evil.example.com/c>)`;
     const { r } = await run(w, [...calls(w), { status: 200, body: reply(text) }]);
-    assert.equal(r.answer, `[${u}](${u}) puis fin, x`);
+    assert.equal(r.answer, `${u} puis fin, x`);
     assert.deepEqual(r.removedLinks, ['https://evil.example.com/a', 'https://evil.example.com/b', 'https://evil.example.com/c']);
   });
 
