@@ -1,6 +1,6 @@
 'use strict';
 const assert = require('assert').strict;
-const { sanitizeReading, mergeReadings } = require('../src/reading/schema');
+const { sanitizeReading, mergeReadings, cleanPersonal } = require('../src/reading/schema');
 const { buildReadingMessages } = require('../src/reading/prompt');
 const { readPage, READING_VERSION } = require('../src/reading/readPage');
 const { diagramsToText } = require('../src/parse/confluence/drawioText');
@@ -245,6 +245,14 @@ describe('lecture IA d\'une page', () => {
     assert.ok(r.owners[0].evidence.includes('Alice Martin'));
     // une IP n'est pas un numéro de téléphone ; une adresse électronique n'est pas une personne
     assert.deepEqual(r.entities.map((e) => e.name), ['10.12.40.21']);
+  });
+
+  test('cleanPersonal only erases telephone-shaped numbers', () => {
+    for (const keep of ['10.20.11.46 10.20.11.47', '2026-01-30 12:45', 'lmrlp01 10.20.11.46', 'ports 8080 8443 9000 9090', 'du 2026-01-30 au 2026-02-14']) assert.equal(cleanPersonal(keep), keep);
+    for (const phone of ['06 11 22 33 44', '01.23.45.67.89', '0611223344', '01-23-45-67-89', '+33 6 11 22 33 44', '+33 (0)1 23 45 67 89']) {
+      assert.equal(cleanPersonal(`Appeler ${phone} demain`), 'Appeler  demain', phone);
+    }
+    assert.equal(cleanPersonal('srv 10.20.11.46 10.20.11.47 puis 06 11 22 33 44.'), 'srv 10.20.11.46 10.20.11.47 puis .');
   });
 
   test('diagramsToText writes one line per arrow and per containment', () => {

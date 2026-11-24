@@ -124,7 +124,9 @@ const envOf = (v) => {
 
 // ---------- données personnelles ----------
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g;
-const PHONE_CANDIDATE = /\+?\d[\d\s.()-]{6,}\d/g;
+// Forme téléphonique seulement : français 0X XX XX XX XX (séparateurs facultatifs), ou international en +.
+// Jamais collé à un mot ou à un chiffre, pour ne pas prendre une suite d'IP ou de dates pour un numéro.
+const PHONE_CANDIDATE = /(?<!\w)(?<!\d[.-])(?:0\d(?:[ .-]?\d{2}){4}(?!\d)|\+\d[\d\s.()-]{6,}\d)/g;
 const IPV4 = /^\d{1,3}(?:\.\d{1,3}){3}$/;
 const isPhone = (s) => (s.match(/\d/g) || []).length >= 9 && !IPV4.test(s.trim());
 const EDGE_PUNCT = /^[\s,;:()[\]<>/|.-]+|[\s,;:([<>/|-]+$/g;
