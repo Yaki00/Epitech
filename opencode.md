@@ -143,7 +143,7 @@ directe), `v2/backend/data/raw/...`, `v2/logs/`. Le modèle `consignes-ia.exampl
 |---|---|
 | `npm run setup` | installe le backend, crée `backend/.env` et les configs ; **reprend la v1** si `../v1/backend/.env` existe |
 | `npm run doctor` | vérifie Node, IA, Confluence, Naemon, fichiers ; objectif : `--- aucune erreur ---` |
-| `npm test` | tests du backend : tous les tests doivent passer (494 au 24/11/2026, ce nombre augmente avec le code), sans réseau |
+| `npm test` | tests du backend : tous les tests doivent passer (499 au 25/11/2026, ce nombre augmente avec le code), sans réseau |
 | `npm start` | http://localhost:3002 (interface incluse, car `frontend/dist` est dans le dépôt) |
 | `npm run sync:all` | Confluence, CSV, analyse IA (seulement après l'essai sur 20 pages validé) |
 
