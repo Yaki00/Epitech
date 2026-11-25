@@ -67,7 +67,8 @@ Toutes les commandes se lancent depuis `v1/`, sauf indication contraire.
    - `MCP_*`, `NAEMON_URL_TEMPLATE` : laisser vides si non fournis.
 4. **`backend/config/perimeter.json`** : les applications suivies, **fournies par l'utilisateur**
    (noms tels qu'écrits dans la colonne A de l'export APM). Ne jamais laisser les exemples OrderHub / Billing Engine.
-5. **Export APM** : le fichier CSV fourni par l'utilisateur va dans `backend/data/raw/apm/`.
+5. **Export APM** : le fichier CSV fourni par l'utilisateur va dans `backend/data/raw/apm/`. Après une reprise de la v1, `data/raw/apm` et `marketplace`
+   ne sont copiés qu'une fois : tout nouvel export doit être déposé dans `v2/backend/data/raw/apm` (ou `marketplace`), pas dans la v1.
    Vérifier que **la ligne 1 contient les en-têtes** (sinon le signaler, ne pas modifier le fichier).
 6. **Contrôle** : `npm run doctor`. Objectif : `--- aucune erreur ---`. Les `WARN` sont à lister dans le rapport.
 7. **Tests** : `npm test`. Tous les tests doivent passer (148 ou plus). Aucun ne nécessite le réseau.
@@ -122,3 +123,114 @@ Quand une commande échoue ou qu'un résultat paraît faux, ne corrige rien et d
 6. ce que tu as déjà essayé (uniquement des changements de configuration autorisés).
 
 Ce rapport est transmis au responsable du projet, qui fait la correction dans le code.
+
+---
+
+# Lyra v2 (dossier `v2/`)
+
+Mêmes rôle, mêmes interdits et mêmes droits que pour la v1 (voir plus haut), en remplaçant `v1/` par `v2/` :
+tu **installes, configures, lances et testes**, tu ne modifies jamais le code (`v2/backend/src/`, `v2/backend/scripts/`,
+`v2/backend/test/`, `v2/frontend/` y compris `dist/`, `v2/scripts/`), ni `package.json`, ni les fichiers `*.example*`, ni les
+fichiers de documentation. Tu ne touches jamais à `v1/` depuis la v2. Documentation : `v2/README.md` et `v2/ARCHITECTURE.md`.
+
+Fichiers que tu peux modifier : `v2/backend/.env`, `v2/backend/config/perimeter.json`, `v2/backend/config/mappings.json`
+et `v2/backend/config/consignes-ia.md` (pour ces trois derniers : proposition puis accord de l'utilisateur, jamais d'écriture
+directe), `v2/backend/data/raw/...`, `v2/logs/`. Le modèle `consignes-ia.example.md` ne se modifie pas.
+
+## Commandes (depuis `v2/`, Node 16.20.x)
+
+| Commande | Rôle |
+|---|---|
+| `npm run setup` | installe le backend, crée `backend/.env` et les configs ; **reprend la v1** si `../v1/backend/.env` existe |
+| `npm run doctor` | vérifie Node, IA, Confluence, Naemon, fichiers ; objectif : `--- aucune erreur ---` |
+| `npm test` | tests du backend : tous les tests doivent passer (499 au 25/11/2026, ce nombre augmente avec le code), sans réseau |
+| `npm start` | http://localhost:3002 (interface incluse, car `frontend/dist` est dans le dépôt) |
+| `npm run sync:all` | Confluence, CSV, analyse IA (seulement après l'essai sur 20 pages validé) |
+
+Ne lance jamais `npm run build`, `npm run test:front` ni `npm install` dans `v2/frontend/` (Vite demande Node >= 22.12).
+Les tests de l'interface (107 au 24/11/2026, `npm test` dans `v2/frontend/`) se lancent sur la machine de développement, pas sur ce poste.
+L'interface est déjà compilée dans `v2/frontend/dist` ; si elle manque, seule l'API répond : le signaler.
+
+## Mise en route de la v2
+
+1. `node -v` doit afficher `v16.20.x`.
+2. `cd v2 && npm run setup`.
+   - **Avec la v1 configurée à côté** : la reprise est automatique. Lire sa sortie et la citer dans le rapport : config copiée, cache IA,
+     store, CSV, `.env` créé avec `PORT=3002`, `DEMO_MODE=false`, `CONFLUENCE_FETCH=false`. Relancer `setup` est sans risque (rien n'est écrasé).
+   - **Sans v1** : `backend/.env` est créé avec **`DEMO_MODE=true`** (données fictives). Pour les vraies données, remplir `.env` comme pour la v1
+     (voir plus haut) puis mettre `DEMO_MODE=false`.
+3. Vérifier dans `v2/backend/.env` : `DEMO_MODE`, `PORT=3002`, `CONFLUENCE_EXPORT_DIR` (export de la v1 si `CONFLUENCE_FETCH=false`), `DATA_DIR`.
+4. `npm run doctor`, puis `npm test` (tous les tests verts).
+5. `npm start` et ouvrir http://localhost:3002. La v1 (3001) et la v2 (3002) peuvent tourner ensemble.
+
+## Ce qu'on règle dans `.env` pour la v2
+
+| Variable | Valeur |
+|---|---|
+| `DEMO_MODE` | `true` pour essayer sans données, `false` pour les vraies |
+| `PORT` | `3002` (la v1 reste sur 3001) |
+| `CONFLUENCE_FETCH` | `false` si la v1 récupère Confluence (reprise), `true` sinon |
+| `HISTORY_KEEP` | nombre d'imports gardés dans l'historique (50 par défaut) |
+| `NAEMON_SOURCE` | `off` (défaut), `thruk` ou `csv` |
+| `NAEMON_THRUK_URL`, `NAEMON_TOKEN` ou `NAEMON_USER` et `NAEMON_PASSWORD` | pour `thruk` ; valeurs fournies par l'utilisateur, jamais inventées, masquées dans les rapports |
+| `NAEMON_CSV_FILE` | pour `csv` ; les colonnes sont décrites dans le bloc `naemon` de `mappings.json` (proposer, attendre l'accord) |
+| `NAEMON_POLL_MINUTES` | minutes entre deux relevés (5 par défaut) |
+| `NAEMON_URL_TEMPLATE` | lien du bouton « Monitoring Naemon », `{app}` = nom de l'application |
+| `LLM_REASONING_EFFORT` | `none` conseillé (modèle de `.env.example`) ; si la passerelle refuse ce réglage, Lyra le retire seul et l'écrit dans le journal |
+| `LLM_MAX_TOKENS_REASONING` | place de réponse minimale par appel tant que la réflexion n'est pas coupée (réglage vide ou refusé), 8192 par défaut |
+| `KNOWLEDGE_RERANK`, `KNOWLEDGE_RERANK_PATH` | reclassement des fiches par la passerelle : `false` par défaut ; ne l'activer que sur demande (chemin `/rerank` par défaut, relatif à `LLM_BASE_URL`) |
+| `LLM_MAX_TOKENS_EXTRACT`, `READING_CHUNK_CHARS`, `CONSIGNES_FILE` | laisser les valeurs par défaut sauf demande |
+
+`NODE_EXTRA_CA_CERTS` (certificat d'entreprise) se définit dans l'environnement **système**, pas dans `.env`.
+
+## Lecture des pages par l'IA et consignes (v2)
+
+L'IA lit chaque page Confluence et le code vérifie ses citations : plus aucune règle de repérage dans le code. Les conventions de
+l'entreprise (noms de serveurs, sens de « recette », vocabulaire) se disent dans `v2/backend/config/consignes-ia.md`, absent au
+départ (`npm run setup` ne le crée pas), à écrire à partir du modèle en remplaçant ses exemples fictifs. Tu peux proposer une modification de ce fichier, comme pour `perimeter.json`, et l'écrire
+seulement après l'accord de l'utilisateur. Ne jamais y mettre de mot de passe, de jeton ni de donnée personnelle. Modifier les
+consignes fait relire toutes les pages au prochain passage : le dire à l'utilisateur avant.
+
+- `npm run doctor` indique la présence et la taille des consignes (au-delà de 8 000 caractères la fin est ignorée), les synonymes
+  d'environnement lus dans `mappings.json` et le résultat d'une petite lecture d'essai.
+- Au premier passage après la mise à jour (ou après une reprise de la v1), **toutes les pages sont relues par l'IA** : c'est normal et long.
+  Toujours faire l'essai sur 20 pages d'abord : `node backend/scripts/sync-confluence.js --llm --limit 20`.
+- Sans `--llm` ou sans IA joignable, les pages sont stockées mais rien n'est déduit (ni serveurs cités, ni responsables) : le signaler.
+- Regarder dans `backend/data/rapports/` : `perimetre-pages.csv`, `perimetre-orthographes.csv`, `lectures-rejets.csv` (éléments écartés
+  faute de citation ou d'application connue), `architecture-*.csv`. Les résumer dans le rapport.
+- Page **Équipes** et carte **Responsables** de la fiche application : alimentées par les pages lues. Liens « À valider », « Ancien »,
+  « Cible » et serveurs « Hors inventaire » : normaux, ils ne comptent pas (ou pas tous) dans l'impact.
+
+## Assistant opérationnel (v2)
+
+Après l'analyse, les pages d'exploitation donnent des **fiches** (incident, correctif, procédure, bonne pratique), cherchées par le
+chat (« comment relance-t-on X ? », « cette erreur est-elle déjà arrivée ? »). Au premier passage après la mise à jour, ces pages
+reçoivent un second appel IA (environ la moitié des pages) : c'est normal, le dire à l'utilisateur avant un passage complet.
+Vérifier avec l'essai sur 20 pages : les statistiques du passage (`fiches`, `ficheErrors`) sont dans la ligne « progression » du journal et sur la page Synchronisation (API `/api/sync/runs`) ; une fiche en échec n'empêche pas la page
+d'être lue. Pour essayer la recherche sans le chat : `curl "localhost:3002/api/knowledge/search?q=<question>"`. Ne rien activer
+d'autre sans demande : le reclassement (`KNOWLEDGE_RERANK`) reste éteint.
+
+## Erreurs fréquentes (v2)
+
+| Message ou symptôme | Cause probable | Que faire |
+|---|---|---|
+| `Interface non disponible : frontend/dist absent` | dépôt incomplet ou `git pull` manquant | `git pull` (sur demande), sinon le signaler |
+| Données fictives affichées (« Mode démo ») | `DEMO_MODE=true` | mettre `false` dans `.env`, relancer `npm start` |
+| `EADDRINUSE` sur 3002 | une autre instance tourne | l'arrêter ; ne pas changer le port sans accord |
+| `Thruk HTTP 401` ou `jeton ou identifiants refusés` | jeton Naemon faux ou expiré | demander un nouveau jeton |
+| `Thruk : page HTML reçue (connexion ?)` | mauvaise URL Thruk ou authentification absente | comparer l'URL avec celle du navigateur (avec `/thruk`) |
+| Supervision « inconnue » partout | `NAEMON_SOURCE=off` ou première relève pas encore faite | normal avec `off` ; sinon attendre un relevé et voir la page Supervision |
+| Hôtes « non rapprochés » | noms Naemon différents de ceux de l'inventaire | les lister dans le rapport, ne rien modifier |
+| `backend/.env existe déjà : reprise de la v1 ignorée` | `.env` créé avant la reprise | le dire à l'utilisateur ; ne pas supprimer le `.env` sans accord |
+| `unable to get local issuer certificate` | certificat d'entreprise | `NODE_EXTRA_CA_CERTS` (variable système) |
+| Réponses vides ou coupées de l'IA (`réponse vide`, `réponse coupée`, pages en erreur, doctor le signale) | le modèle « réfléchit » et épuise sa place | proposer `LLM_REASONING_EFFORT=none` dans `.env`, relancer `npm run doctor` puis l'essai sur 20 pages |
+| `doctor` : consignes absentes, vides, trop longues ou « consignes d'exemple non adaptées » | `consignes-ia.md` manquant, > 8 000 caractères ou copie telle quelle du modèle | proposer de l'écrire à partir du modèle (exemples remplacés par les conventions de l'entreprise) ou de le raccourcir (accord de l'utilisateur) |
+| `fiches en échec, page gardée, reprise au passage suivant` dans le journal de synchro (étape « fiches » dans la page Synchronisation, statut du passage « partiel ») | le second appel IA des fiches a échoué (réponse vide, coupée, JSON illisible, passerelle lente) ; la page elle-même est bien lue | relancer la synchro (la page est reprise toute seule) ; si cela dure, lister les pages concernées et proposer `LLM_REASONING_EFFORT=none` ; ne rien corriger dans le code |
+| `reasoning_effort refusé par la passerelle, désactivé pour la suite` | la passerelle n'accepte pas ce réglage ; le modèle réfléchit, les appels sont plus lents | normal, le signaler dans le rapport ; ne pas toucher à `LLM_MAX_TOKENS_REASONING` sans demande |
+| `reclassement des fiches indisponible (rerank), ordre des mots-clés gardé` ou `doctor` : `reclassement des fiches : ...` (404, chemin refusé) | `KNOWLEDGE_RERANK=true` alors que la passerelle n'offre pas ce point d'accès, ou chemin différent | proposer `KNOWLEDGE_RERANK=false` (le défaut) ou de régler `KNOWLEDGE_RERANK_PATH` avec le chemin donné par l'équipe de la passerelle (accord de l'utilisateur) ; la recherche marche quand même |
+| Le chat répond « rien trouvé dans la documentation » partout | aucune fiche encore (synchro avec `--llm` jamais faite, IA absente, pages en erreur) | lancer la synchro avec `--llm`, voir le journal ; `curl "localhost:3002/api/knowledge/search?q=test"` rend des listes vides tant qu'il n'y a pas de fiche |
+| Aucune équipe ni serveur cité après la synchro | pas de `--llm`, IA injoignable ou pages en erreur | lancer avec `--llm`, voir `lectures-rejets.csv` et le journal |
+| Applications du périmètre toutes à « inconnu » après reprise | `perimeter.json` ou export APM absent | vérifier `data/raw/apm/` et `config/perimeter.json` |
+
+Pour rapporter un problème : mêmes règles que pour la v1 (commande exacte, sortie complète sans secret, `node -v`, `npm run doctor`,
+hypothèse présentée comme telle, ce qui a déjà été essayé).

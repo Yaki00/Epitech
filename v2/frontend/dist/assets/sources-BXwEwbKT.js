@@ -1,0 +1,1 @@
+function e(e,t,n){let r=`${t}.${n}`,i=e(r);return i===r?n:i}var t=(t,n)=>e(t,`source`,n),n=(t,n)=>e(t,`edge`,n);function r(t,n){let r=n===`démo`?`demo`:n,i=r===`success`||r===`ok`?`ok`:r===`error`?`down`:r===`demo`?`accent`:r===`off`?`unmon`:`unknown`;return{label:e(t,`sourceStatus`,r),tone:i}}export{t as n,r,n as t};

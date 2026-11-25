@@ -1,0 +1,17 @@
+{
+  "name": "lyra-v2",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Lyra - lance le backend (API + interface compilée) ; sur une machine Node >= 22.12, aussi le frontend en développement",
+  "scripts": {
+    "setup": "node scripts/setup.js",
+    "start": "node scripts/start.js",
+    "doctor": "npm --prefix backend run doctor",
+    "sync": "npm --prefix backend run sync:inventory && npm --prefix backend run sync:confluence",
+    "sync:all": "node scripts/sync-all.js",
+    "fetch": "npm --prefix backend run fetch:confluence",
+    "test": "npm --prefix backend test",
+    "test:front": "npm --prefix frontend test",
+    "build": "npm --prefix frontend run build"
+  }
+}

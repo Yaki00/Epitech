@@ -1,0 +1,19 @@
+{
+  "pageId": "9001109",
+  "title": "Paris Service Delivery",
+  "rawTitle": "Paris Service Delivery",
+  "url": "https://wiki.example.local/spaces/DEMO/pages/9001109/Paris+Service+Delivery",
+  "spaceKey": "DEMO",
+  "status": "current",
+  "type": "page",
+  "createdAt": "2007-04-30T17:54:29.000+02:00",
+  "createdBy": "Auteur Exemple",
+  "updatedAt": "2010-09-27T15:49:52.000+02:00",
+  "updatedBy": "Unknown User (110902)",
+  "version": 0,
+  "entities": { "applications": [], "servers": [], "ips": ["01.23.45.82", "01.23.45.75", "01.23.45.60"], "databases": [], "storage": [] },
+  "tables": [{ "headers": [], "rows": [["Name", "Phone", "Business Line", "email"]] }],
+  "keywords": ["sdm", "paris", "com", "how", "find", "below"],
+  "attachments": { "count": 0, "downloaded": [], "all": [] },
+  "images": { "count": 0, "downloaded": 0 }
+}

@@ -1,0 +1,9 @@
+{
+  "pageId": "7001",
+  "title": "OrderHub - Architecture",
+  "url": "https://wiki.example.local/spaces/ESP/pages/7001",
+  "spaceKey": "ESP",
+  "updatedAt": "2026-06-01T10:00:00.000+02:00",
+  "version": 4,
+  "ancestors": [{ "id": "1", "title": "Accueil" }, { "id": "7000", "title": "OrderHub" }]
+}

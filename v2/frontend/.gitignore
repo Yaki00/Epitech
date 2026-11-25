@@ -1,0 +1,5 @@
+node_modules/
+*.log
+.vite/
+coverage/
+# dist/ est versionné (servi tel quel par le backend sur le poste) : ne pas l'ignorer

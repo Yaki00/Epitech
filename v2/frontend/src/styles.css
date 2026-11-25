@@ -1,0 +1,218 @@
+@import "tailwindcss";
+
+/*
+ * Jetons de l'interface Lyra.
+ * Principe : l'habillage reste neutre (ardoise), la couleur est réservée au sens
+ * (états de supervision, environnements). L'accent ne sert qu'aux liens, au focus et à l'action principale.
+ * Chaque jeton est une variable CSS : les utilitaires Tailwind (bg-surface, text-ink-2, border-line...)
+ * suivent automatiquement le thème posé sur <html data-theme="light|dark">.
+ */
+
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+@theme {
+  /* police système : rien n'est téléchargé (poste parfois sans accès à Internet) */
+  --font-sans: "Inter", "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", "Cascadia Code", Consolas, "SF Mono", Menlo, monospace;
+
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+
+  /* habillage (clair) */
+  --color-canvas: #f3f5f7;
+  --color-surface: #ffffff;
+  --color-surface-2: #f6f8fa;
+  --color-surface-3: #eceff3;
+  --color-line: #dde2e8;
+  --color-line-strong: #c5ccd5;
+  --color-ink: #17212b;
+  --color-ink-2: #4f5b68;
+  --color-ink-3: #77828e;
+  --color-sidebar: #1c2530;
+  --color-sidebar-ink: #c9d2dc;
+  --color-sidebar-ink-strong: #ffffff;
+  --color-sidebar-active: #2a3542;
+  --color-sidebar-line: #2b3541;
+
+  --color-accent: #2f55c4;
+  --color-accent-hover: #2647a8;
+  --color-accent-ink: #ffffff;
+  --color-accent-soft: #e7edfb;
+  --color-focus: #2f55c4;
+
+  /* états (texte lisible sur le fond « soft » et sur la surface) */
+  --color-ok: #17804a;
+  --color-ok-soft: #e2f3e9;
+  --color-warn: #946000;
+  --color-warn-soft: #fbefd6;
+  --color-crit: #bb4707;
+  --color-crit-soft: #fde8db;
+  --color-down: #c01d32;
+  --color-down-soft: #fbe3e6;
+  --color-maint: #6c44b6;
+  --color-maint-soft: #eee7fa;
+  --color-unknown: #5b6673;
+  --color-unknown-soft: #eaedf1;
+  --color-unmon: #6f7985;
+  --color-unmon-soft: transparent;
+
+  /* environnements (zones de la carte, badges) */
+  --color-env-prd: #2b56c0;
+  --color-env-prd-soft: #e6ecfa;
+  --color-env-stg: #0b7682;
+  --color-env-stg-soft: #e0f2f3;
+  --color-env-dev: #6a5a8c;
+  --color-env-dev-soft: #efebf6;
+  --color-env-none: #6f7985;
+  --color-env-none-soft: #eef0f3;
+
+  --shadow-pop: 0 12px 32px -8px rgb(15 23 32 / 0.22), 0 2px 6px rgb(15 23 32 / 0.08);
+}
+
+:root[data-theme="dark"] {
+  --color-canvas: #0f141a;
+  --color-surface: #161c23;
+  --color-surface-2: #1b222b;
+  --color-surface-3: #232c36;
+  --color-line: #29323d;
+  --color-line-strong: #3a4552;
+  --color-ink: #e5e9ee;
+  --color-ink-2: #a3aeba;
+  --color-ink-3: #7b8794;
+  --color-sidebar: #12181f;
+  --color-sidebar-ink: #a9b4c0;
+  --color-sidebar-ink-strong: #ffffff;
+  --color-sidebar-active: #1f2833;
+  --color-sidebar-line: #222b35;
+
+  --color-accent: #8ea7ff;
+  --color-accent-hover: #a9bcff;
+  --color-accent-ink: #0f141a;
+  --color-accent-soft: rgb(142 167 255 / 0.14);
+  --color-focus: #8ea7ff;
+
+  --color-ok: #4cc384;
+  --color-ok-soft: rgb(76 195 132 / 0.14);
+  --color-warn: #e6b03c;
+  --color-warn-soft: rgb(230 176 60 / 0.15);
+  --color-crit: #f28a4e;
+  --color-crit-soft: rgb(242 138 78 / 0.15);
+  --color-down: #f36a7e;
+  --color-down-soft: rgb(243 106 126 / 0.16);
+  --color-maint: #b79af3;
+  --color-maint-soft: rgb(183 154 243 / 0.15);
+  --color-unknown: #a3aeba;
+  --color-unknown-soft: rgb(163 174 186 / 0.13);
+  --color-unmon: #8d98a5;
+  --color-unmon-soft: transparent;
+
+  --color-env-prd: #86a3ff;
+  --color-env-prd-soft: rgb(134 163 255 / 0.13);
+  --color-env-stg: #4fc7cf;
+  --color-env-stg-soft: rgb(79 199 207 / 0.13);
+  --color-env-dev: #b9a6dc;
+  --color-env-dev-soft: rgb(185 166 220 / 0.13);
+  --color-env-none: #9aa5b1;
+  --color-env-none-soft: rgb(154 165 177 / 0.12);
+
+  --shadow-pop: 0 14px 36px -8px rgb(0 0 0 / 0.6), 0 2px 6px rgb(0 0 0 / 0.35);
+}
+
+@layer base {
+  html {
+    color-scheme: light;
+    -webkit-text-size-adjust: 100%;
+  }
+  html[data-theme="dark"] {
+    color-scheme: dark;
+  }
+  body {
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 0.875rem;
+    line-height: 1.45;
+    font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased;
+  }
+  /* chiffres alignés dans les tableaux et indicateurs */
+  table,
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
+    border-radius: 3px;
+  }
+  ::selection {
+    background: var(--color-accent-soft);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer components {
+  .link {
+    color: var(--color-accent);
+    text-underline-offset: 2px;
+  }
+  .link:hover {
+    text-decoration: underline;
+  }
+  .skeleton {
+    background: linear-gradient(90deg, var(--color-surface-3) 0%, var(--color-surface-2) 50%, var(--color-surface-3) 100%);
+    background-size: 200% 100%;
+    animation: lyra-shimmer 1.4s ease-in-out infinite;
+  }
+}
+
+@keyframes lyra-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+/* palette Ctrl+K (cmdk) */
+[cmdk-overlay] {
+  position: fixed;
+  inset: 0;
+  background: rgb(10 14 19 / 0.45);
+  z-index: 50;
+}
+[cmdk-dialog] {
+  position: fixed;
+  top: 12vh;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(640px, calc(100vw - 32px));
+  z-index: 51;
+}
+[cmdk-list] {
+  max-height: min(420px, 60vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+[cmdk-group-heading] {
+  padding: 8px 12px 4px;
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  color: var(--color-ink-3);
+}
+[cmdk-item][data-selected="true"] {
+  background: var(--color-surface-3);
+}
