@@ -491,6 +491,49 @@ describe('période ancienne ou cible : seulement si une citation la prouve', () 
     assert.equal(verifyReading(link({ periodEvidence: 'Flux supprimé en 2025 : Billing Engine vers OrderHub' }), c).links[0].period, 'past');
     assert.equal(verifyReading(link({ periodEvidence: 'Flux supprimé en 2026' }), c).links[0].period, 'current');
   });
+
+  test('parent pages never prove a target page (a « Projets » folder may describe the existing), but still prove a past one', () => {
+    const env = setup();
+    const withParents = (title, parents, text = 'OrderHub tourne sur srvorh01') => {
+      const header = `Titre : ${title}\nPages parentes : ${parents}`;
+      return ctxOf(env, { headerText: header, pageText: `${header}\n${title}\n${text}` });
+    };
+    // l'IA cite le titre, ou la ligne des pages parentes : rangement seul, la page reste actuelle avec ses liens
+    for (const quote of ['Migration Oracle 19c : plan de bascule', 'Pages parentes : Projets SI', 'Projets SI', null]) {
+      const v = verifyReading(pageOf('target', quote), withParents('Migration Oracle 19c : plan de bascule', 'Projets SI'));
+      assert.equal(v.period, 'current', String(quote));
+      assert.equal(v.links[0].period, 'current', String(quote));
+      assert.ok(v.rejected.some((x) => x.what === 'période de la page (target)'), String(quote));
+    }
+    // un lien cible qui ne cite que les pages parentes reste actuel
+    const linkTarget = reading({ links: [runsOn('srvorh01', 'OrderHub tourne sur srvorh01', { period: 'target', periodEvidence: 'Pages parentes : Projets SI' })] });
+    assert.equal(verifyReading(linkTarget, withParents('Plan de capacité 2026', 'Projets SI')).links[0].period, 'current');
+    // le titre ou le contenu le disent : cible gardée, même sous « Projets SI »
+    assert.equal(verifyReading(pageOf('target', null), withParents('Projet Portail 2025 : architecture cible', 'Projets SI')).period, 'target');
+    const body = 'OrderHub tourne sur srvorh01\nArchitecture prévue pour 2027.';
+    assert.equal(verifyReading(pageOf('target', 'Architecture prévue pour 2027'), withParents('Portail 2027', 'Projets SI', body)).period, 'target');
+    // une page rangée sous « Archives » reste ancienne
+    assert.equal(verifyReading(pageOf('past', null), withParents('DAT OrderHub', 'Accueil > Archives')).period, 'past');
+  });
+});
+
+describe('serveur cité dans une commande « ssh compte@serveur »', () => {
+  test('the server and its link are kept: the account before the @ is removed on both sides', () => {
+    const env = setup();
+    const { sanitizeReading } = require('../src/reading/schema');
+    const text = 'Se connecter sur le premier nœud :\nssh deploy@srvnew88.rec.corp.example\nsudo systemctl stop orh';
+    const raw = sanitizeReading({
+      page: { kind: 'install', period: 'current' },
+      entities: [{ name: 'srvnew88.rec.corp.example', type: 'server', env: 'STG', status: 'active', evidence: 'ssh deploy@srvnew88.rec.corp.example' }],
+      links: [{ from: 'OrderHub', to: 'srvnew88.rec.corp.example', type: 'runs_on', evidence: 'Se connecter sur le premier nœud : ssh deploy@srvnew88.rec.corp.example' }],
+    });
+    assert.equal(raw.entities[0].evidence, 'ssh srvnew88.rec.corp.example');
+    assert.ok(!/deploy/.test(JSON.stringify(raw)));
+    const v = verifyReading(raw, ctxOf(env, { pageText: text }));
+    assert.deepEqual(v.rejected, []);
+    assert.deepEqual(v.servers.map((x) => x.name), ['srvnew88.rec.corp.example']);
+    assert.deepEqual(v.links.map((l) => [l.type, l.dstName]), [['runs_on', 'srvnew88.rec.corp.example']]);
+  });
 });
 
 describe('relecture round 1 : page elle-même, utilisateurs actuels, lien actuel dans une page ancienne', () => {

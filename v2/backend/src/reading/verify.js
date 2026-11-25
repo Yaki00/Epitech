@@ -29,8 +29,8 @@
  * est contesté : il n'est corroboré par rien (pas même Naemon, qui supervise parfois encore un serveur
  * arrêté) et ses liens sont `toValidate`.
  * Période de la page : ancienne ou cible seulement si une citation le prouve (`periodEvidence` retrouvée
- * dans la page et contenant un mot de cette période, ou un tel mot dans le titre ou les pages parentes) ;
- * sinon actuelle. Une date ou une année seule ne prouve rien.
+ * dans la page et contenant un mot de cette période, ou un tel mot dans le titre, ou dans les pages parentes
+ * pour une page ancienne seulement) ; sinon actuelle. Une date ou une année seule ne prouve rien.
  * Période d'un lien : la sienne si elle est celle de la page (vérifiée) ou si sa citation la prouve,
  * sinon celle de la page ; serveur dit arrêté : past, prévu : target. Un lien dit actuel dans une page
  * ancienne est au mieux `toValidate` (sauf `confirmed`).
@@ -64,6 +64,17 @@ const PERIOD_WORDS = {
 /** La citation contient-elle un mot de la période (ancienne ou cible) ? */
 const provesPeriod = (quote, period) => Boolean(PERIOD_WORDS[period] && quote && PERIOD_WORDS[period].test(normalizeText(quote)));
 
+/**
+ * Texte sans la ligne « Pages parentes : ... » de l'en-tête. Un rangement sous « Projets SI » ne dit pas si
+ * la page décrit l'existant ou le futur : une période cible se prouve par le titre ou le contenu de la page.
+ * Un rangement sous « Archives » prouve en revanche une page ancienne : les pages parentes restent admises pour past.
+ */
+const withoutParents = (s) =>
+  String(s || '')
+    .split('\n')
+    .filter((line) => !/^\s*Pages parentes\s*:/i.test(line))
+    .join('\n');
+
 /** Liens qui rattachent une application à une base, une file, un chemin ou une URL. */
 const USE_TYPES = new Set(['uses_db', 'reads_from', 'writes_to']);
 
@@ -93,6 +104,9 @@ function verifyReading(reading, ctx) {
   const { repo, matcher, naemonHosts = new Set(), pageUpdatedAt = null, now = Date.now(), docNodeId = null } = ctx;
   const docSources = ctx.docSources || DOC_SOURCES;
   const text = `${ctx.pageText || ''}\n${ctx.diagramsText || ''}`;
+  /** Texte et en-tête où une période peut être prouvée (sans les pages parentes pour une période cible). */
+  const periodText = (period) => (period === 'target' ? withoutParents(text) : text);
+  const periodHeader = (period) => (period === 'target' ? withoutParents(ctx.headerText) : ctx.headerText || '');
   const rejected = [];
   const ok = (what, evidence) => {
     if (hasEvidence(text, evidence)) return true;
@@ -111,8 +125,9 @@ function verifyReading(reading, ctx) {
   let pagePeriod = page.period === undefined ? 'current' : page.period; // null = illisible
   if (pagePeriod === 'past' || pagePeriod === 'target') {
     const quote = page.periodEvidence;
-    const quoted = Boolean(quote) && (hasEvidence(text, quote) || hasEvidence(ctx.headerText || '', quote));
-    if (!(quoted && provesPeriod(quote, pagePeriod)) && !provesPeriod(ctx.headerText, pagePeriod)) {
+    const header = periodHeader(pagePeriod);
+    const quoted = Boolean(quote) && (hasEvidence(periodText(pagePeriod), quote) || hasEvidence(header, quote));
+    if (!(quoted && provesPeriod(quote, pagePeriod)) && !provesPeriod(header, pagePeriod)) {
       rejected.push({ what: `période de la page (${pagePeriod})`, reason: quoted || !quote ? 'evidence_mismatch' : 'no_evidence' });
       pagePeriod = 'current';
     }
@@ -329,7 +344,7 @@ function verifyReading(reading, ctx) {
   const ownPeriod = (l) => {
     if (!l.period || l.period === 'current' || l.period === pagePeriod) return l.period || null;
     for (const quote of [l.periodEvidence, l.evidence]) {
-      if (quote && hasEvidence(text, quote) && provesPeriod(quote, l.period)) return l.period;
+      if (quote && hasEvidence(periodText(l.period), quote) && provesPeriod(quote, l.period)) return l.period;
     }
     return null;
   };

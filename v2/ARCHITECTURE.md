@@ -135,8 +135,9 @@ L'en-tête envoyé à l'IA porte la date du jour (`Date du jour : AAAA-MM-JJ`, h
 2026 » est actuel en 2026) ; elle n'entre pas dans le texte où les citations sont cherchées. Chaque lien peut porter sa propre période
 (page qui mêle l'existant et une cible, historique qui va jusqu'à aujourd'hui) ; sans période propre, il prend celle de la page. Une
 période ancienne ou cible n'est gardée que si elle est prouvée : pour la page, sa citation (`periodEvidence`) se retrouve dans la page et
-contient un mot de cette période (obsolète, archivée, historique, remplacée, cible, prévue, projet...), ou le titre et les pages parentes en
-contiennent un ; pour un lien, la même période que la page, ou sa citation (`periodEvidence` ou `evidence`) qui contient un tel mot. Une date
+contient un mot de cette période (obsolète, archivée, historique, remplacée, cible, prévue, projet...), ou le titre en contient un (les
+pages parentes comptent aussi pour une page ancienne, rangée sous « Archives » par exemple, mais jamais pour une page cible : une page
+rangée sous « Projets SI » peut décrire l'existant) ; pour un lien, la même période que la page, ou sa citation (`periodEvidence` ou `evidence`) qui contient un tel mot. Une date
 ou une année seule ne prouve rien (« Cartographie 2024 », « Note de version 7.3 ») : la page est alors actuelle (rejet `période de la page (past)`) et le
 lien prend la période de la page. Un lien
 dit actuel dans une page ancienne est au mieux `toValidate` (sauf `confirmed` par l'inventaire). L'environnement de la page n'est
