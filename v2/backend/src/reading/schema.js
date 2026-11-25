@@ -23,6 +23,7 @@
 const { SECTION_KEYS } = require('../perimeter/architecture');
 const { normalizeEnv } = require('../lib/environment');
 const { isIPv4 } = require('../resolve/entities');
+const { stripEmailUser } = require('./evidence');
 
 const KINDS = ['architecture', 'operations', 'install', 'incident', 'release', 'meeting', 'project', 'other'];
 const PERIODS = ['current', 'past', 'target'];
@@ -138,9 +139,20 @@ function splitPersonal(s, phones) {
   return marked.split('\u0000');
 }
 
-/** Texte libre sans adresse électronique ni numéro de téléphone (les espaces sont gardés tels quels). */
+/** Supprime les numéros de téléphone (pas les IP, dates ni ports). */
+const stripPhones = (s) => s.replace(PHONE_CANDIDATE, (m) => (isPhone(m) ? '' : m));
+
+/**
+ * Texte libre sans données personnelles : partie avant le `@` des adresses retirée (le domaine, ou la machine
+ * d'une commande `ssh deploy@serveur`, reste), numéros de téléphone supprimés ; les espaces sont gardés tels quels.
+ */
 function cleanPersonal(s) {
-  return String(s || '').replace(EMAIL, '').replace(PHONE_CANDIDATE, (m) => (isPhone(m) ? '' : m));
+  return stripPhones(stripEmailUser(String(s || '')));
+}
+
+/** Texte d'un élément de fiche (étape, cause...) : comme `cleanPersonal`, espaces réduits. */
+function cleanText(s) {
+  return cleanPersonal(s).replace(/\s+/g, ' ').replace(EDGE_PUNCT, '').trim();
 }
 
 /** Nom sans adresse ni numéro. */
@@ -154,11 +166,12 @@ function cleanName(s, phones) {
 }
 
 /**
- * Citation sans adresse ni numéro : on garde le plus long morceau qui n'en contient pas, pour
- * qu'elle reste une suite exacte du texte de la page (vérifiée ensuite par le code).
+ * Citation sans données personnelles : la partie avant le `@` des adresses est retirée (`hasEvidence`
+ * la retire aussi du texte de la page, la citation s'y retrouve donc toujours) ; autour d'un numéro, on
+ * garde le plus long morceau qui n'en contient pas, pour qu'elle reste une suite exacte du texte de la page.
  */
 function cleanEvidence(v, phones) {
-  const s = str(v).slice(0, EVIDENCE_MAX * 2);
+  const s = stripEmailUser(str(v).slice(0, EVIDENCE_MAX * 2));
   const parts = splitPersonal(s, phones);
   if (parts.length === 1) return s.slice(0, EVIDENCE_MAX).trim();
   const pieces = parts.map((p) => p.replace(EDGE_PUNCT, '').trim());
@@ -337,6 +350,7 @@ module.exports = {
   list,
   cleanName,
   cleanPersonal,
+  cleanText,
   cleanEvidence,
   READING_SCHEMA,
   KINDS,

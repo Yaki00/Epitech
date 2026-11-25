@@ -52,6 +52,13 @@ describe('hasEvidence', () => {
     assert.ok(hasEvidence('pré\u2011prod', 'pré-prod'));
   });
 
+  test('the account before the @ of an address is ignored on both sides', () => {
+    assert.ok(hasEvidence('ssh deploy@srv01.rec.corp.example', 'ssh srv01.rec.corp.example'));
+    assert.ok(hasEvidence('ssh deploy@srv01.rec.corp.example', 'ssh deploy@srv01.rec.corp.example'));
+    assert.ok(hasEvidence('db.url=jdbc:oracle:thin:@ora01.corp.example:1521/DB', 'thin:@ora01.corp.example:1521'));
+    assert.ok(!hasEvidence('ssh deploy@srv01.rec.corp.example', 'ssh srv02.rec.corp.example'));
+  });
+
   test('too short evidence is rejected', () => {
     assert.ok(!hasEvidence('abc srv 12', 'srv'));
     assert.ok(!hasEvidence('a | b ... c', '...'));

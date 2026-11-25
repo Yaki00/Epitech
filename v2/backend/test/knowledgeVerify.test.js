@@ -94,6 +94,15 @@ describe('verifyFiches', () => {
       keywords: ['jean.dupont@example.com', 'lenteur'],
     }));
     assert.ok(!/@|01 23 45/.test(JSON.stringify(r.fiches)));
+    assert.ok(!/jean\.dupont/.test(JSON.stringify(r.fiches)));
     assert.deepEqual(r.fiches[0].keywords, ['lenteur']);
+  });
+
+  test('a step « ssh compte@serveur » keeps the server, not the account', () => {
+    const env = setup();
+    const page = 'Se connecter sur le premier nœud :\nssh deploy@srvorh01.rec.corp.example\nsudo systemctl stop orh';
+    const step = it_('Se connecter : ssh deploy@srvorh01.rec.corp.example', 'Se connecter sur le premier nœud : ssh deploy@srvorh01.rec.corp.example');
+    const r = verifyFiches({ fiches: [fiche({ kind: 'procedure', title: it_('Se connecter', 'Se connecter sur le premier nœud'), lists: { steps: [step] } })] }, { pageText: page, repo: env.repo, matcher: env.matcher });
+    assert.deepEqual(r.fiches[0].lists.steps, [{ text: 'Se connecter : ssh srvorh01.rec.corp.example', evidence: 'Se connecter sur le premier nœud : ssh srvorh01.rec.corp.example' }]);
   });
 });

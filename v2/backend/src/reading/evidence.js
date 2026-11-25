@@ -19,10 +19,25 @@ function normalizeText(s) {
     .trim();
 }
 
+/**
+ * Partie avant le `@` d'une adresse de forme `nom@domaine` : seule cette partie est personnelle
+ * (`prenom.nom@...`) ; le domaine, ou la machine d'une commande `ssh deploy@serveur.domaine`, ne l'est pas.
+ */
+const EMAIL_USER = /[A-Za-z0-9._%+-]+@(?=[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,})/g;
+
+/** Texte sans la partie personnelle des adresses : `ssh deploy@srv01.domaine.lan` devient `ssh srv01.domaine.lan`. */
+function stripEmailUser(s) {
+  return String(s == null ? '' : s).replace(EMAIL_USER, '');
+}
+
+/**
+ * La citation se retrouve-t-elle dans le texte ? Les deux côtés sont comparés sans la partie personnelle
+ * des adresses, retirée des citations au nettoyage (`cleanEvidence`).
+ */
 function hasEvidence(haystack, quote) {
-  const q = normalizeText(quote);
+  const q = normalizeText(stripEmailUser(quote));
   if (q.length < 4 || !/[\p{L}\p{N}]/u.test(q)) return false;
-  return normalizeText(haystack).includes(q);
+  return normalizeText(stripEmailUser(haystack)).includes(q);
 }
 
 /** Forme compacte d'un nom pour la comparaison : texte normalisé sans espaces, tirets, soulignés ni points. */
@@ -52,4 +67,4 @@ function quoteNames(quote, names) {
   return false;
 }
 
-module.exports = { hasEvidence, normalizeText, quoteNames };
+module.exports = { hasEvidence, normalizeText, quoteNames, stripEmailUser };

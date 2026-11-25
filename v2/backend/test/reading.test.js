@@ -1,6 +1,6 @@
 'use strict';
 const assert = require('assert').strict;
-const { sanitizeReading, mergeReadings, cleanPersonal } = require('../src/reading/schema');
+const { sanitizeReading, mergeReadings, cleanPersonal, cleanEvidence, cleanText } = require('../src/reading/schema');
 const { buildReadingMessages } = require('../src/reading/prompt');
 const { readPage, READING_VERSION } = require('../src/reading/readPage');
 const { diagramsToText } = require('../src/parse/confluence/drawioText');
@@ -253,6 +253,16 @@ describe('lecture IA d\'une page', () => {
       assert.equal(cleanPersonal(`Appeler ${phone} demain`), 'Appeler  demain', phone);
     }
     assert.equal(cleanPersonal('srv 10.20.11.46 10.20.11.47 puis 06 11 22 33 44.'), 'srv 10.20.11.46 10.20.11.47 puis .');
+  });
+
+  test('only the part before the @ of an address is personal: the host of an ssh command stays', () => {
+    assert.equal(cleanPersonal('ssh deploy@lsrv01.rec.corp.example puis'), 'ssh lsrv01.rec.corp.example puis');
+    assert.equal(cleanPersonal('scp app.tar root@lsrv01.corp.example:/tmp'), 'scp app.tar lsrv01.corp.example:/tmp');
+    assert.equal(cleanPersonal('écrire à jean.dupont@example.org'), 'écrire à example.org');
+    assert.equal(cleanPersonal('jdbc:oracle:thin:@ora01.corp.example:1521/DB'), 'jdbc:oracle:thin:@ora01.corp.example:1521/DB');
+    assert.equal(cleanEvidence('ssh deploy@lsrv01.rec.corp.example', false), 'ssh lsrv01.rec.corp.example');
+    assert.equal(cleanEvidence('Contact : jean.dupont@example.org, 06 11 22 33 44', true), 'Contact : example.org');
+    assert.equal(cleanText('  ssh  deploy@lsrv01.corp.example\n'), 'ssh lsrv01.corp.example');
   });
 
   test('diagramsToText writes one line per arrow and per containment', () => {

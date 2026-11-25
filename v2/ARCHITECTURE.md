@@ -104,7 +104,7 @@ reconnaissance d'application. Tout ce qui dépend des conventions va dans les co
    variantes, consignes. Une page plus longue que `READING_CHUNK_CHARS` est coupée en morceaux (par sections, puis par paragraphes) lus
    l'un après l'autre et fusionnés. Un appel `chatJson` par morceau (tâche `extract`, température 0, `LLM_MAX_TOKENS_EXTRACT`). Un
    morceau vide, coupé ou illisible fait échouer la page entière, jamais une lecture partielle. Le résultat est nettoyé : valeurs hors
-   liste écartées ou ramenées à une valeur neutre, éléments sans citation écartés, adresses électroniques et numéros de téléphone retirés.
+   liste écartées ou ramenées à une valeur neutre, éléments sans citation écartés, numéros de téléphone retirés, et partie avant le `@` des adresses retirée (le domaine reste : dans `ssh deploy@srv01.domaine.lan`, la citation garde `srv01.domaine.lan`).
 2. **Vérification** (`evidence.js`, `verify.js`), sans modifier le graphe. Chaque élément garde sa citation seulement si elle se retrouve
    dans le texte de la page (comparaison tolérante : casse, accents, guillemets typographiques, espaces insécables, retours à la ligne,
    cellules de tableau). Les serveurs sont rapprochés de l'inventaire par `repo.resolve` (nom court, FQDN, IP), les applications du
@@ -225,7 +225,8 @@ plus, jamais montrés comme un fait), `replaces` (procédure remplacée) et `fix
 `{ text, evidence }` : la citation (`evidence`) doit se retrouver dans la page (`hasEvidence`), sinon l'élément est écarté. Sont aussi
 rejetés : une citation qui ne contient ni le texte ni un mot de 4 lettres ou plus de ce texte (`evidence_mismatch`), et tout élément dont
 le texte ou la citation ressemble à un mot de passe, un jeton ou une clé (`secret`, motif `SECRET` : l'élément entier est retiré). Les
-adresses électroniques et numéros de téléphone sont retirés. Les applications et serveurs sont rapprochés comme dans la lecture des
+numéros de téléphone sont retirés, ainsi que la partie avant le `@` des adresses (une étape `ssh deploy@srv01.domaine.lan` garde le nom
+du serveur). Les applications et serveurs sont rapprochés comme dans la lecture des
 pages (`matcher.resolveAppName`, `repo.resolve`) ; un nom inconnu reste en texte (`unresolved`), sans lien. Une page peut donner
 plusieurs fiches, ou aucune.
 
@@ -254,7 +255,7 @@ l'erreur est enregistrée avec l'étape `fiches` et l'empreinte reste ancienne, 
 
 À chaque passage, `knowledge-sections.json` (dans `DATA_DIR`, écriture atomique) reçoit les sections de **toutes** les pages
 (`pageId`, `title`, `url` avec ancre, `section`, `text`, `period`), y compris les pages sautées. Tout ce qui ressemble à un secret y est
-remplacé par `[masqué]`, et les adresses électroniques et numéros de téléphone sont retirés (même nettoyage que pour les fiches). Un passage
+remplacé par `[masqué]`, et les numéros de téléphone et la partie avant le `@` des adresses sont retirés (même nettoyage que pour les fiches). Un passage
 limité (`--limit`) ne réécrit pas ce fichier : il n'a vu qu'une partie des pages. Il sert de second recours à la recherche. Illisible ou absent : la recherche porte sur les fiches seules
 (un avertissement par démarrage).
 

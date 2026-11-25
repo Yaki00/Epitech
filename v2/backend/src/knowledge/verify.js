@@ -22,7 +22,7 @@
  * retire la fiche. Les adresses électroniques et numéros sont retirés des textes rendus.
  */
 const { hasEvidence, normalizeText } = require('../reading/evidence');
-const { cleanName, cleanEvidence, normKey } = require('../reading/schema');
+const { cleanName, cleanText, cleanEvidence, normKey } = require('../reading/schema');
 
 const SECRET = /(mot de passe|password|passwd|pwd|tokens?|jeton|secrets?|api[ _-]?keys?)\s*[:=]\s*\S+/i;
 
@@ -55,7 +55,7 @@ function verifyFiches(reading, ctx) {
       rejected.push({ what, reason: 'evidence_mismatch' });
       return null;
     }
-    const text = cleanName(item.text, true);
+    const text = cleanText(item.text);
     const evidence = cleanEvidence(item.evidence, true);
     return text && evidence ? { text, evidence } : null;
   }

@@ -11,7 +11,7 @@
  *   apps: Item[], servers: Item[], keywords: string[], replaces: Item|null, fixes: Item|null,
  * }
  */
-const { str, opt, list, cleanName, cleanEvidence, normKey } = require('../reading/schema');
+const { str, opt, list, cleanName, cleanText, cleanEvidence, normKey } = require('../reading/schema');
 
 const FICHE_KINDS = ['incident', 'correctif', 'procedure', 'pratique'];
 /** Natures de page qui reçoivent la lecture des fiches. */
@@ -36,7 +36,7 @@ const SECTION_MAX = 150;
 /** Élément { text, evidence } : null sans texte ou sans citation (une fois adresses et numéros retirés). */
 function cleanItem(v) {
   if (typeof v === 'string' || !v || typeof v !== 'object') return null;
-  const text = cleanName(opt(v.text), true).slice(0, TEXT_MAX).trim();
+  const text = cleanText(opt(v.text)).slice(0, TEXT_MAX).trim();
   const evidence = cleanEvidence(opt(v.evidence), true);
   return text && evidence ? { text, evidence } : null;
 }
